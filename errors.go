@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// type ConfigLoadError {{{
+
 type ConfigLoadError struct {
 	Path    string
 	Section string
@@ -27,6 +29,10 @@ func (err ConfigLoadError) Unwrap() error {
 
 var _ error = ConfigLoadError{}
 
+// }}}
+
+// type InvalidHostGlobError {{{
+
 type InvalidHostGlobError struct {
 	Glob string
 	Err  error
@@ -42,6 +48,10 @@ func (err InvalidHostGlobError) Unwrap() error {
 
 var _ error = InvalidHostGlobError{}
 
+// }}}
+
+// type InvalidPathGlobError {{{
+
 type InvalidPathGlobError struct {
 	Glob string
 	Err  error
@@ -56,3 +66,5 @@ func (err InvalidPathGlobError) Unwrap() error {
 }
 
 var _ error = InvalidPathGlobError{}
+
+// }}}
