@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	htmltemplate "html/template"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
@@ -23,6 +24,7 @@ type Impl struct {
 	storage       autocert.Cache
 	hosts         []*regexp.Regexp
 	errorPageRoot string
+	indexPageTmpl *htmltemplate.Template
 	mimeRules     []*MimeRule
 	targets       map[string]http.Handler
 	rules         []*Rule
@@ -47,6 +49,13 @@ func LoadImpl(configPath string) (*Impl, error) {
 		return nil, ConfigLoadError{
 			Path: configPath,
 			Err:  err,
+		}
+	}
+
+	if impl.cfg.Storage == nil {
+		return nil, ConfigLoadError{
+			Path: configPath,
+			Err:  fmt.Errorf("missing required section \"storage\""),
 		}
 	}
 
@@ -79,6 +88,65 @@ func LoadImpl(configPath string) (*Impl, error) {
 				Section: "errorPages.root",
 				Err:     err,
 			}
+		}
+	}
+
+	indexPageTemplate := defaultIndexPageTemplate
+	if impl.cfg.IndexPages != nil && impl.cfg.IndexPages.Path != "" {
+		contents, err := ioutil.ReadFile(impl.cfg.IndexPages.Path)
+		if err != nil {
+			return nil, ConfigLoadError{
+				Path:    configPath,
+				Section: "indexPages.path",
+				Err:     err,
+			}
+		}
+
+		indexPageTemplate = string(contents)
+	}
+
+	impl.indexPageTmpl = htmltemplate.New("index").Funcs(htmltemplate.FuncMap{
+		"runelen": runeLen,
+		"uint": func(x int) uint {
+			log.Logger.Debug().Str("func", "uint").Int("x", x).Send()
+			if x < 0 {
+				panic(fmt.Errorf("%d is negative", x))
+			}
+			return uint(x)
+		},
+		"neg": func(x uint) int {
+			log.Logger.Debug().Str("func", "neg").Uint("x", x).Send()
+			return -int(x)
+		},
+		"add": func(a, b uint) uint {
+			log.Logger.Debug().Str("func", "add").Uint("a", a).Uint("b", b).Send()
+			return a + b
+		},
+		"sub": func(a, b uint) uint {
+			log.Logger.Debug().Str("func", "sub").Uint("a", a).Uint("b", b).Send()
+			if b > a {
+				panic(fmt.Errorf("%d > %d", b, a))
+			}
+			return a - b
+		},
+		"pad": func(n uint) string {
+			log.Logger.Debug().Str("func", "pad").Uint("n", n).Send()
+			if n >= 256 {
+				panic(fmt.Errorf("pad: argument %d is >= 256", n))
+			}
+			buf := make([]byte, n)
+			for i := uint(0); i < n; i++ {
+				buf[i] = ' '
+			}
+			return string(buf)
+		},
+	})
+	impl.indexPageTmpl, err = impl.indexPageTmpl.Parse(indexPageTemplate)
+	if err != nil {
+		return nil, ConfigLoadError{
+			Path:    configPath,
+			Section: "indexPages.path",
+			Err:     err,
 		}
 	}
 

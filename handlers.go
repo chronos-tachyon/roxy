@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"io/fs"
 	"io/ioutil"
@@ -17,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/user"
 	"path"
 	"path/filepath"
 	"sort"
@@ -32,15 +32,7 @@ import (
 	unix "golang.org/x/sys/unix"
 )
 
-const (
-	xattrMimeType  = "user.mimetype"
-	xattrMd5sum    = "user.md5sum"
-	xattrSha1sum   = "user.sha1sum"
-	xattrSha256sum = "user.sha256sum"
-	xattrEtag      = "user.etag"
-
-	defaultMaxCacheSize = 4 << 10 // 4 KiB
-)
+const defaultMaxCacheSize = 4 << 10 // 4 KiB
 
 var (
 	gFileCacheMu  sync.Mutex
@@ -305,32 +297,20 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 	hdrs := w.Header()
 
 	var (
-		cachePossible   bool
-		cacheHit        bool
-		haveContentType bool
-		haveMd5sum      bool
-		haveSha1sum     bool
-		haveSha256sum   bool
-		haveEtag        bool
-		tookSlowPath    bool
-		body            io.ReadSeeker = f
+		cachePossible bool
+		cacheHit      bool
+		haveMd5sum    bool
+		haveSha1sum   bool
+		haveSha256sum bool
+		haveEtag      bool
+		tookSlowPath  bool
+		body          io.ReadSeeker = f
 	)
 
-	hdrs.Set("content-type", "application/octet-stream")
-
-	if raw, err := readXattr(f, xattrMimeType); err == nil {
-		hdrs.Set("content-type", string(raw))
-		haveContentType = true
-	}
-
-	for _, mimeRule := range impl.mimeRules {
-		if !mimeRule.rx.MatchString(r.URL.Path) {
-			continue
-		}
-		if !haveContentType && mimeRule.contentType != "" {
-			hdrs.Set("content-type", mimeRule.contentType)
-			haveContentType = true
-		}
+	contentType, contentLang := DetectMimeProperties(impl, logger, h.fs, r.URL.Path)
+	hdrs.Set("content-type", contentType)
+	if contentLang != "" {
+		hdrs.Set("content-language", contentLang)
 	}
 
 	size := fi.Size()
@@ -478,7 +458,6 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 	logger.Debug().
 		Bool("cachePossible", cachePossible).
 		Bool("cacheHit", cacheHit).
-		Bool("haveContentType", haveContentType).
 		Bool("haveMd5sum", haveMd5sum).
 		Bool("haveSha1sum", haveSha1sum).
 		Bool("haveSha256sum", haveSha256sum).
@@ -490,67 +469,251 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 
 func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
 	ctx := r.Context()
+	impl := implFromCtx(ctx)
 	logger := log.Ctx(ctx)
 	hdrs := w.Header()
 
-	var entries anyDirs
-	var err error
-	if x, ok := f.(fs.ReadDirFile); ok {
-		var list dirEntryDirs
-		list, err = x.ReadDir(-1)
-		entries = list
-	} else {
-		var list fileInfoDirs
-		list, err = f.Readdir(-1)
-		entries = list
-	}
-
+	list, err := f.Readdir(-1)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to read directory")
 		writeError(ctx, w, http.StatusInternalServerError)
 		return
 	}
 
-	sort.Sort(entries)
+	sort.Sort(fileInfoList(list))
 
-	var buf strings.Builder
-	buf.WriteString("<!DOCTYPE html>")
-	buf.WriteString("<html>\n")
-	buf.WriteString("\t<head>\n")
-	buf.WriteString("\t\t<meta charset=\"utf-8\">\n")
-	buf.WriteString("\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
-	buf.WriteString("\t\t<title>Listing of ")
-	buf.WriteString(html.EscapeString(r.URL.Path))
-	buf.WriteString("</title>\n")
-	buf.WriteString("\t</head>\n")
-	buf.WriteString("\t<body>\n")
-	buf.WriteString("\t\t<pre>")
-	for i, j := 0, entries.Len(); i < j; i++ {
-		name := entries.Name(i)
-		isDir := entries.IsDir(i)
+	type entry struct {
+		Name        string
+		Slash       string
+		Mode        string
+		Owner       string
+		Group       string
+		ContentType string
+		ContentLang string
+		Dev         uint64
+		Ino         uint64
+		NLink       uint64
+		Size        int64
+		MTime       time.Time
+		IsDir       bool
+		IsHidden    bool
+	}
 
-		mode := "-rw-r--r--"
-		slash := ""
-		if isDir {
-			mode = "drwxr-xr-x"
-			slash = "/"
+	populateRealStats := func(e *entry, fi fs.FileInfo, fullPath string) {
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if ok {
+			e.Dev = st.Dev
+			e.Ino = st.Ino
+			e.NLink = st.Nlink
+
+			uid := strconv.FormatUint(uint64(st.Uid), 10)
+			if u, err := user.LookupId(uid); err == nil {
+				e.Owner = u.Username
+			} else {
+				logger.Warn().Uint32("uid", st.Uid).Err(err).Msg("failed to look up user by ID")
+				e.Owner = "#" + uid
+			}
+
+			gid := strconv.FormatUint(uint64(st.Gid), 10)
+			if g, err := user.LookupGroupId(gid); err == nil {
+				e.Group = g.Name
+			} else {
+				logger.Warn().Uint32("gid", st.Gid).Err(err).Msg("failed to look up group by ID")
+				e.Group = "#" + gid
+			}
+
+			var realMode [10]byte
+			for i := 0; i < 10; i++ {
+				realMode[i] = '-'
+			}
+
+			if e.IsDir {
+				realMode[0] = 'd'
+			}
+
+			if (st.Mode & 0400) == 0400 {
+				realMode[1] = 'r'
+			}
+			if (st.Mode & 0200) == 0200 {
+				realMode[2] = 'w'
+			}
+			switch st.Mode & 04100 {
+			case 04100:
+				realMode[3] = 's'
+			case 04000:
+				realMode[3] = 'S'
+			case 00100:
+				realMode[3] = 'x'
+			}
+
+			if (st.Mode & 0040) == 0040 {
+				realMode[4] = 'r'
+			}
+			if (st.Mode & 0020) == 0020 {
+				realMode[5] = 'w'
+			}
+			switch st.Mode & 02010 {
+			case 02010:
+				realMode[6] = 's'
+			case 02000:
+				realMode[6] = 'S'
+			case 00010:
+				realMode[6] = 'x'
+			}
+
+			if (st.Mode & 0004) == 0004 {
+				realMode[7] = 'r'
+			}
+			if (st.Mode & 0002) == 0002 {
+				realMode[8] = 'w'
+			}
+			switch st.Mode & 01001 {
+			case 01001:
+				realMode[9] = 't'
+			case 01000:
+				realMode[9] = 'T'
+			case 00001:
+				realMode[9] = 'x'
+			}
+
+			e.Mode = string(realMode[:])
 		}
 
-		buf.WriteString(mode)
-		buf.WriteByte(' ')
-		buf.WriteString("<a href=\"")
-		buf.WriteString(html.EscapeString(url.PathEscape(name)))
-		buf.WriteString(slash)
-		buf.WriteString("\">")
-		buf.WriteString(html.EscapeString(name))
-		buf.WriteString(slash)
-		buf.WriteString("</a>\n")
-	}
-	buf.WriteString("</pre>\n")
-	buf.WriteString("\t</body>\n")
-	buf.WriteString("</html>\n")
+		var (
+			contentType string
+			contentLang string
+		)
+		if e.IsDir {
+			contentType = "inode/directory"
+		} else {
+			contentType, contentLang = DetectMimeProperties(impl, logger, h.fs, fullPath)
+		}
 
-	raw := []byte(buf.String())
+		if contentType == "" {
+			contentType = "-"
+		}
+		if contentLang == "" {
+			contentLang = "-"
+		}
+
+		e.ContentType = trimContentHeader(contentType)
+		e.ContentLang = trimContentHeader(contentLang)
+	}
+
+	entries := make([]entry, 0, 1+len(list))
+	if r.URL.Path != "/" {
+		var e entry
+
+		e.Name = ".."
+		e.IsDir = true
+		e.Slash = "/"
+		e.Mode = "drwxr-xr-x"
+		e.Owner = "-"
+		e.Group = "-"
+		e.IsHidden = false
+
+		parentDir := path.Dir(r.URL.Path)
+		if parentFile, err := h.fs.Open(parentDir); err == nil {
+			if parentInfo, err := parentFile.Stat(); err == nil {
+				populateRealStats(&e, parentInfo, parentDir)
+			}
+			parentFile.Close()
+		}
+
+		entries = append(entries, e)
+	}
+	for _, fi := range list {
+		var e entry
+
+		e.Name = fi.Name()
+		e.IsDir = fi.IsDir()
+		e.Size = fi.Size()
+		e.MTime = fi.ModTime()
+		e.Slash = ""
+		e.Mode = "-rw-r--r--"
+		e.Owner = "owner"
+		e.Group = "group"
+		e.NLink = 1
+		if e.IsDir {
+			e.Slash = "/"
+			e.Mode = "drwxr-xr-x"
+			e.NLink = 0
+		}
+		e.IsHidden = strings.HasPrefix(e.Name, ".")
+
+		populateRealStats(&e, fi, path.Join(r.URL.Path, e.Name))
+
+		entries = append(entries, e)
+	}
+
+	var (
+		maxNLinkWidth uint = 1
+		maxOwnerWidth uint = 1
+		maxGroupWidth uint = 1
+		maxSizeWidth  uint = 1
+		maxNameWidth  uint = 1
+		maxCTypeWidth uint = 1
+		maxCLangWidth uint = 1
+	)
+	for _, e := range entries {
+		if w := uint(len(strconv.FormatUint(e.NLink, 10))); w > maxNLinkWidth {
+			maxNLinkWidth = w
+		}
+		if w := uint(len(e.Owner)); w > maxOwnerWidth {
+			maxOwnerWidth = w
+		}
+		if w := uint(len(e.Group)); w > maxGroupWidth {
+			maxGroupWidth = w
+		}
+		if w := uint(len(strconv.FormatInt(e.Size, 10))); w > maxSizeWidth {
+			maxSizeWidth = w
+		}
+		if w := uint(runeLen(e.Name)) + uint(len(e.Slash)); w > maxNameWidth {
+			maxNameWidth = w
+		}
+		if w := uint(len(e.ContentType)); w > maxCTypeWidth {
+			maxCTypeWidth = w
+		}
+		if w := uint(len(e.ContentLang)); w > maxCLangWidth {
+			maxCLangWidth = w
+		}
+	}
+
+	type templateData struct {
+		Path             string
+		Entries          []entry
+		NLinkWidth       uint
+		OwnerWidth       uint
+		GroupWidth       uint
+		SizeWidth        uint
+		NameWidth        uint
+		ContentTypeWidth uint
+		ContentLangWidth uint
+	}
+
+	data := templateData{
+		Path:             r.URL.Path,
+		Entries:          entries,
+		NLinkWidth:       maxNLinkWidth,
+		OwnerWidth:       maxOwnerWidth,
+		GroupWidth:       maxGroupWidth,
+		SizeWidth:        maxSizeWidth,
+		NameWidth:        maxNameWidth,
+		ContentTypeWidth: maxCTypeWidth,
+		ContentLangWidth: maxCLangWidth,
+	}
+
+	var buf bytes.Buffer
+	buf.Grow(4096)
+
+	err = impl.indexPageTmpl.Execute(&buf, data)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to render index template")
+		writeError(ctx, w, http.StatusInternalServerError)
+		return
+	}
+
+	raw := buf.Bytes()
 
 	md5raw := md5.Sum(raw)
 	sha1raw := sha1.Sum(raw)
@@ -561,14 +724,29 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 	sha256sum := hex.EncodeToString(sha256raw[:])
 	etag := strconv.Quote("D" + sha256sum[:16])
 
-	hdrs.Set("content-type", "text/html; charset=utf-8")
+	var (
+		contentType string
+		contentLang string
+	)
+	if impl.cfg.IndexPages != nil {
+		contentType = impl.cfg.IndexPages.ContentType
+		contentLang = impl.cfg.IndexPages.ContentLang
+	}
+	if contentType == "" {
+		contentType = defaultIndexPageType
+	}
+	if contentLang == "" {
+		contentLang = defaultIndexPageLang
+	}
+
+	hdrs.Set("content-type", contentType)
+	hdrs.Set("content-language", contentLang)
 	hdrs.Set("content-md5", md5sum)
 	hdrs.Set("content-sha1", sha1sum)
 	hdrs.Set("content-sha256", sha256sum)
 	hdrs.Set("etag", etag)
 
-	logger.Debug().
-		Msg("serve directory")
+	logger.Debug().Msg("serve directory")
 	http.ServeContent(w, r, "", fi.ModTime(), bytes.NewReader(raw))
 }
 
@@ -811,20 +989,21 @@ func readXattr(f http.File, attr string) ([]byte, error) {
 	}
 }
 
-func fileLess(a, b minimalDirEntry) bool {
-	aName, aIsDir := a.Name(), a.IsDir()
-	bName, bIsDir := b.Name(), b.IsDir()
-
-	aIsDot := strings.HasPrefix(aName, ".")
-	bIsDot := strings.HasPrefix(bName, ".")
-
-	if aIsDir != bIsDir {
-		return aIsDir
+func runeLen(str string) int {
+	var length int
+	for _, ch := range str {
+		_ = ch
+		length++
 	}
-	if aIsDot != bIsDot {
-		return aIsDot
+	return length
+}
+
+func trimContentHeader(str string) string {
+	i := strings.IndexByte(str, ';')
+	if i >= 0 {
+		str = str[:i]
 	}
-	return aName < bName
+	return strings.TrimSpace(str)
 }
 
 type cacheKey struct {
@@ -841,45 +1020,36 @@ type cacheRow struct {
 	etag      string
 }
 
-type minimalDirEntry interface {
-	Name() string
-	IsDir() bool
+// type fileInfoList {{{
+
+type fileInfoList []fs.FileInfo
+
+func (list fileInfoList) Len() int {
+	return len(list)
 }
 
-// type anyDirs {{{
+func (list fileInfoList) Less(i, j int) bool {
+	a, b := list[i], list[j]
 
-type anyDirs interface {
-	sort.Interface
-	Name(i int) string
-	IsDir(i int) bool
+	aName, aIsDir := a.Name(), a.IsDir()
+	bName, bIsDir := b.Name(), b.IsDir()
+
+	aIsDot := strings.HasPrefix(aName, ".")
+	bIsDot := strings.HasPrefix(bName, ".")
+
+	if aIsDir != bIsDir {
+		return aIsDir
+	}
+	if aIsDot != bIsDot {
+		return aIsDot
+	}
+	return aName < bName
 }
 
-// type fileInfoDirs {{{
+func (list fileInfoList) Swap(i, j int) {
+	list[i], list[j] = list[j], list[i]
+}
 
-type fileInfoDirs []fs.FileInfo
-
-func (d fileInfoDirs) Len() int           { return len(d) }
-func (d fileInfoDirs) Less(i, j int) bool { return fileLess(d[i], d[j]) }
-func (d fileInfoDirs) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
-func (d fileInfoDirs) IsDir(i int) bool   { return d[i].IsDir() }
-func (d fileInfoDirs) Name(i int) string  { return d[i].Name() }
-
-var _ anyDirs = fileInfoDirs(nil)
-
-// }}}
-
-// type dirEntryDirs {{{
-
-type dirEntryDirs []fs.DirEntry
-
-func (d dirEntryDirs) Len() int           { return len(d) }
-func (d dirEntryDirs) Less(i, j int) bool { return fileLess(d[i], d[j]) }
-func (d dirEntryDirs) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
-func (d dirEntryDirs) IsDir(i int) bool   { return d[i].IsDir() }
-func (d dirEntryDirs) Name(i int) string  { return d[i].Name() }
-
-var _ anyDirs = dirEntryDirs(nil)
-
-// }}}
+var _ sort.Interface = fileInfoList(nil)
 
 // }}}

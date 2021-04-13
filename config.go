@@ -4,6 +4,7 @@ type Config struct {
 	Storage    *StorageConfig           `json:"storage"`
 	Hosts      []string                 `json:"hosts"`
 	ErrorPages *ErrorPagesConfig        `json:"errorPages"`
+	IndexPages *IndexPagesConfig        `json:"indexPages"`
 	MimeRules  []*MimeRuleConfig        `json:"mimeRules"`
 	Targets    map[string]*TargetConfig `json:"targets"`
 	Rules      []*RuleConfig            `json:"rules"`
@@ -22,9 +23,16 @@ type ErrorPagesConfig struct {
 	ContentLang string            `json:"contentLanguage"`
 }
 
+type IndexPagesConfig struct {
+	Path        string `json:"path"`
+	ContentType string `json:"contentType"`
+	ContentLang string `json:"contentLanguage"`
+}
+
 type MimeRuleConfig struct {
 	Suffixes    []string `json:"suffixes"`
 	ContentType string   `json:"contentType"`
+	ContentLang string   `json:"contentLanguage"`
 }
 
 type TargetConfig struct {
