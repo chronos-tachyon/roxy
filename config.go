@@ -1,17 +1,25 @@
 package main
 
 type Config struct {
-	Storage   *StorageConfig           `json:"storage"`
-	Hosts     []string                 `json:"hosts"`
-	MimeRules []*MimeRuleConfig        `json:"mimeRules"`
-	Targets   map[string]*TargetConfig `json:"targets"`
-	Rules     []*RuleConfig            `json:"rules"`
+	Storage    *StorageConfig           `json:"storage"`
+	Hosts      []string                 `json:"hosts"`
+	ErrorPages *ErrorPagesConfig        `json:"errorPages"`
+	MimeRules  []*MimeRuleConfig        `json:"mimeRules"`
+	Targets    map[string]*TargetConfig `json:"targets"`
+	Rules      []*RuleConfig            `json:"rules"`
 }
 
 type StorageConfig struct {
 	Engine  string   `json:"engine"`
 	Path    string   `json:"path"`
 	Servers []string `json:"servers"`
+}
+
+type ErrorPagesConfig struct {
+	Root        string            `json:"root"`
+	Map         map[string]string `json:"map"`
+	ContentType string            `json:"contentType"`
+	ContentLang string            `json:"contentLanguage"`
 }
 
 type MimeRuleConfig struct {

@@ -107,8 +107,8 @@ func main() {
 
 	rootContext := context.Background()
 
-	var roxy Ref
-	err := roxy.Load(flagConfig)
+	var ref Ref
+	err := ref.Load(flagConfig)
 	if err != nil {
 		log.Fatal().Err(err).Send()
 		os.Exit(1)
@@ -121,8 +121,8 @@ func main() {
 	acmeManager := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Client:     acmeClient,
-		Cache:      roxy.Cache(),
-		HostPolicy: roxy.HostPolicy(),
+		Cache:      ref.Cache(),
+		HostPolicy: ref.HostPolicy(),
 	}
 
 	var (
@@ -139,7 +139,6 @@ func main() {
 	}
 
 	insecureHandler = BasicSecurityHandler{
-		Ref:  &roxy,
 		Next: insecureHandler,
 	}
 
@@ -169,7 +168,7 @@ func main() {
 		secureServer  http.Server
 	)
 
-	secureHandler = roxy.Handler()
+	secureHandler = ref.Handler()
 
 	secureHandler = LoggingHandler{
 		RootLogger: &log.Logger,
@@ -178,7 +177,6 @@ func main() {
 	}
 
 	secureHandler = BasicSecurityHandler{
-		Ref:  &roxy,
 		Next: secureHandler,
 	}
 

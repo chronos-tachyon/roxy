@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"path/filepath"
 	"regexp"
 
 	log "github.com/rs/zerolog/log"
@@ -18,12 +19,13 @@ var (
 )
 
 type Impl struct {
-	cfg       *Config
-	storage   autocert.Cache
-	hosts     []*regexp.Regexp
-	mimeRules []*MimeRule
-	targets   map[string]http.Handler
-	rules     []*Rule
+	cfg           *Config
+	storage       autocert.Cache
+	hosts         []*regexp.Regexp
+	errorPageRoot string
+	mimeRules     []*MimeRule
+	targets       map[string]http.Handler
+	rules         []*Rule
 }
 
 func LoadImpl(configPath string) (*Impl, error) {
@@ -64,6 +66,17 @@ func LoadImpl(configPath string) (*Impl, error) {
 			return nil, ConfigLoadError{
 				Path:    configPath,
 				Section: fmt.Sprintf("hosts[%d]", i),
+				Err:     err,
+			}
+		}
+	}
+
+	if impl.cfg.ErrorPages != nil && impl.cfg.ErrorPages.Root != "" {
+		impl.errorPageRoot, err = filepath.Abs(impl.cfg.ErrorPages.Root)
+		if err != nil {
+			return nil, ConfigLoadError{
+				Path:    configPath,
+				Section: "errorPages.root",
 				Err:     err,
 			}
 		}
@@ -146,6 +159,11 @@ func (impl *Impl) HostPolicyImpl(ctx context.Context, host string) error {
 }
 
 func (impl *Impl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ctx = context.WithValue(ctx, implKey{}, impl)
+	r = r.WithContext(ctx)
+	logger := log.Ctx(ctx)
+
 	applicableRules := make([]*Rule, 0, len(impl.rules))
 	for _, rule := range impl.rules {
 		if rule.Check(r) {
@@ -164,7 +182,7 @@ func (impl *Impl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rule.ApplyPre(w, r)
 	}
 
-	w.(ResponseWriter).SetRules(applicableRules, r)
+	w.(WrappedWriter).SetRules(applicableRules, r)
 
 	lastIndex := len(applicableRules) - 1
 	target := applicableRules[lastIndex].Target
@@ -175,7 +193,6 @@ func (impl *Impl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	r.URL.Scheme = "https"
 	r.URL.Host = r.Host
-	logger := log.Ctx(r.Context())
 	logger.Warn().Stringer("url", r.URL).Msg("no matching target")
-	http.NotFound(w, r)
+	writeError(ctx, w, http.StatusNotFound)
 }

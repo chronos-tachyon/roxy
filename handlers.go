@@ -33,17 +33,13 @@ import (
 )
 
 const (
-	textNotFound  = "404 Not Found"
-	textForbidden = "403 Forbidden"
-	textISE       = "500 Internal Server Error"
-
 	xattrMimeType  = "user.mimetype"
 	xattrMd5sum    = "user.md5sum"
 	xattrSha1sum   = "user.sha1sum"
 	xattrSha256sum = "user.sha256sum"
 	xattrEtag      = "user.etag"
 
-	defaultMaxCacheSize = 1 << 16 // 64 KiB
+	defaultMaxCacheSize = 4 << 10 // 4 KiB
 )
 
 var (
@@ -54,7 +50,6 @@ var (
 // type BasicSecurityHandler {{{
 
 type BasicSecurityHandler struct {
-	Ref  *Ref
 	Next http.Handler
 }
 
@@ -93,9 +88,11 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if value := r.Header.Get("referer"); value != "" {
 		c = c.Str("referer", value)
 	}
-
 	logger := c.Logger()
-	r = r.WithContext(logger.WithContext(r.Context()))
+
+	ctx := r.Context()
+	ctx = logger.WithContext(ctx)
+	r = r.WithContext(ctx)
 
 	ww := WrapWriter(w)
 
@@ -108,11 +105,12 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		elapsed := endTime.Sub(startTime)
 
 		if panicValue != nil {
-			http.Error(ww, textISE, http.StatusInternalServerError)
+			ww.Error(ctx, http.StatusInternalServerError)
 		}
 
 		status := ww.Status()
 		bytesWritten := ww.BytesWritten()
+		sawError := ww.SawError()
 		location := ww.Header().Get("location")
 		contentType := ww.Header().Get("content-type")
 
@@ -132,13 +130,14 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		event = event.Dur("elapsed", elapsed)
 		event = event.Int("status", status)
-		event = event.Int64("bytesWritten", bytesWritten)
 		if location != "" {
 			event = event.Str("location", location)
 		}
 		if contentType != "" {
 			event = event.Str("contentType", contentType)
 		}
+		event = event.Int64("bytesWritten", bytesWritten)
+		event = event.Bool("sawError", sawError)
 		event.Msg("end request")
 	}()
 
@@ -156,7 +155,8 @@ type ErrorHandler struct {
 }
 
 func (h ErrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "", h.status)
+	ctx := r.Context()
+	writeError(ctx, w, h.status)
 }
 
 var _ http.Handler = ErrorHandler{}
@@ -171,7 +171,8 @@ type RedirHandler struct {
 }
 
 func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	logger := log.Ctx(r.Context())
+	ctx := r.Context()
+	logger := log.Ctx(ctx)
 
 	r.URL.Scheme = "https"
 	r.URL.Host = r.Host
@@ -183,7 +184,7 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Str("type", "redir").
 			Interface("url", r.URL).
 			Msg("failed to execute template")
-		http.Error(w, textISE, http.StatusInternalServerError)
+		writeError(ctx, w, http.StatusInternalServerError)
 		return
 	}
 
@@ -194,7 +195,7 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Str("type", "redir").
 			Str("url", urlStr).
 			Msg("invalid url")
-		http.Error(w, textISE, http.StatusInternalServerError)
+		writeError(ctx, w, http.StatusInternalServerError)
 		return
 	}
 
@@ -209,12 +210,13 @@ var _ http.Handler = RedirHandler{}
 // type FileSystemHandler {{{
 
 type FileSystemHandler struct {
-	impl *Impl
-	key  string
-	fs   http.FileSystem
+	key string
+	fs  http.FileSystem
 }
 
 func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	reqPath := r.URL.Path
 	if !strings.HasPrefix(reqPath, "/") {
 		reqPath = "/" + reqPath
@@ -232,8 +234,7 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reqFile, err := h.fs.Open(reqPath)
 	if err != nil {
-		msg, code := toHTTPError(err)
-		http.Error(w, msg, code)
+		writeError(ctx, w, toHTTPError(err))
 		return
 	}
 
@@ -241,7 +242,7 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reqStat, err := reqFile.Stat()
 	if err != nil {
-		http.Error(w, textISE, http.StatusInternalServerError)
+		writeError(ctx, w, http.StatusInternalServerError)
 		return
 	}
 
@@ -269,7 +270,7 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			idxStat, err := idxFile.Stat()
 			if err != nil {
-				http.Error(w, textISE, http.StatusInternalServerError)
+				writeError(ctx, w, http.StatusInternalServerError)
 				return
 			}
 
@@ -282,8 +283,7 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// pass
 
 		default:
-			msg, code := toHTTPError(err)
-			http.Error(w, msg, code)
+			writeError(ctx, w, toHTTPError(err))
 			return
 		}
 	}
@@ -299,7 +299,9 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
-	logger := log.Ctx(r.Context())
+	ctx := r.Context()
+	impl := implFromCtx(ctx)
+	logger := log.Ctx(ctx)
 	hdrs := w.Header()
 
 	var (
@@ -321,7 +323,7 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 		haveContentType = true
 	}
 
-	for _, mimeRule := range h.impl.mimeRules {
+	for _, mimeRule := range impl.mimeRules {
 		if !mimeRule.rx.MatchString(r.URL.Path) {
 			continue
 		}
@@ -350,7 +352,7 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 					logger.Error().
 						Err(err).
 						Msg("failed to read file")
-					http.Error(w, textISE, http.StatusInternalServerError)
+					writeError(ctx, w, http.StatusInternalServerError)
 					return
 				}
 
@@ -425,14 +427,14 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 				size, err = io.Copy(mw, f)
 				if err != nil {
 					logger.Error().Err(err).Msg("failed to read file contents")
-					http.Error(w, textISE, http.StatusInternalServerError)
+					writeError(ctx, w, http.StatusInternalServerError)
 					return
 				}
 
 				_, err = f.Seek(0, io.SeekStart)
 				if err != nil {
 					logger.Error().Err(err).Msg("failed to seek to beginning")
-					http.Error(w, textISE, http.StatusInternalServerError)
+					writeError(ctx, w, http.StatusInternalServerError)
 					return
 				}
 
@@ -487,7 +489,8 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 }
 
 func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
-	logger := log.Ctx(r.Context())
+	ctx := r.Context()
+	logger := log.Ctx(ctx)
 	hdrs := w.Header()
 
 	var entries anyDirs
@@ -504,7 +507,7 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to read directory")
-		http.Error(w, textISE, http.StatusInternalServerError)
+		writeError(ctx, w, http.StatusInternalServerError)
 		return
 	}
 
@@ -576,7 +579,6 @@ var _ http.Handler = FileSystemHandler{}
 // type BackendHandler {{{
 
 type BackendHandler struct {
-	impl   *Impl
 	key    string
 	proto  string
 	addr   string
@@ -585,7 +587,7 @@ type BackendHandler struct {
 
 func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := log.Ctx(r.Context())
+	logger := log.Ctx(ctx)
 
 	innerURL := new(url.URL)
 	*innerURL = *r.URL
@@ -615,7 +617,7 @@ func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Str("addr", h.addr).
 			Err(err).
 			Msg("failed subrequest")
-		http.Error(w, textISE, http.StatusInternalServerError)
+		writeError(ctx, w, http.StatusInternalServerError)
 		return
 	}
 
@@ -724,7 +726,7 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 
 	var fs http.FileSystem = http.Dir(abs)
 
-	return FileSystemHandler{impl, key, fs}, nil
+	return FileSystemHandler{key, fs}, nil
 }
 
 func CompileBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
@@ -752,17 +754,26 @@ func CompileBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Hand
 		Timeout: 3600 * time.Second,
 	}
 
-	return BackendHandler{impl, key, protocol, address, client}, nil
+	return BackendHandler{key, protocol, address, client}, nil
 }
 
-func toHTTPError(err error) (string, int) {
+func writeError(ctx context.Context, w http.ResponseWriter, statusCode int) {
+	if ww, ok := w.(WrappedWriter); ok {
+		ww.Error(ctx, statusCode)
+	} else {
+		statusText := fmt.Sprintf("%03d %s", statusCode, http.StatusText(statusCode))
+		http.Error(w, statusText, statusCode)
+	}
+}
+
+func toHTTPError(err error) int {
 	switch {
 	case os.IsNotExist(err):
-		return textNotFound, http.StatusNotFound
+		return http.StatusNotFound
 	case os.IsPermission(err):
-		return textForbidden, http.StatusForbidden
+		return http.StatusForbidden
 	default:
-		return textISE, http.StatusInternalServerError
+		return http.StatusInternalServerError
 	}
 }
 
