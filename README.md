@@ -2,6 +2,10 @@
 
 **Roxy the Frontend Proxy**
 
+> ![Roxy Lalonde](https://chronos-tachyon.net/img/roxy-lalonde.png)
+> 
+> Our mascot, [Roxy Lalonde](https://mspaintadventures.fandom.com/wiki/Roxy_Lalonde).
+
 Roxy is an Internet-facing frontend proxy which provides the following
 features:
 
