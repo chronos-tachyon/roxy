@@ -108,31 +108,26 @@ func LoadImpl(configPath string) (*Impl, error) {
 	impl.indexPageTmpl = htmltemplate.New("index").Funcs(htmltemplate.FuncMap{
 		"runelen": runeLen,
 		"uint": func(x int) uint {
-			log.Logger.Debug().Str("func", "uint").Int("x", x).Send()
 			if x < 0 {
-				panic(fmt.Errorf("%d is negative", x))
+				panic(fmt.Errorf("uint: %d < 0", x))
 			}
 			return uint(x)
 		},
 		"neg": func(x uint) int {
-			log.Logger.Debug().Str("func", "neg").Uint("x", x).Send()
 			return -int(x)
 		},
 		"add": func(a, b uint) uint {
-			log.Logger.Debug().Str("func", "add").Uint("a", a).Uint("b", b).Send()
 			return a + b
 		},
 		"sub": func(a, b uint) uint {
-			log.Logger.Debug().Str("func", "sub").Uint("a", a).Uint("b", b).Send()
 			if b > a {
-				panic(fmt.Errorf("%d > %d", b, a))
+				panic(fmt.Errorf("sub: %d > %d", b, a))
 			}
 			return a - b
 		},
 		"pad": func(n uint) string {
-			log.Logger.Debug().Str("func", "pad").Uint("n", n).Send()
 			if n >= 256 {
-				panic(fmt.Errorf("pad: argument %d is >= 256", n))
+				panic(fmt.Errorf("pad: %d >= 256", n))
 			}
 			buf := make([]byte, n)
 			for i := uint(0); i < n; i++ {

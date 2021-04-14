@@ -8,6 +8,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	getopt "github.com/pborman/getopt/v2"
@@ -16,7 +19,6 @@ import (
 	log "github.com/rs/zerolog/log"
 	acme "golang.org/x/crypto/acme"
 	autocert "golang.org/x/crypto/acme/autocert"
-	errgroup "golang.org/x/sync/errgroup"
 )
 
 var gDialer = net.Dialer{
@@ -28,6 +30,9 @@ var gLogFile *os.File
 var gLogFileRotateCallback = func() error {
 	return nil
 }
+
+var gRootContext context.Context
+var gRootCancel context.CancelFunc
 
 var (
 	flagConfig      string
@@ -105,7 +110,9 @@ func main() {
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(log.Logger)
 
-	rootContext := context.Background()
+	gRootContext = context.Background()
+	gRootContext, gRootCancel = context.WithCancel(gRootContext)
+	defer gRootCancel()
 
 	var ref Ref
 	err := ref.Load(flagConfig)
@@ -151,7 +158,7 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 		BaseContext: func(l net.Listener) context.Context {
-			return rootContext
+			return gRootContext
 		},
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			logger := log.Logger.With().
@@ -184,13 +191,11 @@ func main() {
 		Addr:              ":443",
 		Handler:           secureHandler,
 		TLSConfig:         acmeManager.TLSConfig(),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		ReadHeaderTimeout: 60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 		BaseContext: func(l net.Listener) context.Context {
-			return rootContext
+			return gRootContext
 		},
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			logger := log.Logger.With().
@@ -202,28 +207,133 @@ func main() {
 		},
 	}
 
-	g, groupContext := errgroup.WithContext(rootContext)
+	insecureDoneCh := make(chan struct{})
+	secureDoneCh := make(chan struct{})
+	doneCh := make(chan struct{})
 
-	_ = groupContext
-
-	g.Go(func() error {
+	go func() {
+		defer close(insecureDoneCh)
 		err := insecureServer.ListenAndServe()
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
+		gRootCancel()
+		if !isIgnoredServingError(err) {
+			log.Error().
+				Str("proto", "http").
+				Err(err).
+				Msg("failed to ListenAndServe")
 		}
-		return err
-	})
+		go killServer(secureDoneCh, &secureServer)
+	}()
 
-	g.Go(func() error {
+	go func() {
+		defer close(secureDoneCh)
 		err := secureServer.Serve(acmeManager.Listener())
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
+		gRootCancel()
+		if !isIgnoredServingError(err) {
+			log.Error().
+				Str("proto", "https").
+				Err(err).
+				Msg("failed to ListenAndServe")
 		}
-		return err
-	})
+		go killServer(insecureDoneCh, &insecureServer)
+	}()
 
-	err = g.Wait()
-	if err != nil {
-		log.Fatal().Err(err).Send()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-insecureDoneCh
+	}()
+	go func() {
+		defer wg.Done()
+		<-secureDoneCh
+	}()
+	go func() {
+		wg.Wait()
+		close(doneCh)
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		defer signal.Stop(sigCh)
+		alreadyTermed := false
+		for {
+			sig := <-sigCh
+
+			log.Warn().
+				Str("sig", sig.String()).
+				Msg("got signal")
+
+			switch sig {
+			case syscall.SIGHUP:
+				reload(&ref)
+
+			case syscall.SIGINT:
+				fallthrough
+			case syscall.SIGTERM:
+				if alreadyTermed {
+					log.Warn().Msg("got second SIGINT/SIGTERM, forcing dirty shutdown")
+					go killServer(insecureDoneCh, &insecureServer)
+					go killServer(secureDoneCh, &secureServer)
+					return
+				}
+
+				alreadyTermed = true
+				if err := secureServer.Shutdown(gRootContext); !isIgnoredServingError(err) {
+					log.Error().
+						Str("proto", "https").
+						Err(err).
+						Msg("failed to shutdown")
+				}
+				if err := insecureServer.Shutdown(gRootContext); !isIgnoredServingError(err) {
+					log.Error().
+						Str("proto", "http").
+						Err(err).
+						Msg("failed to shutdown")
+				}
+				gRootCancel()
+			}
+		}
+	}()
+
+	<-doneCh
+}
+
+func killServer(ch <-chan struct{}, server *http.Server) {
+	timer := time.NewTimer(5 * time.Second)
+
+	select {
+	case <-ch:
+		if !timer.Stop() {
+			<-timer.C
+		}
+
+	case <-timer.C:
+		server.Close()
+	}
+}
+
+func reload(ref *Ref) {
+	if err := ref.Load(flagConfig); err != nil {
+		log.Error().
+			Str("path", flagConfig).
+			Err(err).
+			Msg("failed to reload config file")
+	}
+}
+
+func isIgnoredServingError(err error) bool {
+	switch {
+	case err == nil:
+		return true
+
+	case errors.Is(err, http.ErrServerClosed):
+		return true
+
+	case errors.Is(err, context.Canceled):
+		return true
+
+	default:
+		return false
 	}
 }
