@@ -25,11 +25,7 @@ var gDialer = net.Dialer{
 	Timeout: 5 * time.Second,
 }
 
-var gLogFile *os.File
-
-var gLogFileRotateCallback = func() error {
-	return nil
-}
+var gLogger *RotatingLogWriter
 
 var gRootContext context.Context
 var gRootCancel context.CancelFunc
@@ -82,8 +78,8 @@ func main() {
 	}
 
 	defer func() {
-		if gLogFile != nil {
-			gLogFile.Close()
+		if gLogger != nil {
+			gLogger.Close()
 		}
 	}()
 
@@ -96,12 +92,12 @@ func main() {
 
 	case flagLogFile != "":
 		var err error
-		gLogFile, err = os.OpenFile(flagLogFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+		gLogger, err = NewRotatingLogWriter(flagLogFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: failed to open log file for append: %q: %v", flagLogFile, err)
 			os.Exit(1)
 		}
-		log.Logger = log.Output(gLogFile)
+		log.Logger = log.Output(gLogger)
 
 	default:
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -314,6 +310,14 @@ func killServer(ch <-chan struct{}, server *http.Server) {
 }
 
 func reload(ref *Ref) {
+	if gLogger != nil {
+		if err := gLogger.Rotate(); err != nil {
+			log.Error().
+				Err(err).
+				Msg("failed to rotate log file")
+		}
+	}
+
 	if err := ref.Load(flagConfig); err != nil {
 		log.Error().
 			Str("path", flagConfig).

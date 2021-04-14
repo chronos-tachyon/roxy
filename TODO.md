@@ -8,9 +8,11 @@ Things that I would like to do with Roxy:
 * Make fs target reject POST et al with Method Not Allowed
 * Don't try to generate checksums/etag when file is larger than `$num` MiB
 * Unique request IDs for log correlation
-* Re-open log file on SIGHUP
+* ~~Re-open log file on SIGHUP~~
 * Make journald logging more useful
 * Scripts to generate Debian package
 * Scripts to generate Docker image
 * Prometheus metrics on a new HTTP listen port
 * WrappedWriter.Error should not Write after WriteHeader if r.Method is HEAD
+* Recognize symlinks in FileSystemHandler.ServeDir
+* User control of in-memory cache threshold
