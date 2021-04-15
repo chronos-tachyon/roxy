@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -27,12 +28,15 @@ import (
 	"text/template"
 	"time"
 
+	xid "github.com/rs/xid"
 	zerolog "github.com/rs/zerolog"
 	log "github.com/rs/zerolog/log"
 	unix "golang.org/x/sys/unix"
 )
 
 const defaultMaxCacheSize = 4 << 10 // 4 KiB
+
+const defaultMaxComputeDigestSize = 4 << 20 // 4 MiB
 
 var (
 	gFileCacheMu  sync.Mutex
@@ -66,7 +70,10 @@ type LoggingHandler struct {
 }
 
 func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	id := xid.New()
+
 	c := h.RootLogger.With()
+	c = c.Str("xid", id.String())
 	c = c.Str("service", h.Service)
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		c = c.Str("ip", host)
@@ -84,7 +91,10 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	ctx = logger.WithContext(ctx)
+	ctx = context.WithValue(ctx, reqIdKey{}, id)
 	r = r.WithContext(ctx)
+
+	r.Header.Set("request-id", id.String())
 
 	ww := WrapWriter(w)
 
@@ -299,10 +309,6 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 	var (
 		cachePossible bool
 		cacheHit      bool
-		haveMd5sum    bool
-		haveSha1sum   bool
-		haveSha256sum bool
-		haveEtag      bool
 		tookSlowPath  bool
 		body          io.ReadSeeker = f
 	)
@@ -341,15 +347,13 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 				sha1raw := sha1.Sum(raw)
 				sha256raw := sha256.Sum256(raw)
 
-				md5sum := hex.EncodeToString(md5raw[:])
-				sha1sum := hex.EncodeToString(sha1raw[:])
-				sha256sum := hex.EncodeToString(sha256raw[:])
-				etag := strconv.Quote("Z" + sha256sum[:16])
+				md5sum := base64.StdEncoding.EncodeToString(md5raw[:])
+				sha1sum := base64.StdEncoding.EncodeToString(sha1raw[:])
+				sha256sum := base64.StdEncoding.EncodeToString(sha256raw[:])
 
 				row = cacheRow{
 					bytes:     raw,
 					mtime:     mtime,
-					etag:      etag,
 					md5sum:    md5sum,
 					sha1sum:   sha1sum,
 					sha256sum: sha256sum,
@@ -360,44 +364,45 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 				gFileCacheMu.Unlock()
 			}
 
-			hdrs.Set("content-md5", row.md5sum)
-			hdrs.Set("content-sha1", row.sha1sum)
-			hdrs.Set("content-sha256", row.sha256sum)
-			hdrs.Set("etag", row.etag)
+			setDigestHeader(hdrs, DigestMD5, row.md5sum)
+			setDigestHeader(hdrs, DigestSHA1, row.sha1sum)
+			setDigestHeader(hdrs, DigestSHA256, row.sha256sum)
+
 			body = bytes.NewReader(row.bytes)
-			haveMd5sum = true
-			haveSha1sum = true
-			haveSha256sum = true
-			haveEtag = true
 		}
 	}
 
 	if !cachePossible {
+		var (
+			haveMD5    bool
+			haveSHA1   bool
+			haveSHA256 bool
+		)
+
 		if raw, err := readXattr(f, xattrMd5sum); err == nil {
-			md5sum := string(raw)
-			hdrs.Set("content-md5", md5sum)
-			haveMd5sum = true
+			md5sum := hexToBase64(string(raw))
+			setDigestHeader(hdrs, DigestMD5, md5sum)
+			haveMD5 = true
 		}
 
 		if raw, err := readXattr(f, xattrSha1sum); err == nil {
-			sha1sum := string(raw)
-			hdrs.Set("content-sha1", sha1sum)
-			haveSha1sum = true
+			sha1sum := hexToBase64(string(raw))
+			setDigestHeader(hdrs, DigestSHA1, sha1sum)
+			haveSHA1 = true
 		}
 
 		if raw, err := readXattr(f, xattrSha256sum); err == nil {
-			sha256sum := string(raw)
-			hdrs.Set("content-sha256", sha256sum)
-			haveSha256sum = true
+			sha256sum := hexToBase64(string(raw))
+			setDigestHeader(hdrs, DigestSHA256, sha256sum)
+			haveSHA256 = true
 		}
 
 		if raw, err := readXattr(f, xattrEtag); err == nil {
 			etag := string(raw)
 			hdrs.Set("etag", etag)
-			haveEtag = true
 		}
 
-		if !haveMd5sum && !haveSha1sum && !haveSha256sum {
+		if !haveMD5 && !haveSHA1 && !haveSHA256 && fi.Size() <= defaultMaxComputeDigestSize {
 			if _, err := f.Seek(0, io.SeekStart); err == nil {
 				md5writer := md5.New()
 				sha1writer := sha1.New()
@@ -418,50 +423,24 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 					return
 				}
 
-				md5sum := hex.EncodeToString(md5writer.Sum(nil))
-				sha1sum := hex.EncodeToString(sha1writer.Sum(nil))
-				sha256sum := hex.EncodeToString(sha256writer.Sum(nil))
+				md5sum := base64.StdEncoding.EncodeToString(md5writer.Sum(nil))
+				sha1sum := base64.StdEncoding.EncodeToString(sha1writer.Sum(nil))
+				sha256sum := base64.StdEncoding.EncodeToString(sha256writer.Sum(nil))
 
-				hdrs.Set("content-md5", md5sum)
-				hdrs.Set("content-sha1", sha1sum)
-				hdrs.Set("content-sha256", sha256sum)
-				haveMd5sum = true
-				haveSha1sum = true
-				haveSha256sum = true
+				setDigestHeader(hdrs, DigestMD5, md5sum)
+				setDigestHeader(hdrs, DigestSHA1, sha1sum)
+				setDigestHeader(hdrs, DigestSHA256, sha256sum)
 				tookSlowPath = true
 			}
 		}
+
 	}
 
-	if !haveEtag {
-		switch {
-		case haveSha256sum:
-			sha256sum := hdrs.Get("content-sha256")
-			etag := strconv.Quote("Z" + sha256sum[:16])
-			hdrs.Set("etag", etag)
-			haveEtag = true
-
-		case haveSha1sum:
-			sha1sum := hdrs.Get("content-sha1")
-			etag := strconv.Quote("Y" + sha1sum[:16])
-			hdrs.Set("etag", etag)
-			haveEtag = true
-
-		case haveMd5sum:
-			md5sum := hdrs.Get("content-md5")
-			etag := strconv.Quote("X" + md5sum[:16])
-			hdrs.Set("etag", etag)
-			haveEtag = true
-		}
-	}
+	setETagHeader(hdrs, "", fi.ModTime())
 
 	logger.Debug().
 		Bool("cachePossible", cachePossible).
 		Bool("cacheHit", cacheHit).
-		Bool("haveMd5sum", haveMd5sum).
-		Bool("haveSha1sum", haveSha1sum).
-		Bool("haveSha256sum", haveSha256sum).
-		Bool("haveEtag", haveEtag).
 		Bool("tookSlowPath", tookSlowPath).
 		Msg("serve file")
 	http.ServeContent(w, r, fi.Name(), mtime, body)
@@ -719,10 +698,9 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 	sha1raw := sha1.Sum(raw)
 	sha256raw := sha256.Sum256(raw)
 
-	md5sum := hex.EncodeToString(md5raw[:])
-	sha1sum := hex.EncodeToString(sha1raw[:])
-	sha256sum := hex.EncodeToString(sha256raw[:])
-	etag := strconv.Quote("D" + sha256sum[:16])
+	md5sum := base64.StdEncoding.EncodeToString(md5raw[:])
+	sha1sum := base64.StdEncoding.EncodeToString(sha1raw[:])
+	sha256sum := base64.StdEncoding.EncodeToString(sha256raw[:])
 
 	var (
 		contentType string
@@ -741,10 +719,10 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 
 	hdrs.Set("content-type", contentType)
 	hdrs.Set("content-language", contentLang)
-	hdrs.Set("content-md5", md5sum)
-	hdrs.Set("content-sha1", sha1sum)
-	hdrs.Set("content-sha256", sha256sum)
-	hdrs.Set("etag", etag)
+	setDigestHeader(hdrs, DigestMD5, md5sum)
+	setDigestHeader(hdrs, DigestSHA1, sha1sum)
+	setDigestHeader(hdrs, DigestSHA256, sha256sum)
+	setETagHeader(hdrs, "D", fi.ModTime())
 
 	logger.Debug().Msg("serve directory")
 	http.ServeContent(w, r, "", fi.ModTime(), bytes.NewReader(raw))
@@ -766,6 +744,12 @@ type BackendHandler struct {
 func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
+
+	r.Header.Del("forwarded")
+	r.Header.Del("x-forwarded-for")
+	r.Header.Del("x-forwarded-ip")
+	r.Header.Del("x-forwarded-host")
+	r.Header.Del("x-forwarded-proto")
 
 	innerURL := new(url.URL)
 	*innerURL = *r.URL
@@ -1006,6 +990,64 @@ func trimContentHeader(str string) string {
 	return strings.TrimSpace(str)
 }
 
+func hexToBase64(in string) string {
+	raw, err := hex.DecodeString(in)
+	if err != nil {
+		panic(err)
+	}
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func setDigestHeader(h http.Header, algo DigestType, b64 string) {
+	h.Add("digest", fmt.Sprintf("%s=%s", algo, b64))
+}
+
+func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
+	if h.Get("etag") != "" {
+		return
+	}
+
+	var (
+		haveMD5    bool
+		haveSHA1   bool
+		haveSHA256 bool
+		sumMD5     string
+		sumSHA1    string
+		sumSHA256  string
+	)
+
+	for _, row := range h.Values("digest") {
+		switch {
+		case strings.HasPrefix(row, "md5="):
+			haveMD5 = true
+			sumMD5 = row[4:]
+		case strings.HasPrefix(row, "sha1="):
+			haveSHA1 = true
+			sumSHA1 = row[5:]
+		case strings.HasPrefix(row, "sha256="):
+			haveSHA256 = true
+			sumSHA256 = row[7:]
+		}
+	}
+
+	if haveSHA256 {
+		h.Set("etag", strconv.Quote(prefix+"Z"+sumSHA256[:16]))
+		return
+	}
+
+	if haveSHA1 {
+		h.Set("etag", strconv.Quote(prefix+"Y"+sumSHA1[:16]))
+		return
+	}
+
+	if haveMD5 {
+		h.Set("etag", strconv.Quote(prefix+"X"+sumMD5[:16]))
+		return
+	}
+
+	h.Set("etag", fmt.Sprintf("W/%q", lastMod.UTC().Format("2006.01.02.15.04.05")))
+}
+
 type cacheKey struct {
 	dev uint64
 	ino uint64
@@ -1017,7 +1059,6 @@ type cacheRow struct {
 	md5sum    string
 	sha1sum   string
 	sha256sum string
-	etag      string
 }
 
 // type fileInfoList {{{
