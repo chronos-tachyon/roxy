@@ -13,7 +13,7 @@ Things that I would like to do with Roxy:
 * [ ] Scripts to generate Debian package
 * [ ] Scripts to generate Docker image
 * [ ] Prometheus metrics on a new HTTP listen port
-* [ ] WrappedWriter.Error should not Write after WriteHeader if r.Method is HEAD
+* [x] WrappedWriter.Error should not Write after WriteHeader if r.Method is HEAD
 * [ ] Recognize symlinks in FileSystemHandler.ServeDir
 * [ ] User control of in-memory cache threshold
 * [ ] Investigate possible bidirectional support of HTTP trailers to/from backends

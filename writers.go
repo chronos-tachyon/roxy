@@ -21,6 +21,7 @@ type WrappedWriter interface {
 	Unwrap() http.ResponseWriter
 	Status() int
 	BytesWritten() int64
+	SetIsHEAD(value bool)
 	SetRules(rules []*Rule, req *http.Request)
 	Error(ctx context.Context, status int)
 	SawError() bool
@@ -31,6 +32,7 @@ type WrappedWriter interface {
 type BasicWriter struct {
 	next        http.ResponseWriter
 	wroteHeader bool
+	isHEAD      bool
 	sawError    bool
 	status      int
 	bytes       int64
@@ -57,6 +59,9 @@ func (bw *BasicWriter) WriteHeader(status int) {
 
 func (bw *BasicWriter) Write(buf []byte) (int, error) {
 	bw.WriteHeader(http.StatusOK)
+	if bw.isHEAD {
+		return len(buf), nil
+	}
 	n, err := bw.next.Write(buf)
 	bw.bytes += int64(n)
 	return n, err
@@ -79,6 +84,10 @@ func (bw *BasicWriter) Status() int {
 
 func (bw *BasicWriter) BytesWritten() int64 {
 	return bw.bytes
+}
+
+func (bw *BasicWriter) SetIsHEAD(value bool) {
+	bw.isHEAD = value
 }
 
 func (bw *BasicWriter) SetRules(rules []*Rule, req *http.Request) {

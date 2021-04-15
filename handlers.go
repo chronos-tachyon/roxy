@@ -97,6 +97,7 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("request-id", id.String())
 
 	ww := WrapWriter(w)
+	ww.SetIsHEAD(r.Method == http.MethodHead)
 
 	logger.Debug().Msg("start request")
 	startTime := time.Now()
