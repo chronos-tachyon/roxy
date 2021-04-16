@@ -261,7 +261,7 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if reqStat.IsDir() {
-		idxPath := filepath.Join(reqPath, "index.html")
+		idxPath := path.Join(reqPath, "index.html")
 		idxFile, err := h.fs.Open(idxPath)
 		switch {
 		case err == nil:
@@ -468,6 +468,7 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		Mode        string
 		Owner       string
 		Group       string
+		Link        string
 		ContentType string
 		ContentLang string
 		Dev         uint64
@@ -476,6 +477,7 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		Size        int64
 		MTime       time.Time
 		IsDir       bool
+		IsLink      bool
 		IsHidden    bool
 	}
 
@@ -509,6 +511,13 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 
 			if e.IsDir {
 				realMode[0] = 'd'
+			}
+			if (st.Mode & syscall.S_IFMT) == syscall.S_IFLNK {
+				realMode[0] = 'l'
+				e.IsLink = true
+				if link, err := readLinkAt(f, fi.Name()); err == nil {
+					e.Link = link
+				}
 			}
 
 			if (st.Mode & 0400) == 0400 {
@@ -565,7 +574,7 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		)
 		if e.IsDir {
 			contentType = "inode/directory"
-		} else {
+		} else if !e.IsLink {
 			contentType, contentLang = DetectMimeProperties(impl, logger, h.fs, fullPath)
 		}
 
@@ -632,6 +641,7 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		maxGroupWidth uint = 1
 		maxSizeWidth  uint = 1
 		maxNameWidth  uint = 1
+		maxLinkWidth  uint = 1
 		maxCTypeWidth uint = 1
 		maxCLangWidth uint = 1
 	)
@@ -651,6 +661,9 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		if w := uint(runeLen(e.Name)) + uint(len(e.Slash)); w > maxNameWidth {
 			maxNameWidth = w
 		}
+		if w := uint(runeLen(e.Link)); w > maxLinkWidth {
+			maxLinkWidth = w
+		}
 		if w := uint(len(e.ContentType)); w > maxCTypeWidth {
 			maxCTypeWidth = w
 		}
@@ -667,6 +680,7 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		GroupWidth       uint
 		SizeWidth        uint
 		NameWidth        uint
+		LinkWidth        uint
 		ContentTypeWidth uint
 		ContentLangWidth uint
 	}
@@ -679,6 +693,7 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		GroupWidth:       maxGroupWidth,
 		SizeWidth:        maxSizeWidth,
 		NameWidth:        maxNameWidth,
+		LinkWidth:        maxLinkWidth,
 		ContentTypeWidth: maxCTypeWidth,
 		ContentLangWidth: maxCLangWidth,
 	}
@@ -970,6 +985,34 @@ func readXattr(f http.File, attr string) ([]byte, error) {
 
 		default:
 			return nil, err
+		}
+	}
+}
+
+func readLinkAt(dir http.File, name string) (string, error) {
+	fdable, ok := dir.(interface{ Fd() uintptr })
+	if !ok {
+		return "", syscall.ENOTSUP
+	}
+
+	dest := make([]byte, 256)
+	for {
+		n, err := unix.Readlinkat(int(fdable.Fd()), name, dest)
+		switch {
+		case err == nil && n < len(dest):
+			return string(dest[:n]), nil
+
+		case err == nil:
+			if len(dest) >= 65536 {
+				return "", syscall.ERANGE
+			}
+			dest = make([]byte, 2*len(dest))
+
+		case errors.Is(err, syscall.EINTR):
+			// pass
+
+		default:
+			return "", err
 		}
 	}
 }

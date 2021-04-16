@@ -21,7 +21,7 @@ const defaultIndexPageTemplate = `<!DOCTYPE html>
 		<pre>
 {{- with $root := . -}}
 {{- range $entry := .Entries -}}
-{{$entry.Mode}} {{printf "%*d" $root.NLinkWidth $entry.NLink}} {{printf "%*s" (neg $root.OwnerWidth) $entry.Owner}} {{printf "%*s" (neg $root.GroupWidth) $entry.Group}} {{printf "%*d" $root.SizeWidth $entry.Size}} {{$entry.MTime.UTC.Format "2006-01-02 15:04"}} <a href="{{$entry.Name}}{{$entry.Slash}}">{{$entry.Name}}{{$entry.Slash}}</a>{{pad (sub $root.NameWidth (add (uint (runelen $entry.Name)) (uint (len $entry.Slash))))}} [{{printf "%*s" (neg $root.ContentTypeWidth) $entry.ContentType}}] [{{printf "%*s" (neg $root.ContentLangWidth) $entry.ContentLang}}]
+{{$entry.Mode}} {{printf "%*d" $root.NLinkWidth $entry.NLink}} {{printf "%*s" (neg $root.OwnerWidth) $entry.Owner}} {{printf "%*s" (neg $root.GroupWidth) $entry.Group}} {{printf "%*d" $root.SizeWidth $entry.Size}} {{$entry.MTime.UTC.Format "2006-01-02 15:04"}} <a href="{{$entry.Name}}{{$entry.Slash}}">{{$entry.Name}}{{$entry.Slash}}</a>{{pad (sub $root.NameWidth (add (uint (runelen $entry.Name)) (uint (len $entry.Slash))))}} {{if $entry.IsLink}}→ {{$entry.Link}}{{else}}[{{printf "%*s" (neg $root.ContentTypeWidth) $entry.ContentType}}] [{{printf "%*s" (neg $root.ContentLangWidth) $entry.ContentLang}}]{{end}}
 {{end -}}
 {{- end -}}
 		</pre>
