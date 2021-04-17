@@ -111,6 +111,12 @@ func main() {
 	defer gRootCancel()
 
 	var ref Ref
+	defer func() {
+		if err := ref.Close(); err != nil {
+			log.Error().Err(err).Msg("close")
+		}
+	}()
+
 	err := ref.Load(flagConfig)
 	if err != nil {
 		log.Fatal().Err(err).Send()

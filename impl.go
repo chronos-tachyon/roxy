@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	htmltemplate "html/template"
@@ -10,9 +11,11 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"time"
 
+	zkclient "github.com/go-zookeeper/zk"
 	log "github.com/rs/zerolog/log"
-	autocert "golang.org/x/crypto/acme/autocert"
+	etcdclient "go.etcd.io/etcd/client/v3"
 )
 
 var (
@@ -21,7 +24,9 @@ var (
 
 type Impl struct {
 	cfg           *Config
-	storage       autocert.Cache
+	etcd          *etcdclient.Client
+	zk            *zkclient.Conn
+	storage       StorageEngine
 	hosts         []*regexp.Regexp
 	errorPageRoot string
 	indexPageTmpl *htmltemplate.Template
@@ -59,7 +64,121 @@ func LoadImpl(configPath string) (*Impl, error) {
 		}
 	}
 
-	impl.storage, err = NewStorageEngine(impl.cfg.Storage)
+	if impl.cfg.Etcd != nil {
+		if len(impl.cfg.Etcd.Endpoints) == 0 {
+			return nil, ConfigLoadError{
+				Path:    configPath,
+				Section: "etcd",
+				Err:     fmt.Errorf("missing required field \"endpoints\""),
+			}
+		}
+
+		dialTimeout := impl.cfg.Etcd.DialTimeout
+		if dialTimeout == 0 {
+			dialTimeout = 5 * time.Second
+		}
+
+		tlsConfig, err := CompileTLSClientConfig(impl.cfg.Etcd.TLS)
+		if err != nil {
+			return nil, ConfigLoadError{
+				Path:    configPath,
+				Section: "etcd.tls",
+				Err:     err,
+			}
+		}
+
+		impl.etcd, err = etcdclient.New(etcdclient.Config{
+			Endpoints:            impl.cfg.Etcd.Endpoints,
+			AutoSyncInterval:     1 * time.Minute,
+			DialTimeout:          dialTimeout,
+			DialKeepAliveTime:    impl.cfg.Etcd.KeepAliveTime,
+			DialKeepAliveTimeout: impl.cfg.Etcd.KeepAliveTimeout,
+			Username:             impl.cfg.Etcd.Username,
+			Password:             impl.cfg.Etcd.Password,
+			TLS:                  tlsConfig,
+			LogConfig:            NewDummyZapConfig(),
+			Context:              gRootContext,
+		})
+		if err != nil {
+			return nil, ConfigLoadError{
+				Path:    configPath,
+				Section: "etcd",
+				Err:     err,
+			}
+		}
+	}
+
+	if impl.cfg.ZK != nil {
+		if len(impl.cfg.ZK.Servers) == 0 {
+			return nil, ConfigLoadError{
+				Path:    configPath,
+				Section: "zookeeper",
+				Err:     fmt.Errorf("missing required field \"servers\""),
+			}
+		}
+
+		sessTimeout := impl.cfg.ZK.SessionTimeout
+		if sessTimeout == 0 {
+			sessTimeout = 30 * time.Second
+		}
+
+		impl.zk, _, err = zkclient.Connect(
+			impl.cfg.ZK.Servers,
+			sessTimeout,
+			zkclient.WithLogger(ZKLoggerBridge{}))
+		if err != nil {
+			return nil, ConfigLoadError{
+				Path:    configPath,
+				Section: "zookeeper",
+				Err:     err,
+			}
+		}
+
+		if impl.cfg.ZK.Auth != nil {
+			scheme := impl.cfg.ZK.Auth.Scheme
+			if scheme == "" {
+				return nil, ConfigLoadError{
+					Path:    configPath,
+					Section: "zookeeper.auth",
+					Err:     fmt.Errorf("missing required field \"scheme\""),
+				}
+			}
+
+			var raw []byte
+			switch {
+			case impl.cfg.ZK.Auth.Raw != "":
+				raw, err = base64.StdEncoding.DecodeString(impl.cfg.ZK.Auth.Raw)
+				if err != nil {
+					return nil, ConfigLoadError{
+						Path:    configPath,
+						Section: "zookeeper.auth.raw",
+						Err:     err,
+					}
+				}
+
+			case impl.cfg.ZK.Auth.Username != "" && impl.cfg.ZK.Auth.Password != "":
+				raw = []byte(impl.cfg.ZK.Auth.Username + ":" + impl.cfg.ZK.Auth.Password)
+
+			default:
+				return nil, ConfigLoadError{
+					Path:    configPath,
+					Section: "zookeeper.auth",
+					Err:     fmt.Errorf("missing required fields \"raw\" or \"username\" + \"password\""),
+				}
+			}
+
+			err = impl.zk.AddAuth(scheme, raw)
+			if err != nil {
+				return nil, ConfigLoadError{
+					Path:    configPath,
+					Section: "zookeeper.auth",
+					Err:     fmt.Errorf("AddAuth %q, %s: %w", scheme, raw, err),
+				}
+			}
+		}
+	}
+
+	impl.storage, err = NewStorageEngine(impl, impl.cfg.Storage)
 	if err != nil {
 		return nil, ConfigLoadError{
 			Path:    configPath,
@@ -193,11 +312,25 @@ func LoadImpl(configPath string) (*Impl, error) {
 }
 
 func (impl *Impl) Close() error {
-	var err error
-	if x, ok := impl.storage.(interface{ Close() error }); ok {
-		err = x.Close()
+	err0 := impl.storage.Close()
+
+	if impl.zk != nil {
+		impl.zk.Close()
 	}
-	return err
+
+	var err1 error
+	if impl.etcd != nil {
+		err1 = impl.etcd.Close()
+	}
+
+	switch {
+	case err0 != nil:
+		return err0
+	case err1 != nil:
+		return err1
+	default:
+		return nil
+	}
 }
 
 func (impl *Impl) StorageGet(ctx context.Context, key string) ([]byte, error) {

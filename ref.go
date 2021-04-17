@@ -18,7 +18,20 @@ func (ref *Ref) Load(configPath string) error {
 	if err != nil {
 		return err
 	}
-	_ = ref.Swap(next)
+	if prev := ref.Swap(next); prev != nil {
+		if err := prev.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (ref *Ref) Close() error {
+	if prev := ref.Swap(nil); prev != nil {
+		if err := prev.Close(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

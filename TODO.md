@@ -1,6 +1,6 @@
 Things that I would like to do with Roxy:
 
-* [ ] Support etcd and zookeeper for ACME cert/key/challenge storage
+* [x] Support etcd and zookeeper for ACME cert/key/challenge storage
 * [ ] X-Forwarded-IP et al for backend requests
 * [ ] Fork of io.Copy that respects ctx cancellation
 * [ ] Fork of http.ServeContent that respects ctx cancellation
