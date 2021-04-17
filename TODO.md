@@ -4,8 +4,8 @@ Things that I would like to do with Roxy:
 * [ ] X-Forwarded-IP et al for backend requests
 * [ ] Fork of io.Copy that respects ctx cancellation
 * [ ] Fork of http.ServeContent that respects ctx cancellation
-* [ ] Make fs target respond to OPTIONS
-* [ ] Make fs target reject POST et al with Method Not Allowed
+* [x] Make fs target respond to OPTIONS
+* [x] Make fs target reject POST et al with Method Not Allowed
 * [x] Don't try to generate checksums/etag when file is larger than `$num` MiB
 * [x] Unique request IDs for log correlation
 * [x] Re-open log file on SIGHUP

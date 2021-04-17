@@ -220,6 +220,21 @@ type FileSystemHandler struct {
 func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	if r.Method == http.MethodOptions {
+		hdrs := w.Header()
+		hdrs.Set("allow", "OPTIONS, GET, HEAD")
+		hdrs.Set("cache-control", "max-age=604800")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if r.Method != http.MethodHead && r.Method != http.MethodGet {
+		hdrs := w.Header()
+		hdrs.Set("allow", "OPTIONS, GET, HEAD")
+		writeError(ctx, w, http.StatusMethodNotAllowed)
+		return
+	}
+
 	reqPath := r.URL.Path
 	if !strings.HasPrefix(reqPath, "/") {
 		reqPath = "/" + reqPath
