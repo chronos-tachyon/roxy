@@ -713,10 +713,11 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 		ContentLangWidth: maxCLangWidth,
 	}
 
-	var buf bytes.Buffer
-	buf.Grow(4096)
+	page := impl.pages["index"]
 
-	err = impl.indexPageTmpl.Execute(&buf, data)
+	var buf bytes.Buffer
+	buf.Grow(page.size)
+	err = page.tmpl.Execute(&buf, data)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to render index template")
 		writeError(ctx, w, http.StatusInternalServerError)
@@ -733,23 +734,8 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 	sha1sum := base64.StdEncoding.EncodeToString(sha1raw[:])
 	sha256sum := base64.StdEncoding.EncodeToString(sha256raw[:])
 
-	var (
-		contentType string
-		contentLang string
-	)
-	if impl.cfg.IndexPages != nil {
-		contentType = impl.cfg.IndexPages.ContentType
-		contentLang = impl.cfg.IndexPages.ContentLang
-	}
-	if contentType == "" {
-		contentType = defaultIndexPageType
-	}
-	if contentLang == "" {
-		contentLang = defaultIndexPageLang
-	}
-
-	hdrs.Set("content-type", contentType)
-	hdrs.Set("content-language", contentLang)
+	hdrs.Set("content-type", page.contentType)
+	hdrs.Set("content-language", page.contentLang)
 	setDigestHeader(hdrs, DigestMD5, md5sum)
 	setDigestHeader(hdrs, DigestSHA1, sha1sum)
 	setDigestHeader(hdrs, DigestSHA256, sha256sum)

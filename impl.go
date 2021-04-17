@@ -23,30 +23,39 @@ var (
 )
 
 type Impl struct {
-	cfg           *Config
-	etcd          *etcdclient.Client
-	zk            *zkclient.Conn
-	storage       StorageEngine
-	hosts         []*regexp.Regexp
-	errorPageRoot string
-	indexPageTmpl *htmltemplate.Template
-	mimeRules     []*MimeRule
-	targets       map[string]http.Handler
-	rules         []*Rule
+	configPath string
+	cfg        *Config
+	etcd       *etcdclient.Client
+	zk         *zkclient.Conn
+	storage    StorageEngine
+	hosts      []*regexp.Regexp
+	pages      map[string]pageData
+	mimeRules  []*MimeRule
+	targets    map[string]http.Handler
+	rules      []*Rule
+}
+
+type pageData struct {
+	tmpl        *htmltemplate.Template
+	size        int
+	contentType string
+	contentLang string
 }
 
 func LoadImpl(configPath string) (*Impl, error) {
-	impl := new(Impl)
+	impl := &Impl{
+		configPath: configPath,
+		cfg:        new(Config),
+	}
 
 	raw, err := ioutil.ReadFile(configPath)
 	if err != nil {
 		return nil, ConfigLoadError{
 			Path: configPath,
-			Err:  err,
+			Err:  fmt.Errorf("failed to read config file: %w", err),
 		}
 	}
 
-	impl.cfg = new(Config)
 	jsonDecoder := json.NewDecoder(bytes.NewReader(raw))
 	jsonDecoder.DisallowUnknownFields()
 	err = jsonDecoder.Decode(impl.cfg)
@@ -64,167 +73,304 @@ func LoadImpl(configPath string) (*Impl, error) {
 		}
 	}
 
-	if impl.cfg.Etcd != nil {
-		if len(impl.cfg.Etcd.Endpoints) == 0 {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: "etcd",
-				Err:     fmt.Errorf("missing required field \"endpoints\""),
-			}
-		}
-
-		dialTimeout := impl.cfg.Etcd.DialTimeout
-		if dialTimeout == 0 {
-			dialTimeout = 5 * time.Second
-		}
-
-		tlsConfig, err := CompileTLSClientConfig(impl.cfg.Etcd.TLS)
-		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: "etcd.tls",
-				Err:     err,
-			}
-		}
-
-		impl.etcd, err = etcdclient.New(etcdclient.Config{
-			Endpoints:            impl.cfg.Etcd.Endpoints,
-			AutoSyncInterval:     1 * time.Minute,
-			DialTimeout:          dialTimeout,
-			DialKeepAliveTime:    impl.cfg.Etcd.KeepAliveTime,
-			DialKeepAliveTimeout: impl.cfg.Etcd.KeepAliveTimeout,
-			Username:             impl.cfg.Etcd.Username,
-			Password:             impl.cfg.Etcd.Password,
-			TLS:                  tlsConfig,
-			LogConfig:            NewDummyZapConfig(),
-			Context:              gRootContext,
-		})
-		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: "etcd",
-				Err:     err,
-			}
-		}
-	}
-
-	if impl.cfg.ZK != nil {
-		if len(impl.cfg.ZK.Servers) == 0 {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: "zookeeper",
-				Err:     fmt.Errorf("missing required field \"servers\""),
-			}
-		}
-
-		sessTimeout := impl.cfg.ZK.SessionTimeout
-		if sessTimeout == 0 {
-			sessTimeout = 30 * time.Second
-		}
-
-		impl.zk, _, err = zkclient.Connect(
-			impl.cfg.ZK.Servers,
-			sessTimeout,
-			zkclient.WithLogger(ZKLoggerBridge{}))
-		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: "zookeeper",
-				Err:     err,
-			}
-		}
-
-		if impl.cfg.ZK.Auth != nil {
-			scheme := impl.cfg.ZK.Auth.Scheme
-			if scheme == "" {
-				return nil, ConfigLoadError{
-					Path:    configPath,
-					Section: "zookeeper.auth",
-					Err:     fmt.Errorf("missing required field \"scheme\""),
-				}
-			}
-
-			var raw []byte
-			switch {
-			case impl.cfg.ZK.Auth.Raw != "":
-				raw, err = base64.StdEncoding.DecodeString(impl.cfg.ZK.Auth.Raw)
-				if err != nil {
-					return nil, ConfigLoadError{
-						Path:    configPath,
-						Section: "zookeeper.auth.raw",
-						Err:     err,
-					}
-				}
-
-			case impl.cfg.ZK.Auth.Username != "" && impl.cfg.ZK.Auth.Password != "":
-				raw = []byte(impl.cfg.ZK.Auth.Username + ":" + impl.cfg.ZK.Auth.Password)
-
-			default:
-				return nil, ConfigLoadError{
-					Path:    configPath,
-					Section: "zookeeper.auth",
-					Err:     fmt.Errorf("missing required fields \"raw\" or \"username\" + \"password\""),
-				}
-			}
-
-			err = impl.zk.AddAuth(scheme, raw)
-			if err != nil {
-				return nil, ConfigLoadError{
-					Path:    configPath,
-					Section: "zookeeper.auth",
-					Err:     fmt.Errorf("AddAuth %q, %s: %w", scheme, raw, err),
-				}
-			}
-		}
-	}
-
-	impl.storage, err = NewStorageEngine(impl, impl.cfg.Storage)
+	err = impl.loadEtcd()
 	if err != nil {
-		return nil, ConfigLoadError{
-			Path:    configPath,
-			Section: "storage",
+		return nil, err
+	}
+
+	err = impl.loadZK()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.loadStorageEngine()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.loadHosts()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.loadPages()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.loadMimeRules()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.loadTargets()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.loadRules()
+	if err != nil {
+		return nil, err
+	}
+
+	return impl, nil
+}
+
+func (impl *Impl) loadEtcd() error {
+	if impl.cfg.Etcd == nil {
+		return nil
+	}
+
+	if len(impl.cfg.Etcd.Endpoints) == 0 {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "etcd",
+			Err:     fmt.Errorf("missing required field \"endpoints\""),
+		}
+	}
+
+	dialTimeout := impl.cfg.Etcd.DialTimeout
+	if dialTimeout == 0 {
+		dialTimeout = 5 * time.Second
+	}
+
+	tlsConfig, err := CompileTLSClientConfig(impl.cfg.Etcd.TLS)
+	if err != nil {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "etcd.tls",
 			Err:     err,
 		}
 	}
 
+	impl.etcd, err = etcdclient.New(etcdclient.Config{
+		Endpoints:            impl.cfg.Etcd.Endpoints,
+		AutoSyncInterval:     1 * time.Minute,
+		DialTimeout:          dialTimeout,
+		DialKeepAliveTime:    impl.cfg.Etcd.KeepAliveTime,
+		DialKeepAliveTimeout: impl.cfg.Etcd.KeepAliveTimeout,
+		Username:             impl.cfg.Etcd.Username,
+		Password:             impl.cfg.Etcd.Password,
+		TLS:                  tlsConfig,
+		LogConfig:            NewDummyZapConfig(),
+		Context:              gRootContext,
+	})
+	if err != nil {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "etcd",
+			Err:     err,
+		}
+	}
+
+	return nil
+}
+
+func (impl *Impl) loadZK() error {
+	if impl.cfg.ZK == nil {
+		return nil
+	}
+
+	if len(impl.cfg.ZK.Servers) == 0 {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "zookeeper",
+			Err:     fmt.Errorf("missing required field \"servers\""),
+		}
+	}
+
+	sessTimeout := impl.cfg.ZK.SessionTimeout
+	if sessTimeout == 0 {
+		sessTimeout = 30 * time.Second
+	}
+
+	var err error
+	impl.zk, _, err = zkclient.Connect(
+		impl.cfg.ZK.Servers,
+		sessTimeout,
+		zkclient.WithLogger(ZKLoggerBridge{}))
+	if err != nil {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "zookeeper",
+			Err:     err,
+		}
+	}
+
+	if impl.cfg.ZK.Auth != nil {
+		scheme := impl.cfg.ZK.Auth.Scheme
+		if scheme == "" {
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "zookeeper.auth",
+				Err:     fmt.Errorf("missing required field \"scheme\""),
+			}
+		}
+
+		var raw []byte
+		switch {
+		case impl.cfg.ZK.Auth.Raw != "":
+			raw, err = base64.StdEncoding.DecodeString(impl.cfg.ZK.Auth.Raw)
+			if err != nil {
+				return ConfigLoadError{
+					Path:    impl.configPath,
+					Section: "zookeeper.auth.raw",
+					Err:     err,
+				}
+			}
+
+		case impl.cfg.ZK.Auth.Username != "" && impl.cfg.ZK.Auth.Password != "":
+			raw = []byte(impl.cfg.ZK.Auth.Username + ":" + impl.cfg.ZK.Auth.Password)
+
+		default:
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "zookeeper.auth",
+				Err:     fmt.Errorf("missing required fields \"raw\" or \"username\" + \"password\""),
+			}
+		}
+
+		err = impl.zk.AddAuth(scheme, raw)
+		if err != nil {
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "zookeeper.auth",
+				Err:     fmt.Errorf("AddAuth %q, %s: %w", scheme, raw, err),
+			}
+		}
+	}
+
+	return nil
+}
+
+func (impl *Impl) loadStorageEngine() error {
+	var err error
+	impl.storage, err = NewStorageEngine(impl, impl.cfg.Storage)
+	if err != nil {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "storage",
+			Err:     err,
+		}
+	}
+	return nil
+}
+
+func (impl *Impl) loadHosts() error {
+	var err error
 	impl.hosts = make([]*regexp.Regexp, len(impl.cfg.Hosts))
-	for i, pattern := range impl.cfg.Hosts {
-		impl.hosts[i], err = CompileHostGlob(pattern)
+	for index, pattern := range impl.cfg.Hosts {
+		impl.hosts[index], err = CompileHostGlob(pattern)
 		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: fmt.Sprintf("hosts[%d]", i),
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: fmt.Sprintf("hosts[%d]", index),
 				Err:     err,
 			}
 		}
 	}
+	return nil
+}
 
-	if impl.cfg.ErrorPages != nil && impl.cfg.ErrorPages.Root != "" {
-		impl.errorPageRoot, err = filepath.Abs(impl.cfg.ErrorPages.Root)
+func (impl *Impl) loadPages() error {
+	impl.pages = make(map[string]pageData, 64)
+
+	if err := impl.compilePage("index", defaultIndexPageTemplate, "", ""); err != nil {
+		return err
+	}
+	if err := impl.compilePage("redir", defaultRedirPageTemplate, "", ""); err != nil {
+		return err
+	}
+	if err := impl.compilePage("error", defaultErrorPageTemplate, "", ""); err != nil {
+		return err
+	}
+
+	if impl.cfg.Pages != nil {
+		if impl.cfg.Pages.Root == "" {
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "pages",
+				Err:     fmt.Errorf("missing required field \"root\""),
+			}
+		}
+
+		abs, err := filepath.Abs(impl.cfg.Pages.Root)
 		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: "errorPages.root",
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "pages.root",
 				Err:     err,
+			}
+		}
+
+		if err := impl.loadPage("index", abs); err != nil {
+			return err
+		}
+		if err := impl.loadPage("redir", abs); err != nil {
+			return err
+		}
+		if err := impl.loadPage("error", abs); err != nil {
+			return err
+		}
+		if err := impl.loadPage("4xx", abs); err != nil {
+			return err
+		}
+		if err := impl.loadPage("5xx", abs); err != nil {
+			return err
+		}
+
+		for i := 300; i < 600; i++ {
+			key := fmt.Sprintf("%03d", i)
+			if err := impl.loadPage(key, abs); err != nil {
+				return err
 			}
 		}
 	}
 
-	indexPageTemplate := defaultIndexPageTemplate
-	if impl.cfg.IndexPages != nil && impl.cfg.IndexPages.Path != "" {
-		contents, err := ioutil.ReadFile(impl.cfg.IndexPages.Path)
-		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: "indexPages.path",
-				Err:     err,
-			}
-		}
+	return nil
+}
 
-		indexPageTemplate = string(contents)
+func (impl *Impl) loadPage(key string, rootDir string) error {
+	row, found := impl.cfg.Pages.Map[key]
+	if !found {
+		return nil
 	}
 
-	impl.indexPageTmpl = htmltemplate.New("index").Funcs(htmltemplate.FuncMap{
+	fileName := row.FileName
+	contentType := row.ContentType
+	contentLang := row.ContentLang
+	if fileName == "" {
+		fileName = key + ".html"
+	}
+
+	raw, err := ioutil.ReadFile(filepath.Join(rootDir, fileName))
+	if err != nil {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: fmt.Sprintf("pages.map[%q].fileName", key),
+			Err:     err,
+		}
+	}
+
+	return impl.compilePage(key, string(raw), contentType, contentLang)
+}
+
+func (impl *Impl) compilePage(key string, contents string, contentType string, contentLang string) error {
+	if contentType == "" && impl.cfg.Pages != nil {
+		contentType = impl.cfg.Pages.DefaultContentType
+	}
+	if contentLang == "" && impl.cfg.Pages != nil {
+		contentLang = impl.cfg.Pages.DefaultContentLang
+	}
+	if contentType == "" {
+		contentType = defaultContentType
+	}
+	if contentLang == "" {
+		contentLang = defaultContentLang
+	}
+
+	t := htmltemplate.New("page")
+	t = t.Funcs(htmltemplate.FuncMap{
 		"runelen": runeLen,
 		"uint": func(x int) uint {
 			if x < 0 {
@@ -233,6 +379,10 @@ func LoadImpl(configPath string) (*Impl, error) {
 			return uint(x)
 		},
 		"neg": func(x uint) int {
+			const max = ^uint(0) >> 1
+			if x > max {
+				panic(fmt.Errorf("neg: %d > %d", x, max))
+			}
 			return -int(x)
 		},
 		"add": func(a, b uint) uint {
@@ -255,32 +405,47 @@ func LoadImpl(configPath string) (*Impl, error) {
 			return string(buf)
 		},
 	})
-	impl.indexPageTmpl, err = impl.indexPageTmpl.Parse(indexPageTemplate)
+	t, err := t.Parse(contents)
 	if err != nil {
-		return nil, ConfigLoadError{
-			Path:    configPath,
-			Section: "indexPages.path",
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: fmt.Sprintf("pages.map[%q]", key),
 			Err:     err,
 		}
 	}
 
+	impl.pages[key] = pageData{
+		tmpl:        t,
+		size:        len(contents),
+		contentType: contentType,
+		contentLang: contentLang,
+	}
+	return nil
+}
+
+func (impl *Impl) loadMimeRules() error {
+	var err error
 	impl.mimeRules = make([]*MimeRule, len(impl.cfg.MimeRules))
-	for i, cfg := range impl.cfg.MimeRules {
-		impl.mimeRules[i], err = CompileMimeRule(cfg)
+	for index, cfg := range impl.cfg.MimeRules {
+		impl.mimeRules[index], err = CompileMimeRule(cfg)
 		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: fmt.Sprintf("mimeRules[%d]", i),
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: fmt.Sprintf("mimeRules[%d]", index),
 				Err:     err,
 			}
 		}
 	}
+	return nil
+}
 
+func (impl *Impl) loadTargets() error {
+	var err error
 	impl.targets = make(map[string]http.Handler, len(impl.cfg.Targets))
 	for key, cfg := range impl.cfg.Targets {
 		if !reTargetKey.MatchString(key) {
-			return nil, ConfigLoadError{
-				Path:    configPath,
+			return ConfigLoadError{
+				Path:    impl.configPath,
 				Section: "targets",
 				Err:     fmt.Errorf("invalid backend name %q", key),
 			}
@@ -288,27 +453,30 @@ func LoadImpl(configPath string) (*Impl, error) {
 
 		impl.targets[key], err = CompileTarget(impl, key, cfg)
 		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
+			return ConfigLoadError{
+				Path:    impl.configPath,
 				Section: fmt.Sprintf("targets[%q]", key),
 				Err:     err,
 			}
 		}
 	}
+	return nil
+}
 
+func (impl *Impl) loadRules() error {
+	var err error
 	impl.rules = make([]*Rule, len(impl.cfg.Rules))
-	for i, cfg := range impl.cfg.Rules {
-		impl.rules[i], err = CompileRule(impl, cfg)
+	for index, cfg := range impl.cfg.Rules {
+		impl.rules[index], err = CompileRule(impl, cfg)
 		if err != nil {
-			return nil, ConfigLoadError{
-				Path:    configPath,
-				Section: fmt.Sprintf("rules[%d]", i),
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: fmt.Sprintf("rules[%d]", index),
 				Err:     err,
 			}
 		}
 	}
-
-	return impl, nil
+	return nil
 }
 
 func (impl *Impl) Close() error {

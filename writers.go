@@ -5,14 +5,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	htmltemplate "html/template"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -109,6 +106,11 @@ func (bw *BasicWriter) Redirect(ctx context.Context, statusCode int, urlstr stri
 		panic(fmt.Errorf("HTTP status code %03d out of range [300..399]", statusCode))
 	}
 
+	if bw.wroteHeader {
+		bw.sawError = true
+		return
+	}
+
 	if u, err := url.Parse(urlstr); err == nil {
 		if u.Scheme == "" && u.Host == "" {
 			oldPath := bw.request.URL.Path
@@ -151,30 +153,24 @@ func (bw *BasicWriter) Redirect(ctx context.Context, statusCode int, urlstr stri
 		haveImpl = false
 	}
 
-	if bw.request.Method != http.MethodHead && bw.request.Method != http.MethodGet {
+	if haveImpl && (bw.request.Method == http.MethodHead || bw.request.Method == http.MethodGet) {
+		impl := implFromCtx(ctx)
+
+		key := fmt.Sprintf("%03d", statusCode)
+		page, found := impl.pages[key]
+		if !found {
+			page, found = impl.pages["redir"]
+		}
+		if !found {
+			panic(fmt.Errorf("impl.pages[%q] not found", "redir"))
+		}
+
+		writeErrorPage(bw, page, statusCode, u)
 		return
 	}
 
-	if haveImpl {
-		impl := implFromCtx(ctx)
-		if impl.cfg.ErrorPages != nil && impl.cfg.ErrorPages.Root != "" {
-			fullPath := getErrorPagePath(impl, statusCode)
-			if ok := tryWriteErrorPage(bw, impl, statusCode, u, fullPath); ok {
-				return
-			}
-
-			partialPath, found := impl.cfg.ErrorPages.Map["redir"]
-			if !found {
-				partialPath = "redir.tmpl"
-			}
-			fullPath = filepath.Join(impl.cfg.ErrorPages.Root, partialPath)
-			if ok := tryWriteErrorPage(bw, impl, statusCode, u, fullPath); ok {
-				return
-			}
-		}
-	}
-
-	tryWriteErrorPage2(bw, nil, statusCode, u, defaultRedirPageTemplate)
+	hdrs.Set("content-length", "0")
+	bw.WriteHeader(statusCode)
 }
 
 func (bw *BasicWriter) Error(ctx context.Context, statusCode int) {
@@ -198,24 +194,32 @@ func (bw *BasicWriter) Error(ctx context.Context, statusCode int) {
 
 	if haveImpl {
 		impl := implFromCtx(ctx)
-		if impl.cfg.ErrorPages != nil && impl.cfg.ErrorPages.Root != "" {
-			fullPath := getErrorPagePath(impl, statusCode)
-			if ok := tryWriteErrorPage(bw, impl, statusCode, nil, fullPath); ok {
-				return
-			}
 
-			partialPath, found := impl.cfg.ErrorPages.Map["error"]
-			if !found {
-				partialPath = "error.tmpl"
+		key := fmt.Sprintf("%03d", statusCode)
+		page, found := impl.pages[key]
+		if !found {
+			key2 := "4xx"
+			if statusCode >= 500 {
+				key2 = "5xx"
 			}
-			fullPath = filepath.Join(impl.cfg.ErrorPages.Root, partialPath)
-			if ok := tryWriteErrorPage(bw, impl, statusCode, nil, fullPath); ok {
-				return
-			}
+			page, found = impl.pages[key2]
 		}
+		if !found {
+			page, found = impl.pages["error"]
+		}
+		if !found {
+			panic(fmt.Errorf("impl.pages[%q] not found", "error"))
+		}
+
+		writeErrorPage(bw, page, statusCode, nil)
+		return
 	}
 
-	tryWriteErrorPage2(bw, nil, statusCode, nil, defaultErrorPageTemplate)
+	rendered := []byte(fmt.Sprintf("%03d %s\n", statusCode, http.StatusText(statusCode)))
+	hdrs.Set("content-type", "text/plain; charset=utf-8")
+	hdrs.Set("content-length", strconv.FormatUint(uint64(len(rendered)), 10))
+	bw.WriteHeader(statusCode)
+	bw.Write(rendered)
 }
 
 func (bw *BasicWriter) SawError() bool {
@@ -341,6 +345,8 @@ func purgeContentHeaders(hdrs http.Header) {
 	for key := range hdrs {
 		lc := strings.ToLower(key)
 		switch {
+		case lc == "digest":
+			delete(hdrs, key)
 		case lc == "etag":
 			delete(hdrs, key)
 		case lc == "last-modified":
@@ -351,31 +357,7 @@ func purgeContentHeaders(hdrs http.Header) {
 	}
 }
 
-func getErrorPagePath(impl *Impl, statusCode int) string {
-	statusCodeAsStr := fmt.Sprintf("%03d", statusCode)
-	relativePath, found := impl.cfg.ErrorPages.Map[statusCodeAsStr]
-	if !found {
-		relativePath = statusCodeAsStr + ".tmpl"
-	}
-	return filepath.Join(impl.cfg.ErrorPages.Root, relativePath)
-}
-
-func tryWriteErrorPage(bw *BasicWriter, impl *Impl, statusCode int, u *url.URL, fullPath string) bool {
-	contents, err := ioutil.ReadFile(fullPath)
-	if err != nil {
-		return false
-	}
-
-	return tryWriteErrorPage2(bw, impl, statusCode, u, string(contents))
-}
-
-func tryWriteErrorPage2(bw *BasicWriter, impl *Impl, statusCode int, u *url.URL, contents string) bool {
-	t := htmltemplate.New("page")
-	t, err := t.Parse(string(contents))
-	if err != nil {
-		return false
-	}
-
+func writeErrorPage(bw *BasicWriter, page pageData, statusCode int, u *url.URL) {
 	data := struct {
 		StatusCode int
 		StatusText string
@@ -389,33 +371,16 @@ func tryWriteErrorPage2(bw *BasicWriter, impl *Impl, statusCode int, u *url.URL,
 	}
 
 	var buf bytes.Buffer
-	buf.Grow(len(contents))
-	err = t.Execute(&buf, data)
-	if err != nil {
-		return false
+	buf.Grow(page.size)
+	if err := page.tmpl.Execute(&buf, data); err != nil {
+		panic(err)
 	}
 	rendered := []byte(buf.String())
 
-	var (
-		contentType string
-		contentLang string
-	)
-	if impl != nil && impl.cfg.ErrorPages != nil {
-		contentType = impl.cfg.ErrorPages.ContentType
-		contentLang = impl.cfg.ErrorPages.ContentLang
-	}
-	if contentType == "" {
-		contentType = defaultErrorPageType
-	}
-	if contentLang == "" {
-		contentLang = defaultErrorPageLang
-	}
-
 	hdrs := bw.Header()
-	hdrs.Set("content-type", contentType)
-	hdrs.Set("content-language", contentLang)
+	hdrs.Set("content-type", page.contentType)
+	hdrs.Set("content-language", page.contentLang)
 	hdrs.Set("content-length", strconv.FormatUint(uint64(len(rendered)), 10))
 	bw.WriteHeader(statusCode)
 	bw.Write(rendered)
-	return true
 }

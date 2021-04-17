@@ -9,8 +9,9 @@ const (
 	xattrEtag      = "user.etag"
 )
 
-const defaultIndexPageType = "text/html; charset=utf-8"
-const defaultIndexPageLang = "en"
+const defaultContentType = "text/html; charset=utf-8"
+const defaultContentLang = "en"
+
 const defaultIndexPageTemplate = `<!DOCTYPE html>
 <html>
 	<head>
@@ -31,8 +32,6 @@ const defaultIndexPageTemplate = `<!DOCTYPE html>
 </html>
 `
 
-const defaultErrorPageType = "text/html; charset=utf-8"
-const defaultErrorPageLang = "en"
 const defaultRedirPageTemplate = `<!DOCTYPE html>
 <html>
 	<head>
@@ -46,6 +45,7 @@ const defaultRedirPageTemplate = `<!DOCTYPE html>
 	</body>
 </html>
 `
+
 const defaultErrorPageTemplate = `<!DOCTYPE html>
 <html>
 	<head>

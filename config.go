@@ -9,15 +9,14 @@ import (
 )
 
 type Config struct {
-	Etcd       *EtcdConfig              `json:"etcd"`
-	ZK         *ZKConfig                `json:"zookeeper"`
-	Storage    *StorageConfig           `json:"storage"`
-	Hosts      []string                 `json:"hosts"`
-	ErrorPages *ErrorPagesConfig        `json:"errorPages"`
-	IndexPages *IndexPagesConfig        `json:"indexPages"`
-	MimeRules  []*MimeRuleConfig        `json:"mimeRules"`
-	Targets    map[string]*TargetConfig `json:"targets"`
-	Rules      []*RuleConfig            `json:"rules"`
+	Etcd      *EtcdConfig              `json:"etcd"`
+	ZK        *ZKConfig                `json:"zookeeper"`
+	Storage   *StorageConfig           `json:"storage"`
+	Hosts     []string                 `json:"hosts"`
+	Pages     *PagesConfig             `json:"pages"`
+	MimeRules []*MimeRuleConfig        `json:"mimeRules"`
+	Targets   map[string]*TargetConfig `json:"targets"`
+	Rules     []*RuleConfig            `json:"rules"`
 }
 
 type TLSClientConfig struct {
@@ -58,15 +57,15 @@ type StorageConfig struct {
 	Path   string `json:"path"`
 }
 
-type ErrorPagesConfig struct {
-	Root        string            `json:"root"`
-	Map         map[string]string `json:"map"`
-	ContentType string            `json:"contentType"`
-	ContentLang string            `json:"contentLanguage"`
+type PagesConfig struct {
+	Root               string                 `json:"root"`
+	Map                map[string]*PageConfig `json:"map"`
+	DefaultContentType string                 `json:"defaultContentType"`
+	DefaultContentLang string                 `json:"defaultContentLanguage"`
 }
 
-type IndexPagesConfig struct {
-	Path        string `json:"path"`
+type PageConfig struct {
+	FileName    string `json:"fileName"`
 	ContentType string `json:"contentType"`
 	ContentLang string `json:"contentLanguage"`
 }
