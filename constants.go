@@ -14,6 +14,8 @@ const defaultIndexPageLang = "en"
 const defaultIndexPageTemplate = `<!DOCTYPE html>
 <html>
 	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<title>Listing of {{.Path}}</title>
 	</head>
 	<body>
@@ -25,6 +27,34 @@ const defaultIndexPageTemplate = `<!DOCTYPE html>
 {{end -}}
 {{- end -}}
 		</pre>
+	</body>
+</html>
+`
+
+const defaultErrorPageType = "text/html; charset=utf-8"
+const defaultErrorPageLang = "en"
+const defaultRedirPageTemplate = `<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>{{.StatusLine}}</title>
+	</head>
+	<body>
+		<h1>{{.StatusLine}}</h1>
+		<h2><a href="{{.URL}}">{{.URL}}</a></h2>
+	</body>
+</html>
+`
+const defaultErrorPageTemplate = `<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>{{.StatusLine}}</title>
+	</head>
+	<body>
+		<h1>{{.StatusLine}}</h1>
 	</body>
 </html>
 `

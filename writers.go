@@ -2,14 +2,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
-	"html"
+	htmltemplate "html/template"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -23,7 +27,8 @@ type WrappedWriter interface {
 	BytesWritten() int64
 	SetIsHEAD(value bool)
 	SetRules(rules []*Rule, req *http.Request)
-	Error(ctx context.Context, status int)
+	Redirect(ctx context.Context, statusCode int, urlstr string)
+	Error(ctx context.Context, statusCode int)
 	SawError() bool
 }
 
@@ -38,6 +43,10 @@ type BasicWriter struct {
 	bytes       int64
 	rules       []*Rule
 	request     *http.Request
+}
+
+func (bw *BasicWriter) noResponseBody() bool {
+	return bw.isHEAD || bw.status == http.StatusNoContent
 }
 
 func (bw *BasicWriter) Header() http.Header {
@@ -59,7 +68,7 @@ func (bw *BasicWriter) WriteHeader(status int) {
 
 func (bw *BasicWriter) Write(buf []byte) (int, error) {
 	bw.WriteHeader(http.StatusOK)
-	if bw.isHEAD {
+	if bw.noResponseBody() {
 		return len(buf), nil
 	}
 	n, err := bw.next.Write(buf)
@@ -95,6 +104,79 @@ func (bw *BasicWriter) SetRules(rules []*Rule, req *http.Request) {
 	bw.request = req
 }
 
+func (bw *BasicWriter) Redirect(ctx context.Context, statusCode int, urlstr string) {
+	if statusCode < 300 || statusCode >= 400 {
+		panic(fmt.Errorf("HTTP status code %03d out of range [300..399]", statusCode))
+	}
+
+	if u, err := url.Parse(urlstr); err == nil {
+		if u.Scheme == "" && u.Host == "" {
+			oldPath := bw.request.URL.Path
+			if oldPath == "" {
+				oldPath = "/"
+			}
+
+			if urlstr == "" || urlstr[0] != '/' {
+				oldDir, _ := path.Split(oldPath)
+				urlstr = oldDir + urlstr
+			}
+
+			var query string
+			if index := strings.IndexByte(urlstr, '?'); index >= 0 {
+				urlstr, query = urlstr[:index], urlstr[index:]
+			}
+
+			hadTrailingSlash := strings.HasSuffix(urlstr, "/")
+			urlstr = path.Clean(urlstr)
+			if hadTrailingSlash {
+				urlstr += "/"
+			}
+
+			urlstr += query
+		}
+	}
+
+	u, err := url.Parse(urlstr)
+	if err != nil {
+		panic(err)
+	}
+
+	hdrs := bw.Header()
+	purgeContentHeaders(hdrs)
+	hdrs.Set("location", hexEscapeNonASCII(urlstr))
+	hdrs.Set("cache-control", "max-age=86400")
+
+	haveImpl := true
+	if value := ctx.Value(implKey{}); value == nil {
+		haveImpl = false
+	}
+
+	if bw.request.Method != http.MethodHead && bw.request.Method != http.MethodGet {
+		return
+	}
+
+	if haveImpl {
+		impl := implFromCtx(ctx)
+		if impl.cfg.ErrorPages != nil && impl.cfg.ErrorPages.Root != "" {
+			fullPath := getErrorPagePath(impl, statusCode)
+			if ok := tryWriteErrorPage(bw, impl, statusCode, u, fullPath); ok {
+				return
+			}
+
+			partialPath, found := impl.cfg.ErrorPages.Map["redir"]
+			if !found {
+				partialPath = "redir.tmpl"
+			}
+			fullPath = filepath.Join(impl.cfg.ErrorPages.Root, partialPath)
+			if ok := tryWriteErrorPage(bw, impl, statusCode, u, fullPath); ok {
+				return
+			}
+		}
+	}
+
+	tryWriteErrorPage2(bw, nil, statusCode, u, defaultRedirPageTemplate)
+}
+
 func (bw *BasicWriter) Error(ctx context.Context, statusCode int) {
 	if statusCode < 400 || statusCode >= 600 {
 		panic(fmt.Errorf("HTTP status code %03d out of range [400..599]", statusCode))
@@ -106,18 +188,8 @@ func (bw *BasicWriter) Error(ctx context.Context, statusCode int) {
 	}
 
 	hdrs := bw.Header()
+	purgeContentHeaders(hdrs)
 	hdrs.Set("cache-control", "no-cache")
-	for key := range hdrs {
-		lc := strings.ToLower(key)
-		switch {
-		case lc == "etag":
-			delete(hdrs, key)
-		case lc == "last-modified":
-			delete(hdrs, key)
-		case strings.HasPrefix(lc, "content-"):
-			delete(hdrs, key)
-		}
-	}
 
 	haveImpl := true
 	if value := ctx.Value(implKey{}); value == nil {
@@ -127,53 +199,23 @@ func (bw *BasicWriter) Error(ctx context.Context, statusCode int) {
 	if haveImpl {
 		impl := implFromCtx(ctx)
 		if impl.cfg.ErrorPages != nil && impl.cfg.ErrorPages.Root != "" {
-			rootDir := impl.cfg.ErrorPages.Root
-			errorPageMap := impl.cfg.ErrorPages.Map
-			fullPath := getErrorPagePath(statusCode, rootDir, errorPageMap)
-			if ok := tryWriteErrorPage(bw, impl, statusCode, fullPath); ok {
+			fullPath := getErrorPagePath(impl, statusCode)
+			if ok := tryWriteErrorPage(bw, impl, statusCode, nil, fullPath); ok {
 				return
 			}
 
-			if statusCode != 400 && statusCode != 500 {
-				altStatusCode := 500
-				if statusCode < 500 {
-					altStatusCode = 400
-				}
-
-				fullPath = getErrorPagePath(altStatusCode, rootDir, errorPageMap)
-				if ok := tryWriteErrorPage(bw, impl, statusCode, fullPath); ok {
-					return
-				}
+			partialPath, found := impl.cfg.ErrorPages.Map["error"]
+			if !found {
+				partialPath = "error.tmpl"
+			}
+			fullPath = filepath.Join(impl.cfg.ErrorPages.Root, partialPath)
+			if ok := tryWriteErrorPage(bw, impl, statusCode, nil, fullPath); ok {
+				return
 			}
 		}
 	}
 
-	// fallback
-
-	statusText := fmt.Sprintf("%03d %s", statusCode, http.StatusText(statusCode))
-
-	var buf strings.Builder
-	buf.WriteString("<!DOCTYPE html>\n")
-	buf.WriteString("<html>\n")
-	buf.WriteString("\t<head>\n")
-	buf.WriteString("\t\t<meta charset=\"utf-8\">\n")
-	buf.WriteString("\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
-	buf.WriteString("\t\t<title>")
-	buf.WriteString(html.EscapeString(statusText))
-	buf.WriteString("</title>\n")
-	buf.WriteString("\t</head>\n")
-	buf.WriteString("\t<body>\n")
-	buf.WriteString("\t\t<h1>")
-	buf.WriteString(html.EscapeString(statusText))
-	buf.WriteString("</h1>\n")
-	buf.WriteString("\t</body>\n")
-	buf.WriteString("</html>\n")
-	contents := []byte(buf.String())
-
-	hdrs.Set("content-type", "text/html; charset=utf-8")
-	hdrs.Set("content-language", "en")
-	bw.WriteHeader(statusCode)
-	bw.Write(contents)
+	tryWriteErrorPage2(bw, nil, statusCode, nil, defaultErrorPageTemplate)
 }
 
 func (bw *BasicWriter) SawError() bool {
@@ -269,36 +311,111 @@ func WrapWriter(w http.ResponseWriter) WrappedWriter {
 	return &BasicWriter{next: w}
 }
 
-func getErrorPagePath(statusCode int, rootDir string, errorPageMap map[string]string) string {
-	statusCodeAsStr := fmt.Sprintf("%03d", statusCode)
-	errorPagePath, found := errorPageMap[statusCodeAsStr]
-	if !found {
-		errorPagePath = statusCodeAsStr + ".html"
+func hexEscapeNonASCII(str string) string {
+	var newLen uint
+	for i, j := uint(0), uint(len(str)); i < j; i++ {
+		ch := str[i]
+		if ch >= 0x80 {
+			newLen += 3
+		} else {
+			newLen++
+		}
 	}
-	fullPath := filepath.Join(rootDir, errorPagePath)
-	return fullPath
+	if newLen == uint(len(str)) {
+		return str
+	}
+	buf := make([]byte, 0, newLen)
+	for i, j := uint(0), uint(len(str)); i < j; i++ {
+		ch := str[i]
+		if ch >= 0x80 {
+			buf = append(buf, '%')
+			buf = strconv.AppendUint(buf, uint64(ch), 16)
+		} else {
+			buf = append(buf, ch)
+		}
+	}
+	return string(buf)
 }
 
-func tryWriteErrorPage(bw *BasicWriter, impl *Impl, statusCode int, fullPath string) bool {
+func purgeContentHeaders(hdrs http.Header) {
+	for key := range hdrs {
+		lc := strings.ToLower(key)
+		switch {
+		case lc == "etag":
+			delete(hdrs, key)
+		case lc == "last-modified":
+			delete(hdrs, key)
+		case strings.HasPrefix(lc, "content-"):
+			delete(hdrs, key)
+		}
+	}
+}
+
+func getErrorPagePath(impl *Impl, statusCode int) string {
+	statusCodeAsStr := fmt.Sprintf("%03d", statusCode)
+	relativePath, found := impl.cfg.ErrorPages.Map[statusCodeAsStr]
+	if !found {
+		relativePath = statusCodeAsStr + ".tmpl"
+	}
+	return filepath.Join(impl.cfg.ErrorPages.Root, relativePath)
+}
+
+func tryWriteErrorPage(bw *BasicWriter, impl *Impl, statusCode int, u *url.URL, fullPath string) bool {
 	contents, err := ioutil.ReadFile(fullPath)
 	if err != nil {
 		return false
 	}
 
-	contentType := impl.cfg.ErrorPages.ContentType
-	if contentType == "" {
-		contentType = "text/html; charset=utf-8"
+	return tryWriteErrorPage2(bw, impl, statusCode, u, string(contents))
+}
+
+func tryWriteErrorPage2(bw *BasicWriter, impl *Impl, statusCode int, u *url.URL, contents string) bool {
+	t := htmltemplate.New("page")
+	t, err := t.Parse(string(contents))
+	if err != nil {
+		return false
 	}
 
-	contentLang := impl.cfg.ErrorPages.ContentLang
+	data := struct {
+		StatusCode int
+		StatusText string
+		StatusLine string
+		URL        *url.URL
+	}{
+		StatusCode: statusCode,
+		StatusText: http.StatusText(statusCode),
+		StatusLine: fmt.Sprintf("%03d %s", statusCode, http.StatusText(statusCode)),
+		URL:        u,
+	}
+
+	var buf bytes.Buffer
+	buf.Grow(len(contents))
+	err = t.Execute(&buf, data)
+	if err != nil {
+		return false
+	}
+	rendered := []byte(buf.String())
+
+	var (
+		contentType string
+		contentLang string
+	)
+	if impl != nil && impl.cfg.ErrorPages != nil {
+		contentType = impl.cfg.ErrorPages.ContentType
+		contentLang = impl.cfg.ErrorPages.ContentLang
+	}
+	if contentType == "" {
+		contentType = defaultErrorPageType
+	}
 	if contentLang == "" {
-		contentLang = "en"
+		contentLang = defaultErrorPageLang
 	}
 
 	hdrs := bw.Header()
 	hdrs.Set("content-type", contentType)
 	hdrs.Set("content-language", contentLang)
+	hdrs.Set("content-length", strconv.FormatUint(uint64(len(rendered)), 10))
 	bw.WriteHeader(statusCode)
-	bw.Write(contents)
+	bw.Write(rendered)
 	return true
 }

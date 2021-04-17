@@ -20,3 +20,4 @@ Things that I would like to do with Roxy:
 * [ ] Investigate possible use of HTTP body filters to/from backends
 * [ ] Optional TLS/mTLS between Roxy and backends
 * [ ] Resolve backend IPs through DNS A + port, DNS SRV, [Finagle ServerSets in ZooKeeper](http://stevenskelton.ca/finagle-serverset-clusters-using-zookeeper/), others?
+* [ ] Match rules on r.Method

@@ -203,7 +203,7 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	urlStr2 := urlObj.String()
-	http.Redirect(w, r, urlStr2, h.status)
+	writeRedirect(ctx, w, h.status, urlStr2)
 }
 
 var _ http.Handler = RedirHandler{}
@@ -246,7 +246,7 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(reqPath, "/") {
 			reqPath += "/"
 		}
-		http.Redirect(w, r, reqPath, http.StatusFound)
+		writeRedirect(ctx, w, http.StatusFound, reqPath)
 		return
 	}
 
@@ -266,12 +266,12 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if reqStat.IsDir() && !strings.HasSuffix(r.URL.Path, "/") {
 		reqPath += "/"
-		http.Redirect(w, r, reqPath, http.StatusFound)
+		writeRedirect(ctx, w, http.StatusFound, reqPath)
 		return
 	}
 
 	if !reqStat.IsDir() && strings.HasSuffix(r.URL.Path, "/") {
-		http.Redirect(w, r, reqPath, http.StatusFound)
+		writeRedirect(ctx, w, http.StatusFound, reqPath)
 		return
 	}
 
@@ -950,13 +950,14 @@ func CompileBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Hand
 	return BackendHandler{key, protocol, address, client}, nil
 }
 
+func writeRedirect(ctx context.Context, w http.ResponseWriter, statusCode int, urlstr string) {
+	ww := w.(WrappedWriter)
+	ww.Redirect(ctx, statusCode, urlstr)
+}
+
 func writeError(ctx context.Context, w http.ResponseWriter, statusCode int) {
-	if ww, ok := w.(WrappedWriter); ok {
-		ww.Error(ctx, statusCode)
-	} else {
-		statusText := fmt.Sprintf("%03d %s", statusCode, http.StatusText(statusCode))
-		http.Error(w, statusText, statusCode)
-	}
+	ww := w.(WrappedWriter)
+	ww.Error(ctx, statusCode)
 }
 
 func toHTTPError(err error) int {
@@ -1090,17 +1091,17 @@ func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
 	}
 
 	if haveSHA256 {
-		h.Set("etag", strconv.Quote(prefix+"Z"+sumSHA256[:16]))
+		h.Set("etag", strconv.Quote(prefix+"Z."+sumSHA256[:16]))
 		return
 	}
 
 	if haveSHA1 {
-		h.Set("etag", strconv.Quote(prefix+"Y"+sumSHA1[:16]))
+		h.Set("etag", strconv.Quote(prefix+"Y."+sumSHA1[:16]))
 		return
 	}
 
 	if haveMD5 {
-		h.Set("etag", strconv.Quote(prefix+"X"+sumMD5[:16]))
+		h.Set("etag", strconv.Quote(prefix+"X."+sumMD5[:16]))
 		return
 	}
 

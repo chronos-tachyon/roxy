@@ -166,7 +166,7 @@ func (_ ZapLoggerBridge) Write(p []byte) (int, error) {
 		}
 	}
 
-	e = e.Interface("data", data)
+	e = e.Interface("zap", data)
 
 	if hasMessage {
 		e.Msg(message)
