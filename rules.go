@@ -20,6 +20,8 @@ func (rule *Rule) Check(r *http.Request) bool {
 		switch {
 		case strings.EqualFold(name, "host"):
 			value = r.Host
+		case strings.EqualFold(name, "method"):
+			value = r.Method
 		case strings.EqualFold(name, "path"):
 			value = r.URL.Path
 		default:
