@@ -9,6 +9,8 @@ import (
 	"text/template"
 
 	log "github.com/rs/zerolog/log"
+
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 var (
@@ -366,10 +368,10 @@ func CompileMutation(cfg *MutationConfig) (Mutation, error) {
 	}
 
 	switch cfg.Type {
-	case UndefinedMutationType:
+	case enums.UndefinedMutationType:
 		return nil, fmt.Errorf("missing required field \"type\"")
 
-	case RequestHostMutationType:
+	case enums.RequestHostMutationType:
 		if cfg.Header != "" {
 			return nil, fmt.Errorf("unexpected field \"header\": %q", cfg.Header)
 		}
@@ -379,7 +381,7 @@ func CompileMutation(cfg *MutationConfig) (Mutation, error) {
 			Replace: replaceTmpl,
 		}, nil
 
-	case RequestPathMutationType:
+	case enums.RequestPathMutationType:
 		if cfg.Header != "" {
 			return nil, fmt.Errorf("unexpected field \"header\": %q", cfg.Header)
 		}
@@ -389,7 +391,7 @@ func CompileMutation(cfg *MutationConfig) (Mutation, error) {
 			Replace: replaceTmpl,
 		}, nil
 
-	case RequestQueryMutationType:
+	case enums.RequestQueryMutationType:
 		if cfg.Header != "" {
 			return nil, fmt.Errorf("unexpected field \"header\": %q", cfg.Header)
 		}
@@ -399,7 +401,7 @@ func CompileMutation(cfg *MutationConfig) (Mutation, error) {
 			Replace: replaceTmpl,
 		}, nil
 
-	case RequestHeaderMutationType:
+	case enums.RequestHeaderMutationType:
 		if cfg.Header == "" {
 			return nil, fmt.Errorf("missing required field \"header\"")
 		}
@@ -410,7 +412,7 @@ func CompileMutation(cfg *MutationConfig) (Mutation, error) {
 			Replace: replaceTmpl,
 		}, nil
 
-	case ResponseHeaderPreMutationType:
+	case enums.ResponseHeaderPreMutationType:
 		if cfg.Header == "" {
 			return nil, fmt.Errorf("missing required field \"header\"")
 		}
@@ -421,7 +423,7 @@ func CompileMutation(cfg *MutationConfig) (Mutation, error) {
 			Replace: replaceTmpl,
 		}, nil
 
-	case ResponseHeaderPostMutationType:
+	case enums.ResponseHeaderPostMutationType:
 		if cfg.Header == "" {
 			return nil, fmt.Errorf("missing required field \"header\"")
 		}

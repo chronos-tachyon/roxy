@@ -32,6 +32,9 @@ import (
 	zerolog "github.com/rs/zerolog"
 	log "github.com/rs/zerolog/log"
 	unix "golang.org/x/sys/unix"
+
+	"github.com/chronos-tachyon/roxy/internal/balancedclient"
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 const defaultMaxCacheSize = 4 << 10 // 4 KiB
@@ -217,7 +220,7 @@ type FileSystemHandler struct {
 	fs  http.FileSystem
 }
 
-func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if r.Method == http.MethodOptions {
@@ -316,7 +319,7 @@ func (h FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.ServeFile(w, r, reqFile, reqStat)
 }
 
-func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
+func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
 	ctx := r.Context()
 	impl := implFromCtx(ctx)
 	logger := log.Ctx(ctx)
@@ -380,9 +383,9 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 				gFileCacheMu.Unlock()
 			}
 
-			setDigestHeader(hdrs, DigestMD5, row.md5sum)
-			setDigestHeader(hdrs, DigestSHA1, row.sha1sum)
-			setDigestHeader(hdrs, DigestSHA256, row.sha256sum)
+			setDigestHeader(hdrs, enums.DigestMD5, row.md5sum)
+			setDigestHeader(hdrs, enums.DigestSHA1, row.sha1sum)
+			setDigestHeader(hdrs, enums.DigestSHA256, row.sha256sum)
 
 			body = bytes.NewReader(row.bytes)
 		}
@@ -397,19 +400,19 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 
 		if raw, err := readXattr(f, xattrMd5sum); err == nil {
 			md5sum := hexToBase64(string(raw))
-			setDigestHeader(hdrs, DigestMD5, md5sum)
+			setDigestHeader(hdrs, enums.DigestMD5, md5sum)
 			haveMD5 = true
 		}
 
 		if raw, err := readXattr(f, xattrSha1sum); err == nil {
 			sha1sum := hexToBase64(string(raw))
-			setDigestHeader(hdrs, DigestSHA1, sha1sum)
+			setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
 			haveSHA1 = true
 		}
 
 		if raw, err := readXattr(f, xattrSha256sum); err == nil {
 			sha256sum := hexToBase64(string(raw))
-			setDigestHeader(hdrs, DigestSHA256, sha256sum)
+			setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
 			haveSHA256 = true
 		}
 
@@ -443,9 +446,9 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 				sha1sum := base64.StdEncoding.EncodeToString(sha1writer.Sum(nil))
 				sha256sum := base64.StdEncoding.EncodeToString(sha256writer.Sum(nil))
 
-				setDigestHeader(hdrs, DigestMD5, md5sum)
-				setDigestHeader(hdrs, DigestSHA1, sha1sum)
-				setDigestHeader(hdrs, DigestSHA256, sha256sum)
+				setDigestHeader(hdrs, enums.DigestMD5, md5sum)
+				setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
+				setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
 				tookSlowPath = true
 			}
 		}
@@ -462,7 +465,7 @@ func (h FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f h
 	http.ServeContent(w, r, fi.Name(), mtime, body)
 }
 
-func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
+func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
 	ctx := r.Context()
 	impl := implFromCtx(ctx)
 	logger := log.Ctx(ctx)
@@ -736,29 +739,28 @@ func (h FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f ht
 
 	hdrs.Set("content-type", page.contentType)
 	hdrs.Set("content-language", page.contentLang)
-	setDigestHeader(hdrs, DigestMD5, md5sum)
-	setDigestHeader(hdrs, DigestSHA1, sha1sum)
-	setDigestHeader(hdrs, DigestSHA256, sha256sum)
+	setDigestHeader(hdrs, enums.DigestMD5, md5sum)
+	setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
+	setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
 	setETagHeader(hdrs, "D", fi.ModTime())
 
 	logger.Debug().Msg("serve directory")
 	http.ServeContent(w, r, "", fi.ModTime(), bytes.NewReader(raw))
 }
 
-var _ http.Handler = FileSystemHandler{}
+var _ http.Handler = (*FileSystemHandler)(nil)
 
 // }}}
 
-// type BackendHandler {{{
+// type HTTPBackendHandler {{{
 
-type BackendHandler struct {
+type HTTPBackendHandler struct {
 	key    string
-	proto  string
-	addr   string
-	client *http.Client
+	cfg    *TargetConfig
+	client *balancedclient.BalancedClient
 }
 
-func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
 
@@ -771,7 +773,10 @@ func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	innerURL := new(url.URL)
 	*innerURL = *r.URL
 	innerURL.Scheme = "http"
-	innerURL.Host = "0.0.0.0"
+	innerURL.Host = h.client.Resolver().ServerHostname()
+	if h.client.IsTLS() {
+		innerURL.Scheme = "https"
+	}
 
 	innerReq, err := http.NewRequestWithContext(
 		ctx, r.Method, innerURL.String(), r.Body)
@@ -792,8 +797,7 @@ func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	innerResp, err := h.client.Do(innerReq)
 	if err != nil {
 		logger.Error().
-			Str("proto", h.proto).
-			Str("addr", h.addr).
+			Interface("target", h.cfg).
 			Err(err).
 			Msg("failed subrequest")
 		writeError(ctx, w, http.StatusInternalServerError)
@@ -818,8 +822,7 @@ func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, err = io.Copy(w, innerResp.Body)
 	if err != nil {
 		logger.Error().
-			Str("proto", h.proto).
-			Str("addr", h.addr).
+			Interface("target", h.cfg).
 			Err(err).
 			Msg("failed subrequest")
 	}
@@ -828,14 +831,13 @@ func (h BackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = innerResp.Body.Close()
 	if err != nil {
 		logger.Warn().
-			Str("proto", h.proto).
-			Str("addr", h.addr).
+			Interface("target", h.cfg).
 			Err(err).
 			Msg("failed to close body of subrequest")
 	}
 }
 
-var _ http.Handler = BackendHandler{}
+var _ http.Handler = (*HTTPBackendHandler)(nil)
 
 // }}}
 
@@ -879,17 +881,17 @@ func CompileRedirHandler(impl *Impl, arg string) (http.Handler, error) {
 
 func CompileTarget(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
 	switch cfg.Type {
-	case UndefinedTargetType:
+	case enums.UndefinedTargetType:
 		return nil, fmt.Errorf("missing required field \"type\"")
 
-	case FileSystemTargetType:
+	case enums.FileSystemTargetType:
 		return CompileFileSystemHandler(impl, key, cfg)
 
-	case BackendTargetType:
-		return CompileBackendHandler(impl, key, cfg)
+	case enums.HTTPBackendTargetType:
+		return CompileHTTPBackendHandler(impl, key, cfg)
 
 	default:
-		panic(fmt.Errorf("unknown target type %s(%d)", cfg.Type, cfg.Type))
+		panic(fmt.Errorf("unknown target type %#v", cfg.Type))
 	}
 }
 
@@ -905,35 +907,28 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 
 	var fs http.FileSystem = http.Dir(abs)
 
-	return FileSystemHandler{key, fs}, nil
+	return &FileSystemHandler{key, fs}, nil
 }
 
-func CompileBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
-	protocol := cfg.Protocol
-	address := cfg.Address
-	if protocol == "" {
-		protocol = "tcp"
-	}
-	if address == "" {
-		return nil, fmt.Errorf("missing required field \"address\"")
+func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
+	tlsConfig, err := CompileTLSClientConfig(cfg.TLS)
+	if err != nil {
+		return nil, err
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-				return gDialer.DialContext(ctx, protocol, address)
-			},
-			DisableKeepAlives:  true,
-			DisableCompression: true,
-			ForceAttemptHTTP2:  true,
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-		Timeout: 3600 * time.Second,
+	bc, err := balancedclient.New(cfg.Resolver, balancedclient.Options{
+		Context:      gRootContext,
+		Target:       cfg.Address,
+		Balancer:     cfg.Balancer,
+		PollInterval: cfg.PollInterval,
+		Etcd:         impl.etcd,
+		Dialer:       &gDialer,
+		TLSConfig:    tlsConfig,
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	return BackendHandler{key, protocol, address, client}, nil
+	return &HTTPBackendHandler{key, cfg, bc}, nil
 }
 
 func writeRedirect(ctx context.Context, w http.ResponseWriter, statusCode int, urlstr string) {
@@ -1044,7 +1039,7 @@ func hexToBase64(in string) string {
 	return base64.StdEncoding.EncodeToString(raw)
 }
 
-func setDigestHeader(h http.Header, algo DigestType, b64 string) {
+func setDigestHeader(h http.Header, algo enums.DigestType, b64 string) {
 	h.Add("digest", fmt.Sprintf("%s=%s", algo, b64))
 }
 

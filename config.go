@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"time"
+
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 type Config struct {
@@ -77,12 +79,15 @@ type MimeRuleConfig struct {
 }
 
 type TargetConfig struct {
-	Type TargetType `json:"type"`
+	Type enums.TargetType `json:"type"`
 
 	Path string `json:"path"`
 
-	Protocol string `json:"protocol"`
-	Address  string `json:"address"`
+	Address      string             `json:"address"`
+	Resolver     enums.ResolverType `json:"resolver"`
+	Balancer     enums.BalancerType `json:"balancer"`
+	PollInterval time.Duration      `json:"pollInterval"`
+	TLS          *TLSClientConfig   `json:"tls"`
 }
 
 type RuleConfig struct {
@@ -92,10 +97,10 @@ type RuleConfig struct {
 }
 
 type MutationConfig struct {
-	Type    MutationType `json:"type"`
-	Header  string       `json:"header"`
-	Search  string       `json:"search"`
-	Replace string       `json:"replace"`
+	Type    enums.MutationType `json:"type"`
+	Header  string             `json:"header"`
+	Search  string             `json:"search"`
+	Replace string             `json:"replace"`
 }
 
 func CompileTLSClientConfig(cfg *TLSClientConfig) (*tls.Config, error) {

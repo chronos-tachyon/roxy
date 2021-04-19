@@ -7,6 +7,7 @@ require (
 	github.com/pborman/getopt/v2 v2.1.0
 	github.com/rs/xid v1.2.1
 	github.com/rs/zerolog v1.21.0
+	go.etcd.io/etcd/api/v3 v3.5.0-alpha.0
 	go.etcd.io/etcd/client/v3 v3.5.0-alpha.0
 	go.uber.org/zap v1.16.0
 	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
