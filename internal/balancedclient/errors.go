@@ -4,7 +4,4 @@ import (
 	"errors"
 )
 
-var (
-	ErrClosed            = errors.New("closed")
-	ErrNoHealthyBackends = errors.New("no healthy backends")
-)
+var ErrNoHealthyBackends = errors.New("no healthy backends")

@@ -228,6 +228,7 @@ var _ http.Handler = RedirHandler{}
 
 type FileSystemHandler struct {
 	key string
+	cfg *TargetConfig
 	fs  http.FileSystem
 }
 
@@ -236,7 +237,7 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger := log.Ctx(ctx)
 
 	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Str("type", "fs").Str("key", h.key)
+		return c.Str("key", h.key).Interface("target", h.cfg)
 	})
 
 	if r.Method == http.MethodOptions {
@@ -783,7 +784,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raddr := raddrFromCtx(ctx)
 
 	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Str("type", "http").Str("key", h.key).Interface("target", h.cfg)
+		return c.Str("key", h.key).Interface("target", h.cfg)
 	})
 
 	var once sync.Once
@@ -956,7 +957,7 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 
 	var fs http.FileSystem = http.Dir(abs)
 
-	return &FileSystemHandler{key, fs}, nil
+	return &FileSystemHandler{key, cfg, fs}, nil
 }
 
 func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {

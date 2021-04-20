@@ -31,6 +31,8 @@ func NewResolver(restype enums.ResolverType, opts Options) (Resolver, error) {
 		return NewSRVResolver(opts)
 	case enums.EtcdResolver:
 		return NewEtcdResolver(opts)
+	case enums.ZookeeperResolver:
+		return NewZKResolver(opts)
 	default:
 		return nil, fmt.Errorf("%#v not supported", restype)
 	}

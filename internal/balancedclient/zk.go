@@ -8,10 +8,13 @@ import (
 	"io/fs"
 	"math/rand"
 	"net"
+	"path"
 	"strings"
 	"sync"
+	"time"
 
 	zkclient "github.com/go-zookeeper/zk"
+	multierror "github.com/hashicorp/go-multierror"
 
 	"github.com/chronos-tachyon/roxy/internal/enums"
 )
@@ -120,7 +123,7 @@ type zkResolver struct {
 	down     map[string]struct{}
 	resolved map[string]zkAddrData
 	perm     []string
-	err      error
+	err      multierror.Error
 	ready    bool // cv1
 	closed   bool // cv1
 }
@@ -144,7 +147,7 @@ func (res *zkResolver) ResolveAll() ([]net.Addr, error) {
 		}
 	}
 	tcpAddrList(all).Sort()
-	return all, res.err
+	return all, res.err.ErrorOrNil()
 }
 
 func (res *zkResolver) Resolve() (net.Addr, error) {
@@ -155,8 +158,10 @@ func (res *zkResolver) Resolve() (net.Addr, error) {
 		res.cv1.Wait()
 	}
 
-	if res.err != nil && len(res.resolved) == 0 {
-		return nil, res.err
+	if len(res.resolved) == 0 {
+		if err := res.err.ErrorOrNil(); err != nil {
+			return nil, err
+		}
 	}
 
 	switch res.balancer {
@@ -170,17 +175,15 @@ func (res *zkResolver) Resolve() (net.Addr, error) {
 				}
 			}
 		}
-
-		if len(candidates) == 0 && res.err != nil {
-			return nil, res.err
+		if len(candidates) != 0 {
+			res.err.Errors = nil
+			index := res.rng.Intn(len(candidates))
+			return candidates[index], nil
 		}
-
-		if len(candidates) == 0 {
-			return nil, ErrNoHealthyBackends
+		if err := res.err.ErrorOrNil(); err != nil {
+			return nil, err
 		}
-
-		index := res.rng.Intn(len(candidates))
-		return candidates[index], nil
+		return nil, ErrNoHealthyBackends
 
 	case enums.RoundRobinBalancer:
 		for tries := uint(len(res.perm)); tries > 0; tries-- {
@@ -189,11 +192,12 @@ func (res *zkResolver) Resolve() (net.Addr, error) {
 			addr := res.resolved[res.perm[k]].Addr
 			addrKey := addr.String()
 			if _, found := res.down[addrKey]; !found {
+				res.err.Errors = nil
 				return addr, nil
 			}
 		}
-		if res.err != nil {
-			return nil, res.err
+		if err := res.err.ErrorOrNil(); err != nil {
+			return nil, err
 		}
 		return nil, ErrNoHealthyBackends
 
@@ -234,7 +238,7 @@ func (res *zkResolver) Watch(fn WatchFunc) WatchID {
 	defer res.mu.Unlock()
 
 	if res.closed {
-		panic(ErrClosed)
+		panic(fs.ErrClosed)
 	}
 
 	if res.ready {
@@ -277,7 +281,7 @@ func (res *zkResolver) Close() error {
 	defer res.mu.Unlock()
 
 	if res.closed {
-		return ErrClosed
+		return fs.ErrClosed
 	}
 
 	close(res.doneCh)
@@ -292,16 +296,23 @@ func (res *zkResolver) Close() error {
 func (res *zkResolver) watchThread() {
 	defer res.doClose()
 
+RetryFirst:
 	children, _, zch, err := res.zk.ChildrenW(res.path)
+	err = zkMapError(err)
 	if err != nil {
-		// FIXME: sleep and retry ChildrenW if appropriate
-		res.doPermanentError(err)
+		if res.sendError(err) {
+			if res.sleep() {
+				goto RetryFirst
+			}
+			res.makeLastErrorPermanent()
+		}
 		<-res.doneCh
 		return
 	}
 
 	res.mu.Lock()
-	for _, childPath := range children {
+	for _, child := range children {
+		childPath := path.Join(res.path, child)
 		res.alive[childPath] = struct{}{}
 		res.wg.Add(1)
 		go res.watchChildThread(childPath)
@@ -314,7 +325,7 @@ func (res *zkResolver) watchThread() {
 			return
 
 		case <-res.ctx.Done():
-			res.doPermanentError(res.ctx.Err())
+			res.sendError(res.ctx.Err())
 			<-res.doneCh
 			return
 
@@ -342,6 +353,9 @@ func (res *zkResolver) watchThread() {
 				if oldData := res.resolved[cev.Path]; oldData.Addr == nil {
 					res.resolved[cev.Path] = cev.Data
 				}
+				res.err.Errors = append(res.err.Errors, cev.Data.Err)
+				res.ready = true
+				res.cv1.Broadcast()
 				res.mu.Unlock()
 
 			default:
@@ -374,29 +388,37 @@ func (res *zkResolver) watchThread() {
 
 			case zkclient.EventNodeDeleted:
 				err = fmt.Errorf("node %q was deleted: %w", res.path, fs.ErrNotExist)
-				res.doPermanentError(err)
+				res.sendError(err)
 				<-res.doneCh
 				return
 
 			default:
 				if zev.Err != nil {
-					// FIXME: sleep and retry ChildrenW if appropriate
-					res.doPermanentError(zev.Err)
-					<-res.doneCh
-					return
+					err = zkMapError(zev.Err)
+					if !res.sendError(err) {
+						<-res.doneCh
+						return
+					}
 				}
 			}
 
+		RetrySubsequent:
 			children, _, zch, err = res.zk.ChildrenW(res.path)
+			err = zkMapError(err)
 			if err != nil {
-				// FIXME: sleep and retry ChildrenW if appropriate
-				res.doPermanentError(err)
+				if res.sendError(err) {
+					if res.sleep() {
+						goto RetrySubsequent
+					}
+					res.makeLastErrorPermanent()
+				}
 				<-res.doneCh
 				return
 			}
 
 			res.mu.Lock()
-			for _, childPath := range children {
+			for _, child := range children {
+				childPath := path.Join(res.path, child)
 				if _, exists := res.alive[childPath]; !exists {
 					res.alive[childPath] = struct{}{}
 					res.wg.Add(1)
@@ -421,14 +443,17 @@ func (res *zkResolver) watchChildThread(myPath string) {
 
 	var myData zkAddrData
 
+RetryFirst:
 	raw, _, zch, err := res.zk.GetW(myPath)
-	if errors.Is(err, zkclient.ErrNoNode) {
-		err = fs.ErrNotExist
-	}
+	err = zkMapError(err)
 	if err != nil {
-		// FIXME: sleep and retry GetW if appropriate
 		myData = zkAddrData{Err: err}
 		res.childEventCh <- zkEvent{Path: myPath, Data: myData}
+		if zkErrorIsTemporary(err) {
+			if res.sleep() {
+				goto RetryFirst
+			}
+		}
 		return
 	}
 
@@ -452,21 +477,26 @@ func (res *zkResolver) watchChildThread(myPath string) {
 
 			default:
 				if zev.Err != nil {
-					// FIXME: sleep and retry GetW if appropriate
-					myData = zkAddrData{Err: zev.Err}
+					err = zkMapError(zev.Err)
+					myData = zkAddrData{Err: err}
 					res.childEventCh <- zkEvent{Path: myPath, Data: myData}
-					return
+					if !zkErrorIsTemporary(err) {
+						return
+					}
 				}
 			}
 
+		RetrySubsequent:
 			raw, _, zch, err = res.zk.GetW(myPath)
-			if errors.Is(err, zkclient.ErrNoNode) {
-				err = fs.ErrNotExist
-			}
+			err = zkMapError(err)
 			if err != nil {
-				// FIXME: sleep and retry GetW if appropriate
 				myData = zkAddrData{Err: err}
 				res.childEventCh <- zkEvent{Path: myPath, Data: myData}
+				if zkErrorIsTemporary(err) {
+					if res.sleep() {
+						goto RetrySubsequent
+					}
+				}
 				return
 			}
 
@@ -485,7 +515,7 @@ func (res *zkResolver) doClose() {
 	res.down = nil
 	res.resolved = nil
 	res.perm = nil
-	res.err = ErrClosed
+	res.err.Errors = []error{fs.ErrClosed}
 	res.ready = true
 	res.closed = true
 	res.cv1.Broadcast()
@@ -494,25 +524,10 @@ func (res *zkResolver) doClose() {
 	res.wg.Wait()
 }
 
-func (res *zkResolver) doPermanentError(err error) {
-	res.once.Do(res.doShutdown)
-
+func (res *zkResolver) sendError(err error) bool {
 	if err == nil {
 		panic(fmt.Errorf("err is nil"))
 	}
-
-	res.mu.Lock()
-	defer func() {
-		res.ready = true
-		res.cv1.Broadcast()
-		res.mu.Unlock()
-	}()
-
-	if res.closed {
-		return
-	}
-
-	res.err = err
 
 	events := []*Event{
 		{
@@ -521,9 +536,34 @@ func (res *zkResolver) doPermanentError(err error) {
 		},
 	}
 
-	for _, fn := range res.watches {
-		fn(events)
+	if zkErrorIsTemporary(err) {
+		res.mu.Lock()
+		if !res.closed {
+			res.err.Errors = append(res.err.Errors, err)
+		}
+		res.mu.Unlock()
+		res.doUpdate(events)
+		return true
 	}
+
+	res.once.Do(res.doShutdown)
+	res.mu.Lock()
+	if !res.closed {
+		res.err.Errors = append(res.err.Errors, err)
+		res.ready = true
+		res.cv1.Broadcast()
+	}
+	res.mu.Unlock()
+	res.doUpdate(events)
+	return false
+}
+
+func (res *zkResolver) makeLastErrorPermanent() {
+	res.once.Do(res.doShutdown)
+	res.mu.Lock()
+	res.ready = true
+	res.cv1.Broadcast()
+	res.mu.Unlock()
 }
 
 func (res *zkResolver) doShutdown() {
@@ -660,9 +700,49 @@ func (res *zkResolver) parseServerSet(raw []byte, out *zkAddrData) {
 	}
 }
 
+func (res *zkResolver) sleep() bool {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
+	select {
+	case <-res.doneCh:
+		return false
+	case <-res.childDoneCh:
+		return false
+	case <-res.ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 var _ Resolver = (*zkResolver)(nil)
 
 // }}}
+
+func zkMapError(err error) error {
+	switch err {
+	case zkclient.ErrConnectionClosed:
+		return fs.ErrClosed
+	case zkclient.ErrNodeExists:
+		return fs.ErrExist
+	case zkclient.ErrNoNode:
+		return fs.ErrNotExist
+	default:
+		return err
+	}
+}
+
+func zkErrorIsTemporary(err error) bool {
+	switch err {
+	case zkclient.ErrSessionExpired:
+		return true
+	case zkclient.ErrSessionMoved:
+		return true
+	default:
+		return false
+	}
+}
 
 type zkEvent struct {
 	Path string

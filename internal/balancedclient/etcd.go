@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 
+	multierror "github.com/hashicorp/go-multierror"
 	mvccpb "go.etcd.io/etcd/api/v3/mvccpb"
 	etcdclient "go.etcd.io/etcd/client/v3"
 
@@ -87,7 +89,7 @@ type etcdResolver struct {
 	down     map[string]struct{}
 	resolved map[string]etcdAddrData
 	perm     []string
-	err      error
+	err      multierror.Error
 	ready    bool
 	closed   bool
 }
@@ -109,7 +111,7 @@ func (res *etcdResolver) ResolveAll() ([]net.Addr, error) {
 		all = append(all, data.Addr)
 	}
 	tcpAddrList(all).Sort()
-	return all, res.err
+	return all, res.err.ErrorOrNil()
 }
 
 func (res *etcdResolver) Resolve() (net.Addr, error) {
@@ -120,8 +122,10 @@ func (res *etcdResolver) Resolve() (net.Addr, error) {
 		res.cv.Wait()
 	}
 
-	if res.err != nil && len(res.resolved) == 0 {
-		return nil, res.err
+	if len(res.resolved) == 0 {
+		if err := res.err.ErrorOrNil(); err != nil {
+			return nil, err
+		}
 	}
 
 	switch res.balancer {
@@ -133,17 +137,15 @@ func (res *etcdResolver) Resolve() (net.Addr, error) {
 				candidates = append(candidates, data.Addr)
 			}
 		}
-
-		if len(candidates) == 0 && res.err != nil {
-			return nil, res.err
+		if len(candidates) != 0 {
+			res.err.Errors = nil
+			index := res.rng.Intn(len(candidates))
+			return candidates[index], nil
 		}
-
-		if len(candidates) == 0 {
-			return nil, ErrNoHealthyBackends
+		if err := res.err.ErrorOrNil(); err != nil {
+			return nil, err
 		}
-
-		index := res.rng.Intn(len(candidates))
-		return candidates[index], nil
+		return nil, ErrNoHealthyBackends
 
 	case enums.RoundRobinBalancer:
 		for tries := uint(len(res.perm)); tries > 0; tries-- {
@@ -152,11 +154,12 @@ func (res *etcdResolver) Resolve() (net.Addr, error) {
 			addr := res.resolved[res.perm[k]].Addr
 			addrKey := addr.String()
 			if _, found := res.down[addrKey]; !found {
+				res.err.Errors = nil
 				return addr, nil
 			}
 		}
-		if res.err != nil {
-			return nil, res.err
+		if err := res.err.ErrorOrNil(); err != nil {
+			return nil, err
 		}
 		return nil, ErrNoHealthyBackends
 
@@ -197,7 +200,7 @@ func (res *etcdResolver) Watch(fn WatchFunc) WatchID {
 	defer res.mu.Unlock()
 
 	if res.closed {
-		panic(ErrClosed)
+		panic(fs.ErrClosed)
 	}
 
 	if res.ready {
@@ -236,7 +239,7 @@ func (res *etcdResolver) Close() error {
 	defer res.mu.Unlock()
 
 	if res.closed {
-		return ErrClosed
+		return fs.ErrClosed
 	}
 
 	res.cancelFn()
@@ -256,7 +259,7 @@ func (res *etcdResolver) watchThread() {
 		res.down = nil
 		res.resolved = nil
 		res.perm = nil
-		res.err = ErrClosed
+		res.err.Errors = []error{fs.ErrClosed}
 		res.ready = true
 		res.closed = true
 		res.cv.Broadcast()
@@ -382,7 +385,7 @@ func (res *etcdResolver) doUpdate(events []*Event) {
 	for _, ev := range events {
 		switch ev.Type {
 		case enums.ErrorEvent:
-			res.err = ev.Err
+			res.err.Errors = append(res.err.Errors, ev.Err)
 		case enums.UpdateEvent:
 			res.resolved[ev.Key] = etcdAddrData{ev.Addr, ev.Metadata}
 			didChange = true
@@ -390,6 +393,7 @@ func (res *etcdResolver) doUpdate(events []*Event) {
 			delete(res.resolved, ev.Key)
 			didChange = true
 		case enums.CorruptEvent:
+			res.err.Errors = append(res.err.Errors, ev.Err)
 			delete(res.resolved, ev.Key)
 			didChange = true
 		}

@@ -3,6 +3,7 @@ package balancedclient
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"net"
 	"sort"
@@ -170,7 +171,7 @@ func (res *srvResolver) Watch(fn WatchFunc) WatchID {
 	defer res.mu.Unlock()
 
 	if res.closed {
-		panic(ErrClosed)
+		panic(fs.ErrClosed)
 	}
 
 	if res.ready {
@@ -211,7 +212,7 @@ func (res *srvResolver) Close() error {
 	defer res.mu.Unlock()
 
 	if res.closed {
-		return ErrClosed
+		return fs.ErrClosed
 	}
 
 	close(res.doneCh)
@@ -230,7 +231,7 @@ func (res *srvResolver) resolveThread() {
 		res.resolved = nil
 		res.known = nil
 		res.down = nil
-		res.err = ErrClosed
+		res.err = fs.ErrClosed
 		res.ready = true
 		res.closed = true
 		res.cv.Broadcast()
