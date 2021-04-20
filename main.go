@@ -142,9 +142,8 @@ func main() {
 	insecureHandler = acmeManager.HTTPHandler(nil)
 
 	insecureHandler = LoggingHandler{
-		RootLogger: &log.Logger,
-		Service:    "http",
-		Next:       insecureHandler,
+		Service: "http",
+		Next:    insecureHandler,
 	}
 
 	insecureHandler = BasicSecurityHandler{
@@ -183,9 +182,8 @@ func main() {
 	secureHandler = ref.Handler()
 
 	secureHandler = LoggingHandler{
-		RootLogger: &log.Logger,
-		Service:    "https",
-		Next:       secureHandler,
+		Service: "https",
+		Next:    secureHandler,
 	}
 
 	secureHandler = BasicSecurityHandler{

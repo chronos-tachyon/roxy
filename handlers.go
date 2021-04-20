@@ -69,9 +69,8 @@ var _ http.Handler = BasicSecurityHandler{}
 // type LoggingHandler {{{
 
 type LoggingHandler struct {
-	RootLogger *zerolog.Logger
-	Service    string
-	Next       http.Handler
+	Service string
+	Next    http.Handler
 }
 
 func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
