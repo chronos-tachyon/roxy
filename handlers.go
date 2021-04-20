@@ -831,7 +831,13 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	innerReq.Header.Set("x-forwarded-proto", "https")
 	innerReq.Header.Set("x-forwarded-ip", raddr.String())
 	innerReq.Header.Add("x-forwarded-for", raddr.String())
-	innerReq.Header.Add("forwarded", fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s", laddr, raddr, r.Host, "https"))
+	innerReq.Header.Add(
+		"forwarded",
+		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
+			quoteForwardedAddr(laddr),
+			quoteForwardedAddr(raddr),
+			r.Host,
+			"https"))
 
 	if values := innerReq.Header.Values("x-forwarded-for"); len(values) > 1 {
 		innerReq.Header.Set("x-forwarded-for", strings.Join(values, ", "))
@@ -1138,6 +1144,25 @@ func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
 	}
 
 	h.Set("etag", fmt.Sprintf("W/%q", lastMod.UTC().Format("2006.01.02.15.04.05")))
+}
+
+func quoteForwardedAddr(addr net.Addr) string {
+	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+		if isIPv6(tcpAddr.IP) {
+			return strconv.Quote(tcpAddr.String())
+		}
+	}
+	return addr.String()
+}
+
+func isIPv6(ip net.IP) bool {
+	if len(ip) < 16 {
+		return false
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return false
+	}
+	return true
 }
 
 type cacheKey struct {
