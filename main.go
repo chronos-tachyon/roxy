@@ -168,7 +168,10 @@ func main() {
 				Str("laddr", c.LocalAddr().String()).
 				Str("raddr", c.RemoteAddr().String()).
 				Logger()
-			return logger.WithContext(ctx)
+			ctx = logger.WithContext(ctx)
+			ctx = context.WithValue(ctx, laddrKey{}, c.LocalAddr())
+			ctx = context.WithValue(ctx, raddrKey{}, c.RemoteAddr())
+			return ctx
 		},
 	}
 
@@ -205,7 +208,10 @@ func main() {
 				Str("laddr", c.LocalAddr().String()).
 				Str("raddr", c.RemoteAddr().String()).
 				Logger()
-			return logger.WithContext(ctx)
+			ctx = logger.WithContext(ctx)
+			ctx = context.WithValue(ctx, laddrKey{}, c.LocalAddr())
+			ctx = context.WithValue(ctx, raddrKey{}, c.RemoteAddr())
+			return ctx
 		},
 	}
 

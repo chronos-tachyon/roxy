@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	enums "github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 func NewDNSResolver(opts Options) (Resolver, error) {
@@ -267,16 +267,7 @@ func (res *dnsResolver) resolverThread() {
 	}
 
 	ticker := time.NewTicker(res.interval)
-	tickerStopped := false
-	stopTicker := func() {
-		if !tickerStopped {
-			ticker.Stop()
-			for range ticker.C {
-			}
-			tickerStopped = true
-		}
-	}
-	defer stopTicker()
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -284,7 +275,7 @@ func (res *dnsResolver) resolverThread() {
 			return
 
 		case <-res.ctx.Done():
-			stopTicker()
+			ticker.Stop()
 			<-res.doneCh
 			return
 

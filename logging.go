@@ -10,6 +10,7 @@ import (
 	"time"
 
 	zkclient "github.com/go-zookeeper/zk"
+	multierror "github.com/hashicorp/go-multierror"
 	zerolog "github.com/rs/zerolog"
 	log "github.com/rs/zerolog/log"
 	zap "go.uber.org/zap"
@@ -72,12 +73,14 @@ func (w *RotatingLogWriter) Close() error {
 		w.cv.Wait()
 	}
 
-	err0 := w.file.Sync()
-	err1 := w.file.Close()
-	if err0 != nil {
-		return err0
+	var err error
+	if e := w.file.Sync(); e != nil {
+		err = multierror.Append(err, e)
 	}
-	return err1
+	if e := w.file.Close(); e != nil {
+		err = multierror.Append(err, e)
+	}
+	return err
 }
 
 func (w *RotatingLogWriter) Rotate() error {
@@ -99,12 +102,13 @@ func (w *RotatingLogWriter) Rotate() error {
 	oldFile := w.file
 	w.file = newFile
 
-	err0 := oldFile.Sync()
-	err1 := oldFile.Close()
-	if err0 != nil {
-		return err0
+	if e := oldFile.Sync(); e != nil {
+		err = multierror.Append(err, e)
 	}
-	return err1
+	if e := oldFile.Close(); e != nil {
+		err = multierror.Append(err, e)
+	}
+	return err
 }
 
 var _ io.WriteCloser = (*RotatingLogWriter)(nil)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"sync"
 	"time"
@@ -33,6 +34,9 @@ type FileSystemStorageEngine struct {
 
 func (engine *FileSystemStorageEngine) Get(ctx context.Context, name string) ([]byte, error) {
 	data, err := engine.dc.Get(ctx, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, autocert.ErrCacheMiss
+	}
 	if err != nil {
 		return nil, StorageEngineOperationError{
 			Engine: "fs",
@@ -92,9 +96,6 @@ func (engine *EtcdStorageEngine) Get(ctx context.Context, name string) ([]byte, 
 
 	key := engine.prefix + name
 	resp, err := engine.etcd.KV.Get(ctx, key)
-	if err == nil && len(resp.Kvs) == 0 {
-		err = fmt.Errorf("internal error: len(resp.Kvs) == 0")
-	}
 	if err != nil {
 		return nil, StorageEngineOperationError{
 			Engine: "etcd",
@@ -102,6 +103,9 @@ func (engine *EtcdStorageEngine) Get(ctx context.Context, name string) ([]byte, 
 			Key:    name,
 			Err:    err,
 		}
+	}
+	if len(resp.Kvs) == 0 {
+		return nil, autocert.ErrCacheMiss
 	}
 	return resp.Kvs[0].Value, nil
 }

@@ -3,7 +3,7 @@ package balancedclient
 import (
 	"net"
 
-	enums "github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 type Resolver interface {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	htmltemplate "html/template"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	zkclient "github.com/go-zookeeper/zk"
+	multierror "github.com/hashicorp/go-multierror"
 	log "github.com/rs/zerolog/log"
 	etcdclient "go.etcd.io/etcd/client/v3"
 )
@@ -480,25 +482,31 @@ func (impl *Impl) loadRules() error {
 }
 
 func (impl *Impl) Close() error {
-	err0 := impl.storage.Close()
+	var err error
+
+	for _, handler := range impl.targets {
+		if closer, ok := handler.(io.Closer); ok {
+			if e := closer.Close(); e != nil {
+				e = multierror.Append(err, e)
+			}
+		}
+	}
+
+	if e := impl.storage.Close(); e != nil {
+		e = multierror.Append(err, e)
+	}
 
 	if impl.zk != nil {
 		impl.zk.Close()
 	}
 
-	var err1 error
 	if impl.etcd != nil {
-		err1 = impl.etcd.Close()
+		if e := impl.etcd.Close(); e != nil {
+			e = multierror.Append(err, e)
+		}
 	}
 
-	switch {
-	case err0 != nil:
-		return err0
-	case err1 != nil:
-		return err1
-	default:
-		return nil
-	}
+	return err
 }
 
 func (impl *Impl) StorageGet(ctx context.Context, key string) ([]byte, error) {

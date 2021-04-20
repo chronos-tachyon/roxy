@@ -13,7 +13,7 @@ import (
 	mvccpb "go.etcd.io/etcd/api/v3/mvccpb"
 	etcdclient "go.etcd.io/etcd/client/v3"
 
-	enums "github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 func NewEtcdResolver(opts Options) (Resolver, error) {

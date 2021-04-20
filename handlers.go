@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"os/user"
@@ -30,6 +31,7 @@ import (
 
 	xid "github.com/rs/xid"
 	zerolog "github.com/rs/zerolog"
+	hlog "github.com/rs/zerolog/hlog"
 	log "github.com/rs/zerolog/log"
 	unix "golang.org/x/sys/unix"
 
@@ -73,9 +75,11 @@ type LoggingHandler struct {
 }
 
 func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	id := xid.New()
 
-	c := h.RootLogger.With()
+	c := log.Ctx(ctx).With()
 	c = c.Str("xid", id.String())
 	c = c.Str("service", h.Service)
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -92,12 +96,12 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	logger := c.Logger()
 
-	ctx := r.Context()
 	ctx = logger.WithContext(ctx)
-	ctx = context.WithValue(ctx, reqIdKey{}, id)
+	ctx = hlog.CtxWithID(ctx, id)
 	r = r.WithContext(ctx)
 
-	r.Header.Set("request-id", id.String())
+	r.Header.Set("xid", id.String())
+	w.Header().Set("xid", id.String())
 
 	ww := WrapWriter(w)
 	ww.SetIsHEAD(r.Method == http.MethodHead)
@@ -763,12 +767,28 @@ type HTTPBackendHandler struct {
 func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
+	laddr := laddrFromCtx(ctx)
+	raddr := raddrFromCtx(ctx)
 
-	r.Header.Del("forwarded")
-	r.Header.Del("x-forwarded-for")
-	r.Header.Del("x-forwarded-ip")
-	r.Header.Del("x-forwarded-host")
-	r.Header.Del("x-forwarded-proto")
+	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+		return c.Interface("target", h.cfg)
+	})
+
+	var once sync.Once
+	var addr net.Addr
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			once.Do(func() {
+				addr = info.Conn.RemoteAddr()
+			})
+		},
+	})
+
+	resType := h.cfg.Resolver
+	if resType == enums.DefaultResolver {
+		resType = enums.DNSResolver
+	}
+	r.Header.Set("roxy-target", fmt.Sprintf("%s; %s; %s", h.key, resType, h.cfg.Address))
 
 	innerURL := new(url.URL)
 	*innerURL = *r.URL
@@ -790,14 +810,29 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		copy(newValues, oldValues)
 		innerReq.Header[key] = newValues
 	}
-	innerReq.Header.Set("host", r.Host)
-	innerReq.Host = r.Host
+
 	innerReq.Close = true
+	innerReq.Host = r.Host
+	innerReq.Header.Set("host", r.Host)
+	innerReq.Header.Set("x-forwarded-host", r.Host)
+	innerReq.Header.Set("x-forwarded-proto", "https")
+	innerReq.Header.Set("x-forwarded-ip", raddr.String())
+	innerReq.Header.Add("x-forwarded-for", raddr.String())
+	innerReq.Header.Add("forwarded", fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s", laddr, raddr, r.Host, "https"))
+
+	if values := innerReq.Header.Values("x-forwarded-for"); len(values) > 1 {
+		innerReq.Header.Set("x-forwarded-for", strings.Join(values, ", "))
+	}
 
 	innerResp, err := h.client.Do(innerReq)
+	once.Do(func() {})
+	if addr != nil {
+		logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+			return c.Str("backend", addr.String())
+		})
+	}
 	if err != nil {
 		logger.Error().
-			Interface("target", h.cfg).
 			Err(err).
 			Msg("failed subrequest")
 		writeError(ctx, w, http.StatusInternalServerError)
@@ -822,7 +857,6 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, err = io.Copy(w, innerResp.Body)
 	if err != nil {
 		logger.Error().
-			Interface("target", h.cfg).
 			Err(err).
 			Msg("failed subrequest")
 	}
@@ -831,10 +865,13 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = innerResp.Body.Close()
 	if err != nil {
 		logger.Warn().
-			Interface("target", h.cfg).
 			Err(err).
 			Msg("failed to close body of subrequest")
 	}
+}
+
+func (h *HTTPBackendHandler) Close() error {
+	return h.client.Close()
 }
 
 var _ http.Handler = (*HTTPBackendHandler)(nil)

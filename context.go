@@ -2,18 +2,23 @@ package main
 
 import (
 	"context"
-
-	xid "github.com/rs/xid"
+	"net"
 )
-
-type reqIdKey struct{}
-
-func idFromCtx(ctx context.Context) xid.ID {
-	return ctx.Value(reqIdKey{}).(xid.ID)
-}
 
 type implKey struct{}
 
 func implFromCtx(ctx context.Context) *Impl {
 	return ctx.Value(implKey{}).(*Impl)
+}
+
+type laddrKey struct{}
+
+func laddrFromCtx(ctx context.Context) net.Addr {
+	return ctx.Value(laddrKey{}).(net.Addr)
+}
+
+type raddrKey struct{}
+
+func raddrFromCtx(ctx context.Context) net.Addr {
+	return ctx.Value(raddrKey{}).(net.Addr)
 }

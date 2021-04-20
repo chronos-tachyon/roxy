@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	github.com/go-zookeeper/zk v1.0.2
+	github.com/hashicorp/go-multierror v1.1.1
 	github.com/pborman/getopt/v2 v2.1.0
 	github.com/rs/xid v1.2.1
 	github.com/rs/zerolog v1.21.0

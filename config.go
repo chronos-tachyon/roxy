@@ -79,15 +79,13 @@ type MimeRuleConfig struct {
 }
 
 type TargetConfig struct {
-	Type enums.TargetType `json:"type"`
-
-	Path string `json:"path"`
-
-	Address      string             `json:"address"`
-	Resolver     enums.ResolverType `json:"resolver"`
-	Balancer     enums.BalancerType `json:"balancer"`
-	PollInterval time.Duration      `json:"pollInterval"`
-	TLS          *TLSClientConfig   `json:"tls"`
+	Type         enums.TargetType   `json:"type"`
+	Path         string             `json:"path,omitempty"`
+	Address      string             `json:"address,omitempty"`
+	Resolver     enums.ResolverType `json:"resolver,omitempty"`
+	Balancer     enums.BalancerType `json:"balancer,omitempty"`
+	PollInterval time.Duration      `json:"pollInterval,omitempty"`
+	TLS          *TLSClientConfig   `json:"tls,omitempty"`
 }
 
 type RuleConfig struct {

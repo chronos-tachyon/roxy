@@ -5,7 +5,7 @@ import (
 	"net"
 	"path/filepath"
 
-	enums "github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 func NewUnixResolver(opts Options) (Resolver, error) {

@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
-	enums "github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/internal/enums"
 )
 
 func New(restype enums.ResolverType, opts Options) (*BalancedClient, error) {
@@ -70,8 +71,14 @@ func NewWithResolver(res Resolver, dialer *net.Dialer, tlsconfig *tls.Config) (*
 		res: res,
 		client: &http.Client{
 			Transport: &http.Transport{
-				DialContext:    dialFunc,
-				DialTLSContext: dialFunc,
+				DialContext:           dialFunc,
+				DialTLSContext:        dialFunc,
+				ForceAttemptHTTP2:     true,
+				DisableCompression:    true,
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
 			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
