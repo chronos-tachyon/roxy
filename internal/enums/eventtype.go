@@ -13,6 +13,7 @@ const (
 	UpdateEvent
 	DeleteEvent
 	CorruptEvent
+	StatusChangeEvent
 )
 
 var eventTypeData = []enumData{
@@ -20,6 +21,7 @@ var eventTypeData = []enumData{
 	{"UpdateEvent", "update"},
 	{"DeleteEvent", "delete"},
 	{"CorruptEvent", "corruptionDetected"},
+	{"StatusChangeEvent", "statusChange"},
 }
 
 var eventTypeMap = map[string]EventType{
@@ -28,6 +30,7 @@ var eventTypeMap = map[string]EventType{
 	"update":             UpdateEvent,
 	"delete":             DeleteEvent,
 	"corruptionDetected": CorruptEvent,
+	"statusChange":       StatusChangeEvent,
 }
 
 func (t EventType) String() string {

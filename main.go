@@ -142,8 +142,7 @@ func main() {
 	insecureHandler = acmeManager.HTTPHandler(nil)
 
 	insecureHandler = LoggingHandler{
-		Service: "http",
-		Next:    insecureHandler,
+		Next: insecureHandler,
 	}
 
 	insecureHandler = BasicSecurityHandler{
@@ -162,11 +161,7 @@ func main() {
 			return gRootContext
 		},
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-			logger := log.Logger.With().
-				Str("proto", "http").
-				Str("laddr", c.LocalAddr().String()).
-				Str("raddr", c.RemoteAddr().String()).
-				Logger()
+			logger := log.Logger.With().Str("proto", "http").Logger()
 			ctx = logger.WithContext(ctx)
 			ctx = context.WithValue(ctx, laddrKey{}, c.LocalAddr())
 			ctx = context.WithValue(ctx, raddrKey{}, c.RemoteAddr())
@@ -182,8 +177,7 @@ func main() {
 	secureHandler = ref.Handler()
 
 	secureHandler = LoggingHandler{
-		Service: "https",
-		Next:    secureHandler,
+		Next: secureHandler,
 	}
 
 	secureHandler = BasicSecurityHandler{
@@ -201,11 +195,7 @@ func main() {
 			return gRootContext
 		},
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-			logger := log.Logger.With().
-				Str("proto", "https").
-				Str("laddr", c.LocalAddr().String()).
-				Str("raddr", c.RemoteAddr().String()).
-				Logger()
+			logger := log.Logger.With().Str("proto", "https").Logger()
 			ctx = logger.WithContext(ctx)
 			ctx = context.WithValue(ctx, laddrKey{}, c.LocalAddr())
 			ctx = context.WithValue(ctx, raddrKey{}, c.RemoteAddr())

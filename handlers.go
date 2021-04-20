@@ -69,8 +69,7 @@ var _ http.Handler = BasicSecurityHandler{}
 // type LoggingHandler {{{
 
 type LoggingHandler struct {
-	Service string
-	Next    http.Handler
+	Next http.Handler
 }
 
 func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +79,6 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	c := log.Ctx(ctx).With()
 	c = c.Str("xid", id.String())
-	c = c.Str("service", h.Service)
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		c = c.Str("ip", host)
 	}
@@ -165,6 +163,12 @@ type ErrorHandler struct {
 
 func (h ErrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	logger := log.Ctx(ctx)
+
+	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+		return c.Str("type", "error").Int("errorStatus", h.status)
+	})
+
 	writeError(ctx, w, h.status)
 }
 
@@ -183,6 +187,10 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
 
+	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+		return c.Str("type", "redir").Int("redirStatus", h.status)
+	})
+
 	r.URL.Scheme = "https"
 	r.URL.Host = r.Host
 
@@ -190,8 +198,8 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err := h.tmpl.Execute(&buf, r.URL)
 	if err != nil {
 		logger.Warn().
-			Str("type", "redir").
-			Interface("url", r.URL).
+			Interface("arg", r.URL).
+			Err(err).
 			Msg("failed to execute template")
 		writeError(ctx, w, http.StatusInternalServerError)
 		return
@@ -201,8 +209,8 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	urlObj, err := url.Parse(urlStr)
 	if err != nil {
 		logger.Warn().
-			Str("type", "redir").
-			Str("url", urlStr).
+			Str("arg", urlStr).
+			Err(err).
 			Msg("invalid url")
 		writeError(ctx, w, http.StatusInternalServerError)
 		return
@@ -225,6 +233,11 @@ type FileSystemHandler struct {
 
 func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	logger := log.Ctx(ctx)
+
+	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+		return c.Str("type", "fs").Str("key", h.key)
+	})
 
 	if r.Method == http.MethodOptions {
 		hdrs := w.Header()
@@ -770,7 +783,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raddr := raddrFromCtx(ctx)
 
 	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Interface("target", h.cfg)
+		return c.Str("type", "http").Str("key", h.key).Interface("target", h.cfg)
 	})
 
 	var once sync.Once
@@ -958,6 +971,7 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 		Balancer:     cfg.Balancer,
 		PollInterval: cfg.PollInterval,
 		Etcd:         impl.etcd,
+		ZK:           impl.zk,
 		Dialer:       &gDialer,
 		TLSConfig:    tlsConfig,
 	})
