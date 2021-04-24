@@ -1,0 +1,16 @@
+{
+  "storage": {
+    "engine": "fs",
+    "path": "/var/lib/roxy/acme"
+  },
+  "hosts": [
+    "*.example.com"
+  ],
+  "mimeRules": [],
+  "targets": {},
+  "rules": [
+    {
+      "target": "ERROR:404"
+    }
+  ]
+}

@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/chronos-tachyon/roxy/internal/balancedclient"
+	"github.com/chronos-tachyon/roxy/common/membership"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -233,32 +233,32 @@ func main() {
 				return nil
 			}
 
-			var member balancedclient.ServerSetMember
+			var member membership.ServerSet
 			if httpAddr != nil {
-				member.ServiceEndpoint = balancedclient.ServerSetEndpoint{
+				member.ServiceEndpoint = &membership.ServerSetEndpoint{
 					Host: hostAndZone(httpAddr),
 					Port: uint16(httpAddr.Port),
 				}
 			} else if grpcAddr != nil {
-				member.ServiceEndpoint = balancedclient.ServerSetEndpoint{
+				member.ServiceEndpoint = &membership.ServerSetEndpoint{
 					Host: hostAndZone(grpcAddr),
 					Port: uint16(grpcAddr.Port),
 				}
 			}
-			member.AdditionalEndpoints = make(map[string]balancedclient.ServerSetEndpoint, 2)
+			member.AdditionalEndpoints = make(map[string]*membership.ServerSetEndpoint, 2)
 			if httpAddr != nil {
-				member.AdditionalEndpoints["http"] = balancedclient.ServerSetEndpoint{
+				member.AdditionalEndpoints["http"] = &membership.ServerSetEndpoint{
 					Host: hostAndZone(httpAddr),
 					Port: uint16(httpAddr.Port),
 				}
 			}
 			if grpcAddr != nil {
-				member.AdditionalEndpoints["grpc"] = balancedclient.ServerSetEndpoint{
+				member.AdditionalEndpoints["grpc"] = &membership.ServerSetEndpoint{
 					Host: hostAndZone(grpcAddr),
 					Port: uint16(grpcAddr.Port),
 				}
 			}
-			member.Status = balancedclient.StatusAlive
+			member.Status = membership.StatusAlive
 
 			memberData, err := json.Marshal(&member)
 			if err != nil {
@@ -315,8 +315,8 @@ func main() {
 
 		advertiseEtcd = func() error {
 			if httpAddr != nil && flagEtcdHTTPPath != "" {
-				var member balancedclient.GRPCMember
-				member.Op = balancedclient.GRPCOpAdd
+				var member membership.GRPC
+				member.Op = membership.GRPCOpAdd
 				member.Addr = httpAddr.String()
 				memberData, err := json.Marshal(&member)
 				if err != nil {
@@ -331,8 +331,8 @@ func main() {
 			}
 
 			if grpcAddr != nil && flagEtcdGRPCPath != "" {
-				var member balancedclient.GRPCMember
-				member.Op = balancedclient.GRPCOpAdd
+				var member membership.GRPC
+				member.Op = membership.GRPCOpAdd
 				member.Addr = grpcAddr.String()
 				memberData, err := json.Marshal(&member)
 				if err != nil {
@@ -359,6 +359,10 @@ func main() {
 	advertiseATC := func() error { return nil }
 	shutdownATC := func() error { return nil }
 	if flagATCServers != "" {
+		if grpcAddr == nil {
+			panic(fmt.Errorf("must specify --listen-grpc with --atc-servers"))
+		}
+
 		if flagATCName == "" || !regexp.MustCompile(`^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$`).MatchString(flagATCName) {
 			panic(fmt.Errorf("--atc-name: invalid name %q", flagATCName))
 		}
@@ -391,8 +395,15 @@ func main() {
 			}
 
 			err = rc.Send(&roxypb.ReportRequest{
-				Name:   flagATCName,
-				Unique: flagUnique,
+				Name: flagATCName,
+				Endpoint: &roxypb.Endpoint{
+					Ip:         []byte(grpcAddr.IP),
+					Zone:       grpcAddr.Zone,
+					Port:       uint32(grpcAddr.Port),
+					Unique:     flagUnique,
+					ShardId:    -1,
+					Weight:     1.0,
+				},
 			})
 			if err != nil {
 				return err
