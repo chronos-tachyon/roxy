@@ -51,7 +51,7 @@ func NewSRVResolver(opts Options) (baseresolver.Resolver, error) {
 	if hasQS {
 		query, err = url.ParseQuery(qs)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse Target.Endpoint query string %q", qs, err)
+			return nil, fmt.Errorf("failed to parse Target.Endpoint query string %q: %w", qs, err)
 		}
 	}
 
