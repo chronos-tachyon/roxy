@@ -11,7 +11,7 @@ Things that I would like to do with Roxy:
 * [x] Re-open log file on SIGHUP
 * [ ] Make journald logging more useful
 * [ ] Scripts to generate Debian package
-* [ ] Scripts to generate Docker image
+* [x] Scripts to generate Docker image
 * [ ] Prometheus metrics on a new HTTP listen port
 * [x] WrappedWriter.Error should not Write after WriteHeader if r.Method is HEAD
 * [x] Recognize symlinks in FileSystemHandler.ServeDir
