@@ -13,4 +13,6 @@ require (
 	go.uber.org/zap v1.16.0
 	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
 	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4
+	google.golang.org/grpc v1.37.0
+	google.golang.org/protobuf v1.26.0
 )

@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+option go_package = "github.com/chronos-tachyon/roxy/roxypb";
+
+package roxy;
+
+service WebServer {
+  rpc Serve (stream WebMessage) returns (stream WebMessage) {}
+}
+
+message WebMessage {
+  bytes body_chunk = 1;
+  repeated KeyValue headers = 2;
+  repeated KeyValue trailers = 3;
+}
+
+message KeyValue {
+  string key = 1;
+  string value = 2;
+}
+
+service AirTrafficControl {
+  rpc Balance (stream BalanceRequest) returns (stream BalanceResponse) {}
+  rpc Report (stream ReportRequest) returns (ReportResponse) {}
+}
+
+message BalanceRequest {
+  string name = 1;
+}
+
+message BalanceResponse {
+  string name = 1;
+  string service_config = 2;
+  repeated Endpoint endpoints = 3;
+}
+
+message ReportRequest {
+  string name = 1;
+  float load = 2;
+  Endpoint endpoint = 3;
+}
+
+message ReportResponse {
+}
+
+message Endpoint {
+  bytes ip = 1;
+  string zone = 2;
+  uint32 port = 3;
+  string unique = 4;
+  string server_name = 5;
+  string location = 6;
+  int32 shard_id = 7;
+  float weight = 8;
+}

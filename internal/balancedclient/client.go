@@ -4,41 +4,62 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/chronos-tachyon/roxy/internal/enums"
+	zkclient "github.com/go-zookeeper/zk"
+	etcdclient "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/resolver"
+
+	"github.com/chronos-tachyon/roxy/common/baseresolver"
 )
 
-func New(restype enums.ResolverType, opts Options) (*BalancedClient, error) {
-	res, err := NewResolver(restype, opts)
+type Options struct {
+	Target    resolver.Target
+	Context   context.Context
+	Random    *rand.Rand
+	Etcd      *etcdclient.Client
+	ZK        *zkclient.Conn
+	Dialer    *net.Dialer
+	TLSConfig *tls.Config
+}
+
+func New(opts Options) (*BalancedClient, error) {
+	res, err := NewResolver(opts)
 	if err != nil {
 		return nil, err
 	}
 	return NewWithResolver(res, opts.Dialer, opts.TLSConfig)
 }
 
-func NewResolver(restype enums.ResolverType, opts Options) (Resolver, error) {
-	switch restype {
-	case enums.UnixResolver:
-		return NewUnixResolver(opts)
-	case enums.DefaultResolver:
+func NewResolver(opts Options) (baseresolver.Resolver, error) {
+	scheme := strings.ToLower(opts.Target.Scheme)
+	switch scheme {
+	case "unix":
 		fallthrough
-	case enums.DNSResolver:
+	case "unix-abstract":
+		return NewUnixResolver(opts)
+	case "":
+		fallthrough
+	case "dns":
 		return NewDNSResolver(opts)
-	case enums.SRVResolver:
+	case "srv":
 		return NewSRVResolver(opts)
-	case enums.EtcdResolver:
+	case "etcd":
 		return NewEtcdResolver(opts)
-	case enums.ZookeeperResolver:
+	case "zk":
 		return NewZKResolver(opts)
+	case "atc":
+		return NewATCResolver(opts)
 	default:
-		return nil, fmt.Errorf("%#v not supported", restype)
+		return nil, fmt.Errorf("Target.Scheme %q is not supported", opts.Target.Scheme)
 	}
 }
 
-func NewWithResolver(res Resolver, dialer *net.Dialer, tlsconfig *tls.Config) (*BalancedClient, error) {
+func NewWithResolver(res baseresolver.Resolver, dialer *net.Dialer, tlsConfig *tls.Config) (*BalancedClient, error) {
 	if res == nil {
 		panic(fmt.Errorf("Resolver is nil"))
 	}
@@ -48,25 +69,19 @@ func NewWithResolver(res Resolver, dialer *net.Dialer, tlsconfig *tls.Config) (*
 	}
 
 	dialFunc := func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-		addr, err := res.Resolve()
+		data, err := res.Resolve()
 		if err != nil {
 			return nil, err
 		}
-		return dialer.DialContext(ctx, addr.Network(), addr.String())
-	}
-
-	if tlsconfig != nil {
-		dialFunc = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-			addr, err := res.Resolve()
-			if err != nil {
-				return nil, err
-			}
-			socket, err := dialer.DialContext(ctx, addr.Network(), addr.String())
-			if err != nil {
-				return nil, err
-			}
-			return tls.Client(socket, tlsconfig), nil
+		var socket net.Conn
+		socket, err = dialer.DialContext(ctx, data.Addr.Network(), data.Addr.String())
+		if err != nil {
+			return nil, err
 		}
+		if tlsConfig != nil {
+			socket = tls.Client(socket, tlsConfig)
+		}
+		return socket, err
 	}
 
 	bc := &BalancedClient{
@@ -86,7 +101,7 @@ func NewWithResolver(res Resolver, dialer *net.Dialer, tlsconfig *tls.Config) (*
 				return http.ErrUseLastResponse
 			},
 		},
-		isTLS: (tlsconfig != nil),
+		isTLS: (tlsConfig != nil),
 	}
 	return bc, nil
 }
@@ -94,12 +109,12 @@ func NewWithResolver(res Resolver, dialer *net.Dialer, tlsconfig *tls.Config) (*
 // type BalancedClient {{{
 
 type BalancedClient struct {
-	res    Resolver
+	res    baseresolver.Resolver
 	client *http.Client
 	isTLS  bool
 }
 
-func (bc *BalancedClient) Resolver() Resolver {
+func (bc *BalancedClient) Resolver() baseresolver.Resolver {
 	return bc.res
 }
 
@@ -116,9 +131,9 @@ func (bc *BalancedClient) Do(req *http.Request) (*http.Response, error) {
 }
 
 func (bc *BalancedClient) Close() error {
-	err := bc.res.Close()
+	bc.res.Close()
 	bc.client.CloseIdleConnections()
-	return err
+	return nil
 }
 
 // }}}

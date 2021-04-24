@@ -1,87 +1,81 @@
 package balancedclient
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"path/filepath"
+	"strings"
 
-	"github.com/chronos-tachyon/roxy/internal/enums"
+	"google.golang.org/grpc/resolver"
+
+	"github.com/chronos-tachyon/roxy/common/baseresolver"
 )
 
-func NewUnixResolver(opts Options) (Resolver, error) {
-	if opts.Target == "" {
-		return nil, fmt.Errorf("Target is empty")
+func NewUnixResolver(opts Options) (baseresolver.Resolver, error) {
+	if opts.Target.Authority != "" && !strings.EqualFold(opts.Target.Authority, "localhost") {
+		return nil, fmt.Errorf("Target.Authority %q is not supported", opts.Target.Authority)
 	}
 
-	unixpath := opts.Target
-	switch unixpath[0] {
-	case '\x00':
-		// pass
-	case '@':
-		unixpath = "\x00" + unixpath[1:]
-	default:
+	ep := opts.Target.Endpoint
+
+	var (
+		qs    string
+		hasQS bool
+	)
+	if i := strings.IndexByte(ep, '?'); i >= 0 {
+		ep, qs, hasQS = ep[:i], ep[i+1:], true
+	}
+
+	if ep == "" {
+		return nil, errors.New("Target.Endpoint is empty")
+	}
+
+	var unixpath string
+	if strings.EqualFold(opts.Target.Scheme, "unix-abstract") {
+		unixpath = "\x00" + ep
+	} else if strings.EqualFold(opts.Target.Scheme, "unix") {
+		if ep[0] == '\x00' || ep[0] == '@' {
+			unixpath = "\x00" + ep[1:]
+		} else {
+			unixpath = filepath.Clean(filepath.FromSlash("/" + ep))
+		}
+	} else {
+		return nil, fmt.Errorf("Target.Scheme %q is not supported", opts.Target.Scheme)
+	}
+
+	var query url.Values
+	if hasQS {
 		var err error
-		unixpath, err = filepath.Abs(unixpath)
+		query, err = url.ParseQuery(qs)
 		if err != nil {
-			return nil, fmt.Errorf("failed to make Target %q absolute: %w", opts.Target, err)
+			return nil, fmt.Errorf("failed to parse Target.Endpoint query string %q: %w", qs, err)
 		}
 	}
 
-	if opts.Balancer != enums.RandomBalancer {
-		return nil, fmt.Errorf("UnixResolver does not support %#v", opts.Balancer)
+	var balancer baseresolver.BalancerType
+	if err := balancer.Parse(query.Get("balancer")); err != nil {
+		return nil, fmt.Errorf("failed to parse balancer=%q query string: %w", query.Get("balancer"), err)
 	}
 
-	res := &unixResolver{
-		singleton: &net.UnixAddr{
-			Net:  "unix",
-			Name: unixpath,
-		},
+	unixAddr := &net.UnixAddr{
+		Net:  "unix",
+		Name: unixpath,
 	}
-	return res, nil
-}
 
-// type unixResolver {{{
-
-type unixResolver struct {
-	singleton net.Addr
-}
-
-func (res *unixResolver) ServerHostname() string {
-	return "localhost"
-}
-
-func (res *unixResolver) ResolveAll() ([]net.Addr, error) {
-	return []net.Addr{res.singleton}, nil
-}
-
-func (res *unixResolver) Resolve() (net.Addr, error) {
-	return res.singleton, nil
-}
-
-func (res *unixResolver) MarkHealthy(addr net.Addr, healthy bool) {
-	// pass
-}
-
-func (res *unixResolver) Watch(fn WatchFunc) WatchID {
-	events := []*Event{
+	records := []*baseresolver.AddrData{
 		{
-			Type: enums.UpdateEvent,
-			Key:  "singleton",
-			Addr: res.singleton,
+			Addr: unixAddr,
+			Address: resolver.Address{
+				Addr: unixAddr.String(),
+			},
 		},
 	}
-	fn(events)
-	return 0
+
+	return baseresolver.NewStaticResolver(baseresolver.StaticResolverOptions{
+		Random:   opts.Random,
+		Balancer: balancer,
+		Records:  records,
+	})
 }
-
-func (res *unixResolver) CancelWatch(id WatchID) {
-	// pass
-}
-
-func (res *unixResolver) Close() error {
-	return nil
-}
-
-var _ Resolver = (*unixResolver)(nil)
-
-// }}}

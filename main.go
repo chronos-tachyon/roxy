@@ -14,11 +14,13 @@ import (
 	"time"
 
 	getopt "github.com/pborman/getopt/v2"
-	zerolog "github.com/rs/zerolog"
-	journald "github.com/rs/zerolog/journald"
-	log "github.com/rs/zerolog/log"
-	acme "golang.org/x/crypto/acme"
-	autocert "golang.org/x/crypto/acme/autocert"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/journald"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
+
+	"github.com/chronos-tachyon/roxy/grpc/balancer/atcbalancer"
 )
 
 var gDialer = net.Dialer{
@@ -105,6 +107,8 @@ func main() {
 
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(log.Logger)
+
+	atcbalancer.SetLogger(log.Logger.With().Str("package", "atcbalancer").Logger())
 
 	gRootContext = context.Background()
 	gRootContext, gRootCancel = context.WithCancel(gRootContext)

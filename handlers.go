@@ -29,14 +29,23 @@ import (
 	"text/template"
 	"time"
 
-	xid "github.com/rs/xid"
-	zerolog "github.com/rs/zerolog"
-	hlog "github.com/rs/zerolog/hlog"
-	log "github.com/rs/zerolog/log"
-	unix "golang.org/x/sys/unix"
+	"github.com/rs/xid"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/hlog"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sys/unix"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/common/baseresolver"
+	_ "github.com/chronos-tachyon/roxy/grpc/balancer/atcbalancer"
+	"github.com/chronos-tachyon/roxy/grpc/resolver/atcresolver"
+	"github.com/chronos-tachyon/roxy/grpc/resolver/etcdresolver"
+	"github.com/chronos-tachyon/roxy/grpc/resolver/zkresolver"
 	"github.com/chronos-tachyon/roxy/internal/balancedclient"
 	"github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
 const defaultMaxCacheSize = 4 << 10 // 4 KiB
@@ -797,16 +806,27 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	resType := h.cfg.Resolver
-	if resType == enums.DefaultResolver {
-		resType = enums.DNSResolver
+	r.Header.Set("roxy-target", fmt.Sprintf("%s; %s", h.key, h.cfg.Target))
+	r.Header.Set("x-forwarded-host", r.Host)
+	r.Header.Set("x-forwarded-proto", "https")
+	r.Header.Set("x-forwarded-ip", raddr.String())
+	r.Header.Add("x-forwarded-for", raddr.String())
+	r.Header.Add(
+		"forwarded",
+		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
+			quoteForwardedAddr(laddr),
+			quoteForwardedAddr(raddr),
+			r.Host,
+			"https"))
+
+	if values := r.Header.Values("x-forwarded-for"); len(values) > 1 {
+		r.Header.Set("x-forwarded-for", strings.Join(values, ", "))
 	}
-	r.Header.Set("roxy-target", fmt.Sprintf("%s; %s; %s", h.key, resType, h.cfg.Address))
 
 	innerURL := new(url.URL)
 	*innerURL = *r.URL
 	innerURL.Scheme = "http"
-	innerURL.Host = h.client.Resolver().ServerHostname()
+	innerURL.Host = "example.com"
 	if h.client.IsTLS() {
 		innerURL.Scheme = "https"
 	}
@@ -827,21 +847,6 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	innerReq.Close = true
 	innerReq.Host = r.Host
 	innerReq.Header.Set("host", r.Host)
-	innerReq.Header.Set("x-forwarded-host", r.Host)
-	innerReq.Header.Set("x-forwarded-proto", "https")
-	innerReq.Header.Set("x-forwarded-ip", raddr.String())
-	innerReq.Header.Add("x-forwarded-for", raddr.String())
-	innerReq.Header.Add(
-		"forwarded",
-		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
-			quoteForwardedAddr(laddr),
-			quoteForwardedAddr(raddr),
-			r.Host,
-			"https"))
-
-	if values := innerReq.Header.Values("x-forwarded-for"); len(values) > 1 {
-		innerReq.Header.Set("x-forwarded-for", strings.Join(values, ", "))
-	}
 
 	innerResp, err := h.client.Do(innerReq)
 	once.Do(func() {})
@@ -897,6 +902,227 @@ var _ http.Handler = (*HTTPBackendHandler)(nil)
 
 // }}}
 
+// type GRPCBackendHandler {{{
+
+type GRPCBackendHandler struct {
+	key string
+	cfg *TargetConfig
+	cc  *grpc.ClientConn
+}
+
+func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.Ctx(ctx)
+	laddr := laddrFromCtx(ctx)
+	raddr := raddrFromCtx(ctx)
+
+	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+		return c.Str("key", h.key).Interface("target", h.cfg)
+	})
+
+	r.Header.Set("roxy-target", fmt.Sprintf("%s; %s", h.key, h.cfg.Target))
+	r.Header.Set("x-forwarded-host", r.Host)
+	r.Header.Set("x-forwarded-proto", "https")
+	r.Header.Set("x-forwarded-ip", raddr.String())
+	r.Header.Add("x-forwarded-for", raddr.String())
+	r.Header.Add(
+		"forwarded",
+		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
+			quoteForwardedAddr(laddr),
+			quoteForwardedAddr(raddr),
+			r.Host,
+			"https"))
+
+	var wg sync.WaitGroup
+	needBodyClose := true
+	defer func() {
+		if needBodyClose {
+			io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+		}
+		wg.Wait()
+	}()
+
+	webclient := roxypb.NewWebServerClient(h.cc)
+	sc, err := webclient.Serve(ctx)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to call /roxy.WebServer/Serve")
+		writeError(ctx, w, http.StatusServiceUnavailable)
+		return
+	}
+
+	needCloseSend := true
+	defer func() {
+		if needCloseSend {
+			sc.CloseSend()
+		}
+	}()
+
+	wg.Add(1)
+	go h.recvThread(ctx, w, sc, &wg)
+
+	kv := make([]*roxypb.KeyValue, 4, 4+len(r.Header))
+	kv[0] = &roxypb.KeyValue{Key: ":scheme", Value: "https"}
+	kv[1] = &roxypb.KeyValue{Key: ":method", Value: r.Method}
+	kv[2] = &roxypb.KeyValue{Key: ":authority", Value: r.Host}
+	kv[3] = &roxypb.KeyValue{Key: ":path", Value: r.RequestURI}
+
+	keys := make(headerNames, 0, len(r.Header))
+	for key := range r.Header {
+		keys = append(keys, key)
+	}
+	keys.Sort()
+	for _, key := range keys {
+		lc := strings.ToLower(key)
+		for _, value := range r.Header[key] {
+			kv = append(kv, &roxypb.KeyValue{Key: lc, Value: value})
+		}
+	}
+
+	err = sc.Send(&roxypb.WebMessage{Headers: kv})
+	if err != nil {
+		logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Send failed")
+		return
+	}
+
+	buf := make([]byte, 1<<20) // 1 MiB
+	for {
+		n, err := io.ReadFull(r.Body, buf)
+		if n > 0 {
+			err2 := sc.Send(&roxypb.WebMessage{BodyChunk: buf[:n]})
+			if err2 != nil {
+				logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Send failed")
+				return
+			}
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			break
+		}
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to Read request body")
+			return
+		}
+	}
+
+	needBodyClose = false
+	err = r.Body.Close()
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to Close request body")
+	}
+
+	kv = make([]*roxypb.KeyValue, 0, len(r.Trailer))
+	for trailerName, trailerValues := range r.Trailer {
+		lc := strings.ToLower(trailerName)
+		for _, trailerValue := range trailerValues {
+			kv = append(kv, &roxypb.KeyValue{Key: lc, Value: trailerValue})
+		}
+	}
+
+	if len(kv) != 0 {
+		err = sc.Send(&roxypb.WebMessage{Trailers: kv})
+		if err != nil {
+			logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Send failed")
+			return
+		}
+	}
+
+	needCloseSend = false
+	err = sc.CloseSend()
+	if err != nil {
+		logger.Warn().Err(err).Msg("/roxy.WebServer/Server: CloseSend failed")
+		return
+	}
+}
+
+func (h *GRPCBackendHandler) recvThread(ctx context.Context, w http.ResponseWriter, sc roxypb.WebServer_ServeClient, wg *sync.WaitGroup) {
+	logger := log.Ctx(ctx)
+
+	needWriteHeader := true
+	defer func() {
+		if needWriteHeader {
+			w.WriteHeader(http.StatusOK)
+		}
+		wg.Done()
+	}()
+
+Loop:
+	for {
+		resp, err := sc.Recv()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Recv failed")
+			needWriteHeader = false
+			writeError(ctx, w, http.StatusInternalServerError)
+			return
+		}
+
+		if len(resp.Headers) != 0 && needWriteHeader {
+			hdrs := w.Header()
+			status := ""
+			for _, kv := range resp.Headers {
+				switch kv.Key {
+				case ":status":
+					status = kv.Value
+				default:
+					hdrs.Add(kv.Key, kv.Value)
+				}
+			}
+			statusCode := http.StatusOK
+			if status != "" {
+				statusCode, err = strconv.Atoi(status)
+				if err != nil {
+					logger.Warn().Str("arg", status).Err(err).Msg("/roxy.WebServer/Serve: failed to parse \":status\" pseudo-header")
+					statusCode = http.StatusInternalServerError
+				}
+			}
+			needWriteHeader = false
+			w.WriteHeader(statusCode)
+		}
+
+		if len(resp.BodyChunk) != 0 {
+			needWriteHeader = false
+			_, err = w.Write(resp.BodyChunk)
+			if err != nil {
+				logger.Error().Err(err).Msg("failed to Write response body")
+				break Loop
+			}
+		}
+
+		if len(resp.Trailers) != 0 {
+			if needWriteHeader {
+				needWriteHeader = false
+				w.WriteHeader(http.StatusOK)
+			}
+			hdrs := w.Header()
+			for _, kv := range resp.Trailers {
+				hdrs.Add(kv.Key, kv.Value)
+			}
+		}
+	}
+
+	// This loop is only executed if ResponseWriter.Write failed.
+	for {
+		_, err := sc.Recv()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Recv failed")
+			return
+		}
+	}
+}
+
+func (h *GRPCBackendHandler) Close() error {
+	return h.cc.Close()
+}
+
+var _ http.Handler = (*GRPCBackendHandler)(nil)
+
+// }}}
+
 func CompileErrorHandler(impl *Impl, arg string) (http.Handler, error) {
 	// format: "ERROR:<status>"
 
@@ -946,6 +1172,9 @@ func CompileTarget(impl *Impl, key string, cfg *TargetConfig) (http.Handler, err
 	case enums.HTTPBackendTargetType:
 		return CompileHTTPBackendHandler(impl, key, cfg)
 
+	case enums.GRPCBackendTargetType:
+		return CompileGRPCBackendHandler(impl, key, cfg)
+
 	default:
 		panic(fmt.Errorf("unknown target type %#v", cfg.Type))
 	}
@@ -972,11 +1201,14 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 		return nil, err
 	}
 
-	bc, err := balancedclient.New(cfg.Resolver, balancedclient.Options{
+	parsedTarget, err := baseresolver.ParseTargetString(cfg.Target)
+	if err != nil {
+		return nil, err
+	}
+
+	bc, err := balancedclient.New(balancedclient.Options{
 		Context:      gRootContext,
-		Target:       cfg.Address,
-		Balancer:     cfg.Balancer,
-		PollInterval: cfg.PollInterval,
+		Target:       parsedTarget,
 		Etcd:         impl.etcd,
 		ZK:           impl.zk,
 		Dialer:       &gDialer,
@@ -986,6 +1218,39 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 		return nil, err
 	}
 	return &HTTPBackendHandler{key, cfg, bc}, nil
+}
+
+func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
+	tlsConfig, err := CompileTLSClientConfig(cfg.TLS)
+	if err != nil {
+		return nil, err
+	}
+
+	resolvers := make([]resolver.Builder, 0, 3)
+	resolvers = append(resolvers, atcresolver.NewBuilder(gRootContext, nil))
+	if impl.etcd != nil {
+		resolvers = append(resolvers, etcdresolver.NewBuilder(gRootContext, nil, impl.etcd, ""))
+	}
+	if impl.zk != nil {
+		resolvers = append(resolvers, zkresolver.NewBuilder(gRootContext, nil, impl.zk, ""))
+	}
+
+	dialOpts := make([]grpc.DialOption, 1, 2)
+	if tlsConfig != nil {
+		dialOpts[0] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
+	} else {
+		dialOpts[0] = grpc.WithInsecure()
+	}
+	if len(resolvers) != 0 {
+		dialOpts = append(dialOpts, grpc.WithResolvers(resolvers...))
+	}
+
+	cc, err := grpc.DialContext(gRootContext, cfg.Target, dialOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GRPCBackendHandler{key, cfg, cc}, nil
 }
 
 func writeRedirect(ctx context.Context, w http.ResponseWriter, statusCode int, urlstr string) {
@@ -1211,3 +1476,23 @@ func (list fileInfoList) Swap(i, j int) {
 var _ sort.Interface = fileInfoList(nil)
 
 // }}}
+
+type headerNames []string
+
+func (list headerNames) Len() int {
+	return len(list)
+}
+
+func (list headerNames) Swap(i, j int) {
+	list[i], list[j] = list[j], list[i]
+}
+
+func (list headerNames) Less(i, j int) bool {
+	a := strings.ToLower(list[i])
+	b := strings.ToLower(list[j])
+	return a < b
+}
+
+func (list headerNames) Sort() {
+	sort.Sort(list)
+}

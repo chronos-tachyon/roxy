@@ -1,4 +1,4 @@
-package balancedclient
+package baseresolver
 
 import (
 	"fmt"
@@ -56,34 +56,42 @@ func tcpAddrCompare(a net.TCPAddr, b net.TCPAddr) int {
 	return a.Port - b.Port
 }
 
-func srvCompare(a ResolvedSRV, b ResolvedSRV) int {
-	if a.Priority != b.Priority {
-		return int(a.Priority) - int(b.Priority)
+func addrDataCompare(a *AddrData, b *AddrData) int {
+	ap := (a.SRVPriority == nil)
+	bp := (b.SRVPriority == nil)
+	aw := (a.SRVWeight == nil)
+	bw := (b.SRVWeight == nil)
+	if ap != bp || aw != bw {
+		panic(fmt.Errorf("SRV records mixed with non-SRV records"))
 	}
-	if a.RawWeight != b.RawWeight {
-		return int(b.RawWeight) - int(a.RawWeight)
+	if ap {
+		if *a.SRVPriority != *b.SRVPriority {
+			return int(*a.SRVPriority) - int(*b.SRVPriority)
+		}
+		if *a.SRVWeight != *b.SRVWeight {
+			return int(*b.SRVWeight) - int(*a.SRVWeight)
+		}
 	}
-	return tcpAddrCompare(a.Addr, b.Addr)
+	return tcpAddrCompare(*a.Addr.(*net.TCPAddr), *b.Addr.(*net.TCPAddr))
 }
 
-type tcpAddrList []net.Addr
+type addrDataList []*AddrData
 
-func (list tcpAddrList) Len() int {
+func (list addrDataList) Len() int {
 	return len(list)
 }
 
-func (list tcpAddrList) Swap(i, j int) {
+func (list addrDataList) Swap(i, j int) {
 	list[i], list[j] = list[j], list[i]
 }
 
-func (list tcpAddrList) Less(i, j int) bool {
-	a := list[i].(*net.TCPAddr)
-	b := list[i].(*net.TCPAddr)
-	return tcpAddrCompare(*a, *b) < 0
+func (list addrDataList) Less(i, j int) bool {
+	a, b := list[i], list[j]
+	return addrDataCompare(a, b) < 0
 }
 
-func (list tcpAddrList) Sort() {
+func (list addrDataList) Sort() {
 	sort.Sort(list)
 }
 
-var _ sort.Interface = tcpAddrList(nil)
+var _ sort.Interface = addrDataList(nil)
