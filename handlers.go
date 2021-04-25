@@ -517,7 +517,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		ContentLang string
 		Dev         uint64
 		Ino         uint64
-		NLink       uint64
+		NLink       uint32
 		Size        int64
 		MTime       time.Time
 		IsDir       bool
@@ -568,7 +568,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		if ok {
 			e.Dev = st.Dev
 			e.Ino = st.Ino
-			e.NLink = st.Nlink
+			e.NLink = uint32(st.Nlink)
 			e.Owner = lookupUID(st.Uid)
 			e.Group = lookupGID(st.Gid)
 
@@ -714,7 +714,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		maxCLangWidth uint = 1
 	)
 	for _, e := range entries {
-		if w := uint(len(strconv.FormatUint(e.NLink, 10))); w > maxNLinkWidth {
+		if w := uint(len(strconv.FormatUint(uint64(e.NLink), 10))); w > maxNLinkWidth {
 			maxNLinkWidth = w
 		}
 		if w := uint(len(e.Owner)); w > maxOwnerWidth {
