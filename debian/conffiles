@@ -1,2 +1,5 @@
+/etc/logrotate.d/roxy
 /etc/opt/roxy/config.json
+/etc/opt/roxy/config.json.example
 /etc/opt/roxy/mime.json
+/etc/opt/roxy/mime.json.example

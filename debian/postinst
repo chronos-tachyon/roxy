@@ -7,21 +7,28 @@ setcap cap_net_bind_service=+ep /opt/roxy/bin/roxy
 if ! getent group roxy >/dev/null 2>&1 ; then
   addgroup --system --gid 400 roxy
 fi
-
 if ! getent passwd roxy >/dev/null 2>&1 ; then
   adduser --system --home /var/lib/roxy --no-create-home --uid 400 --gecos roxy --gid 400 --disabled-password roxy
 fi
 
 if ! [ -e /etc/opt/roxy/config.json ]; then
-  cp /etc/opt/roxy/config.json.example /etc/opt/roxy/config.json
+  cp /opt/roxy/share/misc/config.json.example /etc/opt/roxy/config.json
 fi
-
+if ! [ -e /etc/opt/roxy/config.json.example ]; then
+  cp /opt/roxy/share/misc/config.json.example /etc/opt/roxy/config.json.example
+fi
 if ! [ -e /etc/opt/roxy/mime.json ]; then
-  cp /etc/opt/roxy/mime.json.example /etc/opt/roxy/mime.json
+  cp /opt/roxy/share/misc/mime.json.example /etc/opt/roxy/mime.json
+fi
+if ! [ -e /etc/opt/roxy/mime.json.example ]; then
+  cp /opt/roxy/share/misc/mime.json.example /etc/opt/roxy/mime.json.example
+fi
+if ! [ -e /etc/logrotate.d/roxy ]; then
+  cp /opt/roxy/share/misc/logrotate.conf /etc/logrotate.d/roxy
 fi
 
-chown root:roxy /etc/opt/roxy/config.json
-chmod 0640 /etc/opt/roxy/config.json
+chown root:roxy /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example
+chmod 0640 /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example
 
 chown roxy:roxy /var/opt/roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme
 chmod 0755 /var/opt/roxy
@@ -30,5 +37,9 @@ chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme
 chown roxy:adm /var/opt/roxy/log
 chmod 2750 /var/opt/roxy/log
 
-echo '* Please run "sudo systemctl start roxy" to start Roxy immediately.'
-echo '* Please run "sudo systemctl enable roxy" to start Roxy after every reboot.'
+if ! systemctl is-active roxy >/dev/null 2>&1 ; then
+  echo '* Please run "sudo systemctl start roxy" to start Roxy immediately.'
+fi
+if ! systemctl is-enabled roxy >/dev/null 2>&1 ; then
+  echo '* Please run "sudo systemctl enable roxy" to start Roxy after every reboot.'
+fi

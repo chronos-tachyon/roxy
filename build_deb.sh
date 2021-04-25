@@ -34,6 +34,7 @@ build_for_os_arch() {
 
   mkdir -p \
     "${BUILDDIR}/DEBIAN" \
+    "${BUILDDIR}/etc/logrotate.d" \
     "${BUILDDIR}/etc/opt/roxy" \
     "${BUILDDIR}/etc/systemd/system" \
     "${BUILDDIR}/opt/roxy/bin" \
@@ -51,11 +52,14 @@ build_for_os_arch() {
   chmod -R u+w "${BUILDDIR}/opt/roxy/pkg"
   rm -rf "${BUILDDIR}/opt/roxy/pkg"
   echo '> cp (additional files) .../etc/opt/roxy/'
+  cp config.json.example "${BUILDDIR}/opt/roxy/share/misc/config.json.example"
   cp config.json.example "${BUILDDIR}/etc/opt/roxy/config.json.example"
   cp config.json.example "${BUILDDIR}/etc/opt/roxy/config.json"
+  cp mime.json.example "${BUILDDIR}/opt/roxy/share/misc/mime.json.example"
   cp mime.json.example "${BUILDDIR}/etc/opt/roxy/mime.json.example"
   cp mime.json.example "${BUILDDIR}/etc/opt/roxy/mime.json"
-  cp mime.json.example "${BUILDDIR}/opt/roxy/share/misc/mime.json"
+  cp logrotate.conf "${BUILDDIR}/opt/roxy/share/misc/logrotate.conf"
+  cp logrotate.conf "${BUILDDIR}/etc/logrotate.d/roxy"
   cp roxy.service "${BUILDDIR}/etc/systemd/system/roxy.service"
 
   echo '> tar -cf .../data.tar'

@@ -4,8 +4,8 @@ RUN ["/bin/sh", "-c", "update-ca-certificates 2>/dev/null || true"]
 RUN ["/bin/sh", "-c", "echo 'hosts: files dns' > /etc/nsswitch.conf"]
 WORKDIR /build
 COPY ./ ./
-RUN ["go", "get", "-d", "-v", "./..."]
-RUN ["go", "install", "-v", "./..."]
+RUN ["go", "get", "-d", "./..."]
+RUN ["go", "install", "./..."]
 RUN ["setcap", "cap_net_bind_service=+ep", "/go/bin/roxy"]
 RUN ["addgroup", "-S", "roxy", "-g", "400"]
 RUN ["adduser", "-S", "roxy", "-u", "400", "-G", "roxy", "-h", "/var/opt/roxy/lib", "-H", "-D"]
