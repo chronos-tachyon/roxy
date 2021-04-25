@@ -358,10 +358,13 @@ func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f 
 		body          io.ReadSeeker = f
 	)
 
-	contentType, contentLang := DetectMimeProperties(impl, logger, h.fs, r.URL.Path)
+	contentType, contentLang, contentEnc := DetectMimeProperties(impl, logger, h.fs, r.URL.Path)
 	hdrs.Set("content-type", contentType)
 	if contentLang != "" {
 		hdrs.Set("content-language", contentLang)
+	}
+	if contentEnc != "" {
+		hdrs.Set("content-encoding", contentEnc)
 	}
 
 	size := fi.Size()
@@ -515,6 +518,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		Link        string
 		ContentType string
 		ContentLang string
+		ContentEnc  string
 		Dev         uint64
 		Ino         uint64
 		NLink       uint32
@@ -639,11 +643,12 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		var (
 			contentType string
 			contentLang string
+			contentEnc  string
 		)
 		if e.IsDir {
 			contentType = "inode/directory"
 		} else if !e.IsLink {
-			contentType, contentLang = DetectMimeProperties(impl, logger, h.fs, fullPath)
+			contentType, contentLang, contentEnc = DetectMimeProperties(impl, logger, h.fs, fullPath)
 		}
 
 		if contentType == "" {
@@ -652,9 +657,13 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		if contentLang == "" {
 			contentLang = "-"
 		}
+		if contentEnc == "" {
+			contentEnc = "-"
+		}
 
 		e.ContentType = trimContentHeader(contentType)
 		e.ContentLang = trimContentHeader(contentLang)
+		e.ContentEnc = trimContentHeader(contentEnc)
 	}
 
 	entries := make([]entry, 0, 1+len(list))
@@ -712,6 +721,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		maxLinkWidth  uint = 1
 		maxCTypeWidth uint = 1
 		maxCLangWidth uint = 1
+		maxCEncWidth  uint = 1
 	)
 	for _, e := range entries {
 		if w := uint(len(strconv.FormatUint(uint64(e.NLink), 10))); w > maxNLinkWidth {
@@ -738,6 +748,9 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		if w := uint(len(e.ContentLang)); w > maxCLangWidth {
 			maxCLangWidth = w
 		}
+		if w := uint(len(e.ContentEnc)); w > maxCEncWidth {
+			maxCEncWidth = w
+		}
 	}
 
 	type templateData struct {
@@ -751,6 +764,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		LinkWidth        uint
 		ContentTypeWidth uint
 		ContentLangWidth uint
+		ContentEncWidth  uint
 	}
 
 	data := templateData{
@@ -764,6 +778,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		LinkWidth:        maxLinkWidth,
 		ContentTypeWidth: maxCTypeWidth,
 		ContentLangWidth: maxCLangWidth,
+		ContentEncWidth:  maxCEncWidth,
 	}
 
 	page := impl.pages["index"]
@@ -788,7 +803,12 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 	sha256sum := base64.StdEncoding.EncodeToString(sha256raw[:])
 
 	hdrs.Set("content-type", page.contentType)
-	hdrs.Set("content-language", page.contentLang)
+	if page.contentLang != "" {
+		hdrs.Set("content-language", page.contentLang)
+	}
+	if page.contentEnc != "" {
+		hdrs.Set("content-encoding", page.contentEnc)
+	}
 	setDigestHeader(hdrs, enums.DigestMD5, md5sum)
 	setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
 	setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
@@ -1231,12 +1251,12 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 	}
 
 	bc, err := balancedclient.New(balancedclient.Options{
-		Context:      gRootContext,
-		Target:       parsedTarget,
-		Etcd:         impl.etcd,
-		ZK:           impl.zk,
-		Dialer:       &gDialer,
-		TLSConfig:    tlsConfig,
+		Context:   gRootContext,
+		Target:    parsedTarget,
+		Etcd:      impl.etcd,
+		ZK:        impl.zk,
+		Dialer:    &gDialer,
+		TLSConfig: tlsConfig,
 	})
 	if err != nil {
 		return nil, err

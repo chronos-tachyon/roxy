@@ -64,18 +64,21 @@ type PagesConfig struct {
 	Map                map[string]*PageConfig `json:"map"`
 	DefaultContentType string                 `json:"defaultContentType"`
 	DefaultContentLang string                 `json:"defaultContentLanguage"`
+	DefaultContentEnc  string                 `json:"defaultContentEncoding"`
 }
 
 type PageConfig struct {
 	FileName    string `json:"fileName"`
 	ContentType string `json:"contentType"`
 	ContentLang string `json:"contentLanguage"`
+	ContentEnc  string `json:"contentEncoding"`
 }
 
 type MimeRuleConfig struct {
 	Suffixes    []string `json:"suffixes"`
 	ContentType string   `json:"contentType"`
 	ContentLang string   `json:"contentLanguage"`
+	ContentEnc  string   `json:"contentEncoding"`
 }
 
 type TargetConfig struct {

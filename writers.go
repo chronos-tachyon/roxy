@@ -379,8 +379,13 @@ func writeErrorPage(bw *BasicWriter, page pageData, statusCode int, u *url.URL) 
 
 	hdrs := bw.Header()
 	hdrs.Set("content-type", page.contentType)
-	hdrs.Set("content-language", page.contentLang)
-	hdrs.Set("content-length", strconv.FormatUint(uint64(len(rendered)), 10))
+	if page.contentLang != "" {
+		hdrs.Set("content-language", page.contentLang)
+	}
+	if page.contentEnc != "" {
+		hdrs.Set("content-encoding", page.contentEnc)
+	}
+	hdrs.Set("content-length", strconv.Itoa(len(rendered)))
 	bw.WriteHeader(statusCode)
 	bw.Write(rendered)
 }

@@ -12,6 +12,7 @@ type MimeRule struct {
 	rx          *regexp.Regexp
 	contentType string
 	contentLang string
+	contentEnc  string
 }
 
 func CompileMimeRule(cfg *MimeRuleConfig) (*MimeRule, error) {
@@ -26,16 +27,18 @@ func CompileMimeRule(cfg *MimeRuleConfig) (*MimeRule, error) {
 		rx:          rx,
 		contentType: cfg.ContentType,
 		contentLang: cfg.ContentLang,
+		contentEnc:  cfg.ContentEnc,
 	}, nil
 }
 
-func DetectMimeProperties(impl *Impl, logger *zerolog.Logger, filesystem http.FileSystem, path string) (contentType string, contentLang string) {
+func DetectMimeProperties(impl *Impl, logger *zerolog.Logger, filesystem http.FileSystem, path string) (contentType string, contentLang string, contentEnc string) {
 	contentType = "application/octet-stream"
 	contentLang = ""
+	contentEnc = ""
 
 	f, err := filesystem.Open(path)
 	if err != nil {
-		logger.Error().Str("file", path).Err(err).Msg("failed to open file")
+		logger.Error().Str("file", path).Err(err).Msg("DetectMimeProperties: failed to open file")
 		return
 	}
 
@@ -53,6 +56,12 @@ func DetectMimeProperties(impl *Impl, logger *zerolog.Logger, filesystem http.Fi
 		haveContentLang = true
 	}
 
+	haveContentEnc := false
+	if raw, err := readXattr(f, xattrMimeEnc); err == nil {
+		contentEnc = string(raw)
+		haveContentEnc = true
+	}
+
 	for _, mimeRule := range impl.mimeRules {
 		if !mimeRule.rx.MatchString(path) {
 			continue
@@ -64,6 +73,10 @@ func DetectMimeProperties(impl *Impl, logger *zerolog.Logger, filesystem http.Fi
 		if !haveContentLang && mimeRule.contentLang != "" {
 			contentLang = mimeRule.contentLang
 			haveContentLang = true
+		}
+		if !haveContentEnc && mimeRule.contentEnc != "" {
+			contentEnc = mimeRule.contentEnc
+			haveContentEnc = true
 		}
 	}
 

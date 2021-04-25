@@ -3,14 +3,16 @@ package main
 const (
 	xattrMimeType  = "user.mimetype"
 	xattrMimeLang  = "user.mimelang"
+	xattrMimeEnc   = "user.mimeenc"
 	xattrMd5sum    = "user.md5sum"
 	xattrSha1sum   = "user.sha1sum"
 	xattrSha256sum = "user.sha256sum"
 	xattrEtag      = "user.etag"
-)
 
-const defaultContentType = "text/html; charset=utf-8"
-const defaultContentLang = "en"
+	defaultContentType = "text/html; charset=utf-8"
+	defaultContentLang = "en"
+	defaultContentEnc  = ""
+)
 
 const defaultIndexPageTemplate = `<!DOCTYPE html>
 <html>

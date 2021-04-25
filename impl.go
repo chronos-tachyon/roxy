@@ -42,6 +42,7 @@ type pageData struct {
 	size        int
 	contentType string
 	contentLang string
+	contentEnc  string
 }
 
 func LoadImpl(configPath string) (*Impl, error) {
@@ -341,6 +342,7 @@ func (impl *Impl) loadPage(key string, rootDir string) error {
 	fileName := row.FileName
 	contentType := row.ContentType
 	contentLang := row.ContentLang
+	contentEnc := row.ContentEnc
 	if fileName == "" {
 		fileName = key + ".html"
 	}
@@ -354,21 +356,27 @@ func (impl *Impl) loadPage(key string, rootDir string) error {
 		}
 	}
 
-	return impl.compilePage(key, string(raw), contentType, contentLang)
+	return impl.compilePage(key, string(raw), contentType, contentLang, contentEnc)
 }
 
-func (impl *Impl) compilePage(key string, contents string, contentType string, contentLang string) error {
+func (impl *Impl) compilePage(key string, contents string, contentType string, contentLang string, contentEnc string) error {
 	if contentType == "" && impl.cfg.Pages != nil {
 		contentType = impl.cfg.Pages.DefaultContentType
 	}
 	if contentLang == "" && impl.cfg.Pages != nil {
 		contentLang = impl.cfg.Pages.DefaultContentLang
 	}
+	if contentEnc == "" && impl.cfg.Pages != nil {
+		contentEnc = impl.cfg.Pages.DefaultContentEnc
+	}
 	if contentType == "" {
 		contentType = defaultContentType
 	}
 	if contentLang == "" {
 		contentLang = defaultContentLang
+	}
+	if contentEnc == "" {
+		contentEnc = defaultContentEnc
 	}
 
 	t := htmltemplate.New("page")
@@ -421,6 +429,7 @@ func (impl *Impl) compilePage(key string, contents string, contentType string, c
 		size:        len(contents),
 		contentType: contentType,
 		contentLang: contentLang,
+		contentEnc:  contentEnc,
 	}
 	return nil
 }
