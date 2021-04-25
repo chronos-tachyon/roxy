@@ -1,6 +1,7 @@
 FROM golang:1.16.3-alpine3.13 AS builder
 RUN ["apk", "add", "--no-cache", "libcap", "ca-certificates"]
 RUN ["/bin/sh", "-c", "update-ca-certificates 2>/dev/null || true"]
+RUN ["/bin/sh", "-c", "echo 'hosts: files dns' > /etc/nsswitch.conf"]
 WORKDIR /build
 COPY ./ ./
 RUN ["go", "get", "-d", "-v", "./..."]
@@ -15,7 +16,7 @@ RUN ["chmod", "0750", "/var/lib/roxy", "/var/lib/roxy/acme"]
 
 FROM alpine:3.13 AS final
 COPY --from=builder /go/bin/ /go/bin/
-COPY --from=builder /etc/passwd /etc/group /etc/
+COPY --from=builder /etc/passwd /etc/group /etc/nsswitch.conf /etc/
 COPY --from=builder /etc/roxy/ /etc/roxy/
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /var/lib/roxy/ /var/lib/roxy/
