@@ -8,20 +8,22 @@ RUN ["go", "get", "-d", "-v", "./..."]
 RUN ["go", "install", "-v", "./..."]
 RUN ["setcap", "cap_net_bind_service=+ep", "/go/bin/roxy"]
 RUN ["addgroup", "-S", "roxy", "-g", "400"]
-RUN ["adduser", "-S", "roxy", "-u", "400", "-G", "roxy", "-h", "/var/lib/roxy", "-H", "-D"]
-RUN ["mkdir", "-p", "/etc/roxy", "/var/lib/roxy/acme"]
+RUN ["adduser", "-S", "roxy", "-u", "400", "-G", "roxy", "-h", "/var/opt/roxy/lib", "-H", "-D"]
+RUN ["mkdir", "-p", "/etc/roxy", "/opt/roxy/share/misc", "/var/opt/roxy/lib/acme"]
 RUN ["cp", "/build/config.json.example", "/etc/roxy/config.json"]
-RUN ["chown", "roxy:roxy", "/etc/roxy", "/etc/roxy/config.json", "/var/lib/roxy", "/var/lib/roxy/acme"]
-RUN ["chmod", "0750", "/var/lib/roxy", "/var/lib/roxy/acme"]
+RUN ["cp", "/build/mime.json.example", "/opt/roxy/share/misc/mime.json"]
+RUN ["chown", "roxy:roxy", "/var/opt/roxy/lib", "/var/opt/roxy/lib/acme"]
+RUN ["chmod", "0750", "/var/opt/roxy/lib", "/var/opt/roxy/lib/acme"]
 
 FROM alpine:3.13 AS final
-COPY --from=builder /go/bin/ /go/bin/
+COPY --from=builder /opt/roxy/ /opt/roxy/
+COPY --from=builder /go/bin/ /opt/roxy/bin/
+COPY --from=builder /var/opt/roxy/ /var/opt/roxy/
 COPY --from=builder /etc/passwd /etc/group /etc/nsswitch.conf /etc/
 COPY --from=builder /etc/roxy/ /etc/roxy/
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /var/lib/roxy/ /var/lib/roxy/
-ENV PATH /go/bin:$PATH
+ENV PATH /opt/roxy/bin:$PATH
 USER roxy:roxy
-WORKDIR /var/lib/roxy
+WORKDIR /var/opt/roxy/lib
 EXPOSE 80/tcp 443/tcp
 CMD ["roxy", "-S", "-c", "/etc/roxy/config.json"]

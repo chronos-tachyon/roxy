@@ -11,24 +11,18 @@ import (
 )
 
 type Config struct {
-	Etcd      *EtcdConfig              `json:"etcd"`
-	ZK        *ZKConfig                `json:"zookeeper"`
-	Storage   *StorageConfig           `json:"storage"`
-	Hosts     []string                 `json:"hosts"`
-	Pages     *PagesConfig             `json:"pages"`
-	MimeRules []*MimeRuleConfig        `json:"mimeRules"`
-	Targets   map[string]*TargetConfig `json:"targets"`
-	Rules     []*RuleConfig            `json:"rules"`
+	Global  *GlobalConfig            `json:"global"`
+	Hosts   []string                 `json:"hosts"`
+	Pages   *PagesConfig             `json:"pages"`
+	Targets map[string]*TargetConfig `json:"targets"`
+	Rules   []*RuleConfig            `json:"rules"`
 }
 
-type TLSClientConfig struct {
-	SkipVerify        bool   `json:"skipVerify"`
-	SkipVerifyDNSName bool   `json:"skipVerifyDNSName"`
-	RootCA            string `json:"rootCA"`
-	ExactCN           string `json:"exactCN"`
-	ForceDNSName      string `json:"forceDNSName"`
-	ClientCert        string `json:"clientCert"`
-	ClientKey         string `json:"clientKey"`
+type GlobalConfig struct {
+	MimeFile string         `json:"mimeFile"`
+	Etcd     *EtcdConfig    `json:"etcd"`
+	ZK       *ZKConfig      `json:"zookeeper"`
+	Storage  *StorageConfig `json:"storage"`
 }
 
 type EtcdConfig struct {
@@ -74,19 +68,11 @@ type PageConfig struct {
 	ContentEnc  string `json:"contentEncoding"`
 }
 
-type MimeRuleConfig struct {
-	Suffixes    []string `json:"suffixes"`
-	ContentType string   `json:"contentType"`
-	ContentLang string   `json:"contentLanguage"`
-	ContentEnc  string   `json:"contentEncoding"`
-}
-
 type TargetConfig struct {
-	Type         enums.TargetType `json:"type"`
-	Path         string           `json:"path,omitempty"`
-	Target       string           `json:"target,omitempty"`
-	PollInterval time.Duration    `json:"pollInterval,omitempty"`
-	TLS          *TLSClientConfig `json:"tls,omitempty"`
+	Type   enums.TargetType `json:"type"`
+	Path   string           `json:"path,omitempty"`
+	Target string           `json:"target,omitempty"`
+	TLS    *TLSClientConfig `json:"tls,omitempty"`
 }
 
 type RuleConfig struct {
@@ -100,6 +86,25 @@ type MutationConfig struct {
 	Header  string             `json:"header"`
 	Search  string             `json:"search"`
 	Replace string             `json:"replace"`
+}
+
+type TLSClientConfig struct {
+	SkipVerify        bool   `json:"skipVerify"`
+	SkipVerifyDNSName bool   `json:"skipVerifyDNSName"`
+	RootCA            string `json:"rootCA"`
+	ExactCN           string `json:"exactCN"`
+	ForceDNSName      string `json:"forceDNSName"`
+	ClientCert        string `json:"clientCert"`
+	ClientKey         string `json:"clientKey"`
+}
+
+type MimeFile []*MimeRuleConfig
+
+type MimeRuleConfig struct {
+	Suffixes    []string `json:"suffixes"`
+	ContentType string   `json:"contentType"`
+	ContentLang string   `json:"contentLanguage"`
+	ContentEnc  string   `json:"contentEncoding"`
 }
 
 func CompileTLSClientConfig(cfg *TLSClientConfig) (*tls.Config, error) {

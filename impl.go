@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	htmltemplate "html/template"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
@@ -27,12 +29,12 @@ var (
 type Impl struct {
 	configPath string
 	cfg        *Config
+	mimeRules  []*MimeRule
 	etcd       *etcdclient.Client
 	zk         *zkclient.Conn
 	storage    StorageEngine
 	hosts      []*regexp.Regexp
 	pages      map[string]pageData
-	mimeRules  []*MimeRule
 	targets    map[string]http.Handler
 	rules      []*Rule
 }
@@ -69,11 +71,9 @@ func LoadImpl(configPath string) (*Impl, error) {
 		}
 	}
 
-	if impl.cfg.Storage == nil {
-		return nil, ConfigLoadError{
-			Path: configPath,
-			Err:  fmt.Errorf("missing required section \"storage\""),
-		}
+	err = impl.loadMimeRules()
+	if err != nil {
+		return nil, err
 	}
 
 	err = impl.loadEtcd()
@@ -101,11 +101,6 @@ func LoadImpl(configPath string) (*Impl, error) {
 		return nil, err
 	}
 
-	err = impl.loadMimeRules()
-	if err != nil {
-		return nil, err
-	}
-
 	err = impl.loadTargets()
 	if err != nil {
 		return nil, err
@@ -119,12 +114,79 @@ func LoadImpl(configPath string) (*Impl, error) {
 	return impl, nil
 }
 
+func (impl *Impl) loadMimeRules() error {
+	var mimeFile string
+	var mimeFileJSON []byte
+	var err error
+
+	if impl.cfg.Global == nil || impl.cfg.Global.MimeFile == "" {
+		mimeFile = defaultMimeFile
+		mimeFileJSON, err = ioutil.ReadFile(mimeFile)
+		if errors.Is(err, fs.ErrNotExist) {
+			mimeFile = "<internal>"
+			mimeFileJSON = []byte(defaultMimeFileJSON)
+			err = nil
+		}
+		if err != nil {
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "global.mimeFile",
+				Err:     err,
+			}
+		}
+	} else {
+		mimeFile, err = filepath.Abs(impl.cfg.Global.MimeFile)
+		if err != nil {
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "global.mimeFile",
+				Err:     err,
+			}
+		}
+
+		mimeFileJSON, err = ioutil.ReadFile(mimeFile)
+		if err != nil {
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: "global.mimeFile",
+				Err:     err,
+			}
+		}
+	}
+
+	var mimeFileData MimeFile
+	d := json.NewDecoder(bytes.NewReader(mimeFileJSON))
+	d.DisallowUnknownFields()
+	err = d.Decode(&mimeFileData)
+	if err != nil {
+		return ConfigLoadError{
+			Path: mimeFile,
+			Err:  err,
+		}
+	}
+
+	impl.mimeRules = make([]*MimeRule, len(mimeFileData))
+	for index, cfg := range mimeFileData {
+		impl.mimeRules[index], err = CompileMimeRule(cfg)
+		if err != nil {
+			return ConfigLoadError{
+				Path:    mimeFile,
+				Section: fmt.Sprintf("[%d]", index),
+				Err:     err,
+			}
+		}
+	}
+	return nil
+}
+
 func (impl *Impl) loadEtcd() error {
-	if impl.cfg.Etcd == nil {
+	if impl.cfg.Global == nil || impl.cfg.Global.Etcd == nil {
 		return nil
 	}
 
-	if len(impl.cfg.Etcd.Endpoints) == 0 {
+	cfg := impl.cfg.Global.Etcd
+
+	if len(cfg.Endpoints) == 0 {
 		return ConfigLoadError{
 			Path:    impl.configPath,
 			Section: "etcd",
@@ -132,12 +194,12 @@ func (impl *Impl) loadEtcd() error {
 		}
 	}
 
-	dialTimeout := impl.cfg.Etcd.DialTimeout
+	dialTimeout := cfg.DialTimeout
 	if dialTimeout == 0 {
 		dialTimeout = 5 * time.Second
 	}
 
-	tlsConfig, err := CompileTLSClientConfig(impl.cfg.Etcd.TLS)
+	tlsConfig, err := CompileTLSClientConfig(cfg.TLS)
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
@@ -147,13 +209,13 @@ func (impl *Impl) loadEtcd() error {
 	}
 
 	impl.etcd, err = etcdclient.New(etcdclient.Config{
-		Endpoints:            impl.cfg.Etcd.Endpoints,
+		Endpoints:            cfg.Endpoints,
 		AutoSyncInterval:     1 * time.Minute,
 		DialTimeout:          dialTimeout,
-		DialKeepAliveTime:    impl.cfg.Etcd.KeepAliveTime,
-		DialKeepAliveTimeout: impl.cfg.Etcd.KeepAliveTimeout,
-		Username:             impl.cfg.Etcd.Username,
-		Password:             impl.cfg.Etcd.Password,
+		DialKeepAliveTime:    cfg.KeepAliveTime,
+		DialKeepAliveTimeout: cfg.KeepAliveTimeout,
+		Username:             cfg.Username,
+		Password:             cfg.Password,
 		TLS:                  tlsConfig,
 		LogConfig:            NewDummyZapConfig(),
 		Context:              gRootContext,
@@ -170,11 +232,13 @@ func (impl *Impl) loadEtcd() error {
 }
 
 func (impl *Impl) loadZK() error {
-	if impl.cfg.ZK == nil {
+	if impl.cfg.Global == nil || impl.cfg.Global.ZK == nil {
 		return nil
 	}
 
-	if len(impl.cfg.ZK.Servers) == 0 {
+	cfg := impl.cfg.Global.ZK
+
+	if len(cfg.Servers) == 0 {
 		return ConfigLoadError{
 			Path:    impl.configPath,
 			Section: "zookeeper",
@@ -182,14 +246,14 @@ func (impl *Impl) loadZK() error {
 		}
 	}
 
-	sessTimeout := impl.cfg.ZK.SessionTimeout
+	sessTimeout := cfg.SessionTimeout
 	if sessTimeout == 0 {
 		sessTimeout = 30 * time.Second
 	}
 
 	var err error
 	impl.zk, _, err = zkclient.Connect(
-		impl.cfg.ZK.Servers,
+		cfg.Servers,
 		sessTimeout,
 		zkclient.WithLogger(ZKLoggerBridge{}))
 	if err != nil {
@@ -200,8 +264,8 @@ func (impl *Impl) loadZK() error {
 		}
 	}
 
-	if impl.cfg.ZK.Auth != nil {
-		scheme := impl.cfg.ZK.Auth.Scheme
+	if cfg.Auth != nil {
+		scheme := cfg.Auth.Scheme
 		if scheme == "" {
 			return ConfigLoadError{
 				Path:    impl.configPath,
@@ -212,8 +276,8 @@ func (impl *Impl) loadZK() error {
 
 		var raw []byte
 		switch {
-		case impl.cfg.ZK.Auth.Raw != "":
-			raw, err = base64.StdEncoding.DecodeString(impl.cfg.ZK.Auth.Raw)
+		case cfg.Auth.Raw != "":
+			raw, err = base64.StdEncoding.DecodeString(cfg.Auth.Raw)
 			if err != nil {
 				return ConfigLoadError{
 					Path:    impl.configPath,
@@ -222,8 +286,8 @@ func (impl *Impl) loadZK() error {
 				}
 			}
 
-		case impl.cfg.ZK.Auth.Username != "" && impl.cfg.ZK.Auth.Password != "":
-			raw = []byte(impl.cfg.ZK.Auth.Username + ":" + impl.cfg.ZK.Auth.Password)
+		case cfg.Auth.Username != "" && cfg.Auth.Password != "":
+			raw = []byte(cfg.Auth.Username + ":" + cfg.Auth.Password)
 
 		default:
 			return ConfigLoadError{
@@ -247,8 +311,18 @@ func (impl *Impl) loadZK() error {
 }
 
 func (impl *Impl) loadStorageEngine() error {
+	var cfg *StorageConfig
+	if impl.cfg.Global == nil || impl.cfg.Global.Storage == nil {
+		cfg = &StorageConfig{
+			Engine: defaultStorageEngine,
+			Path:   defaultStoragePath,
+		}
+	} else {
+		cfg = impl.cfg.Global.Storage
+	}
+
 	var err error
-	impl.storage, err = NewStorageEngine(impl, impl.cfg.Storage)
+	impl.storage, err = NewStorageEngine(impl, cfg)
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
@@ -278,13 +352,13 @@ func (impl *Impl) loadHosts() error {
 func (impl *Impl) loadPages() error {
 	impl.pages = make(map[string]pageData, 64)
 
-	if err := impl.compilePage("index", defaultIndexPageTemplate, "", ""); err != nil {
+	if err := impl.compilePage("index", defaultIndexPageTemplate, "", "", ""); err != nil {
 		return err
 	}
-	if err := impl.compilePage("redir", defaultRedirPageTemplate, "", ""); err != nil {
+	if err := impl.compilePage("redir", defaultRedirPageTemplate, "", "", ""); err != nil {
 		return err
 	}
-	if err := impl.compilePage("error", defaultErrorPageTemplate, "", ""); err != nil {
+	if err := impl.compilePage("error", defaultErrorPageTemplate, "", "", ""); err != nil {
 		return err
 	}
 
@@ -430,22 +504,6 @@ func (impl *Impl) compilePage(key string, contents string, contentType string, c
 		contentType: contentType,
 		contentLang: contentLang,
 		contentEnc:  contentEnc,
-	}
-	return nil
-}
-
-func (impl *Impl) loadMimeRules() error {
-	var err error
-	impl.mimeRules = make([]*MimeRule, len(impl.cfg.MimeRules))
-	for index, cfg := range impl.cfg.MimeRules {
-		impl.mimeRules[index], err = CompileMimeRule(cfg)
-		if err != nil {
-			return ConfigLoadError{
-				Path:    impl.configPath,
-				Section: fmt.Sprintf("mimeRules[%d]", index),
-				Err:     err,
-			}
-		}
 	}
 	return nil
 }

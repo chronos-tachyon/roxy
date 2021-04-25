@@ -1,7 +1,10 @@
 {
-  "storage": {
-    "engine": "fs",
-    "path": "/var/lib/roxy/acme"
+  "global": {
+    "mimeFile": "/opt/roxy/share/misc/mime.json",
+    "storage": {
+      "engine": "fs",
+      "path": "/var/opt/roxy/lib/acme"
+    }
   },
   "hosts": [
     "*.example.com"

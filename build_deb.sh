@@ -37,9 +37,9 @@ build_for_os_arch() {
     "${BUILDDIR}/opt/roxy/bin" \
     "${BUILDDIR}/opt/roxy/share/misc" \
     "${BUILDDIR}/etc/opt/roxy" \
-    "${BUILDDIR}/var/opt/roxy"
+    "${BUILDDIR}/var/opt/roxy/lib/acme"
 
-  TOPLEVELDIRS=( opt etc var )
+  TOPLEVELDIRS=( etc opt var )
 
   echo '> go get -d ./...'
   go get -d ./...
@@ -51,6 +51,9 @@ build_for_os_arch() {
   echo '> cp (additional files) .../etc/opt/roxy/'
   cp config.json.example "${BUILDDIR}/etc/opt/roxy/config.json.example"
   cp config.json.example "${BUILDDIR}/etc/opt/roxy/config.json"
+  cp mime.json.example "${BUILDDIR}/etc/opt/roxy/mime.json.example"
+  cp mime.json.example "${BUILDDIR}/etc/opt/roxy/mime.json"
+  cp mime.json.example "${BUILDDIR}/opt/roxy/share/misc/mime.json"
 
   echo '> tar -cf .../data.tar'
   tar \
