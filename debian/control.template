@@ -1,0 +1,15 @@
+Package: roxy
+Version: %VERSION%
+Architecture: %ARCH%
+Maintainer: Donald King <chronos@chronos-tachyon.net>
+Installed-Size: %SIZE%
+Depends: libc6
+Recommends: ca-certificates
+Section: net
+Priority: optional
+Homepage: https://chronos-tachyon.github.io/roxy/
+Description: easy-to-configure load balancing reverse proxy
+ Roxy the Frontend Proxy is an Internet-facing HTTPS reverse proxy, with
+ built-in support for obtaining TLS certificates through Let's Encrypt and the
+ ACME protocol.  It can connect to backends through HTTP and gRPC, via mTLS,
+ ordinary TLS, or plaintext.

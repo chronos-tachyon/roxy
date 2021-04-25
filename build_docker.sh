@@ -1,13 +1,16 @@
 #!/bin/bash
 set -euo pipefail
-VERSION=0.0.0
+cd "$(dirname "$0")"
+VERSION="$(cat .version)"
 DATESTAMP="$(date --utc +%Y.%m.%d)"
-mkdir -p ~/.cache/last-build
-if [ ! -e ~/.cache/last-build/roxy ]; then
-  echo 0 > ~/.cache/last-build/roxy
+LASTBUILDDIR="${HOME}/.cache/last-build"
+LASTBUILDFILE="${LASTBUILDDIR}/roxy-docker"
+mkdir -p "$LASTBUILDDIR"
+if [ ! -e "$LASTBUILDFILE" ]; then
+  echo 0 > "$LASTBUILDFILE"
 fi
-LAST_COUNTER="$(cat ~/.cache/last-build/roxy)"
+LAST_COUNTER="$(cat "$LASTBUILDFILE")"
 NEXT_COUNTER=$((LAST_COUNTER + 1))
-echo "$NEXT_COUNTER" > ~/.cache/last-build/roxy
+echo "$NEXT_COUNTER" > "$LASTBUILDFILE"
 FULL_VERSION="${VERSION}-${DATESTAMP}-${NEXT_COUNTER}"
 docker build -t "roxy:${FULL_VERSION}" -t "roxy:latest" .

@@ -10,7 +10,7 @@ Things that I would like to do with Roxy:
 * [x] Unique request IDs for log correlation
 * [x] Re-open log file on SIGHUP
 * [ ] Make journald logging more useful
-* [ ] Scripts to generate Debian package
+* [x] Scripts to generate Debian package
 * [x] Scripts to generate Docker image
 * [ ] Prometheus metrics on a new HTTP listen port
 * [x] WrappedWriter.Error should not Write after WriteHeader if r.Method is HEAD

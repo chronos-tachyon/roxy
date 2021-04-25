@@ -1,5 +1,7 @@
 # roxy
 
+[![Go](https://img.shields.io/github/go-mod/go-version/chronos-tachyon/roxy)](https://golang.org/)
+
 **Roxy the Frontend Proxy**
 
 > ![Roxy Lalonde](https://chronos-tachyon.net/img/roxy-lalonde.png)
