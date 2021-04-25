@@ -5,7 +5,7 @@ Maintainer: Donald King <chronos@chronos-tachyon.net>
 Installed-Size: %SIZE%
 Depends: libc6
 Recommends: ca-certificates
-Section: net
+Section: contrib/net
 Priority: optional
 Homepage: https://chronos-tachyon.github.io/roxy/
 Description: easy-to-configure load balancing reverse proxy
