@@ -34,10 +34,12 @@ build_for_os_arch() {
 
   mkdir -p \
     "${BUILDDIR}/DEBIAN" \
+    "${BUILDDIR}/etc/opt/roxy" \
+    "${BUILDDIR}/etc/systemd/system" \
     "${BUILDDIR}/opt/roxy/bin" \
     "${BUILDDIR}/opt/roxy/share/misc" \
-    "${BUILDDIR}/etc/opt/roxy" \
-    "${BUILDDIR}/var/opt/roxy/lib/acme"
+    "${BUILDDIR}/var/opt/roxy/lib/acme" \
+    "${BUILDDIR}/var/opt/roxy/log"
 
   TOPLEVELDIRS=( etc opt var )
 
@@ -54,6 +56,7 @@ build_for_os_arch() {
   cp mime.json.example "${BUILDDIR}/etc/opt/roxy/mime.json.example"
   cp mime.json.example "${BUILDDIR}/etc/opt/roxy/mime.json"
   cp mime.json.example "${BUILDDIR}/opt/roxy/share/misc/mime.json"
+  cp roxy.service "${BUILDDIR}/etc/systemd/system/roxy.service"
 
   echo '> tar -cf .../data.tar'
   tar \

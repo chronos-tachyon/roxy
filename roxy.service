@@ -1,0 +1,16 @@
+[Unit]
+Description=Roxy the Frontend Proxy
+After=network.target
+
+[Service]
+ExecStart=/opt/roxy/bin/roxy -l /var/opt/roxy/log/roxy.json -c /etc/opt/roxy/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+User=roxy
+Group=roxy
+UMask=022
+
+[Install]
+WantedBy=multi-user.target
+
+; vim:set filetype=systemd:

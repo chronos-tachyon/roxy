@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+set -u
+
+if [ "${1:-}" = "remove" ]; then
+  systemctl disable roxy || true
+  systemctl stop roxy || true
+fi

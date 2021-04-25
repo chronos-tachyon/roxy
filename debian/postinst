@@ -23,5 +23,12 @@ fi
 chown root:roxy /etc/opt/roxy/config.json
 chmod 0640 /etc/opt/roxy/config.json
 
-chown roxy:roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme
+chown roxy:roxy /var/opt/roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme
+chmod 0755 /var/opt/roxy
 chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme
+
+chown roxy:adm /var/opt/roxy/log
+chmod 2750 /var/opt/roxy/log
+
+echo '* Please run "sudo systemctl start roxy" to start Roxy immediately.'
+echo '* Please run "sudo systemctl enable roxy" to start Roxy after every reboot.'
