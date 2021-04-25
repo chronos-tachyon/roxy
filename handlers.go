@@ -525,28 +525,52 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		IsHidden    bool
 	}
 
+	uidCache := make(map[uint32]string, 4)
+	gidCache := make(map[uint32]string, 4)
+
+	lookupUID := func(uid uint32) string {
+		if name, found := uidCache[uid]; found {
+			return name
+		}
+
+		str := strconv.FormatUint(uint64(uid), 10)
+		u, err := user.LookupId(str)
+		var name string
+		if err == nil {
+			name = u.Username
+		} else {
+			logger.Warn().Uint32("uid", uid).Err(err).Msg("failed to look up user by ID")
+			name = "#" + str
+		}
+		uidCache[uid] = name
+		return name
+	}
+
+	lookupGID := func(gid uint32) string {
+		if name, found := gidCache[gid]; found {
+			return name
+		}
+
+		str := strconv.FormatUint(uint64(gid), 10)
+		g, err := user.LookupGroupId(str)
+		var name string
+		if err == nil {
+			name = g.Name
+		} else {
+			name = "#" + str
+		}
+		gidCache[gid] = name
+		return name
+	}
+
 	populateRealStats := func(e *entry, fi fs.FileInfo, fullPath string) {
 		st, ok := fi.Sys().(*syscall.Stat_t)
 		if ok {
 			e.Dev = st.Dev
 			e.Ino = st.Ino
 			e.NLink = st.Nlink
-
-			uid := strconv.FormatUint(uint64(st.Uid), 10)
-			if u, err := user.LookupId(uid); err == nil {
-				e.Owner = u.Username
-			} else {
-				logger.Warn().Uint32("uid", st.Uid).Err(err).Msg("failed to look up user by ID")
-				e.Owner = "#" + uid
-			}
-
-			gid := strconv.FormatUint(uint64(st.Gid), 10)
-			if g, err := user.LookupGroupId(gid); err == nil {
-				e.Group = g.Name
-			} else {
-				logger.Warn().Uint32("gid", st.Gid).Err(err).Msg("failed to look up group by ID")
-				e.Group = "#" + gid
-			}
+			e.Owner = lookupUID(st.Uid)
+			e.Group = lookupGID(st.Gid)
 
 			var realMode [10]byte
 			for i := 0; i < 10; i++ {
