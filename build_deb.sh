@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-if [ "$RELEASE_MODE" = "true" ]; then
+if [ "${RELEASE_MODE:-false}" = "true" ]; then
   FULL_VERSION="$GITHUB_REF"
   FULL_VERSION="${FULL_VERSION##*/v}"
   version_regexp="v${FULL_VERSION/./\\.}"
