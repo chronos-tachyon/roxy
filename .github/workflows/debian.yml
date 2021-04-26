@@ -9,6 +9,8 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Build
+        env:
+          RELEASE_MODE: true
         run: ${GITHUB_WORKSPACE}/build_deb.sh
 
       - name: Release

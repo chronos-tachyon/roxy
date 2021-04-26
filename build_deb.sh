@@ -1,18 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-VERSION="$(cat .version)"
-DATESTAMP="$(date --utc +%Y.%m.%d)"
-LASTBUILDDIR="${HOME}/.cache/last-build"
-LASTBUILDFILE="${LASTBUILDDIR}/roxy-deb"
-mkdir -p "$LASTBUILDDIR"
-if [ ! -e "$LASTBUILDFILE" ]; then
-  echo 0 > "$LASTBUILDFILE"
+if [ "$RELEASE_MODE" = "true" ]; then
+  FULL_VERSION="$GITHUB_REF"
+  FULL_VERSION="${FULL_VERSION##*/}"
+  version_regexp="${FULL_VERSION/./\\.}"
+  rm -f release-notes.txt
+  awk '
+    BEGIN { X=0 }
+    /^v[0-9.]+$/ { X=0 }
+    /^'"${version_regexp}"'$/ { X=1 }
+    X == 1 {print}
+  ' < CHANGELOG.txt > release-notes.txt
+else
+  VERSION="$(cat .version)"
+  DATESTAMP="$(date --utc +%Y.%m.%d)"
+  LASTBUILDDIR="${HOME}/.cache/last-build"
+  LASTBUILDFILE="${LASTBUILDDIR}/roxy-deb"
+  mkdir -p "$LASTBUILDDIR"
+  if [ ! -e "$LASTBUILDFILE" ]; then
+    echo 0 > "$LASTBUILDFILE"
+  fi
+  LAST_COUNTER="$(cat "$LASTBUILDFILE")"
+  NEXT_COUNTER=$((LAST_COUNTER + 1))
+  echo "$NEXT_COUNTER" > "$LASTBUILDFILE"
+  FULL_VERSION="${VERSION}-r${DATESTAMP}-${NEXT_COUNTER}"
 fi
-LAST_COUNTER="$(cat "$LASTBUILDFILE")"
-NEXT_COUNTER=$((LAST_COUNTER + 1))
-echo "$NEXT_COUNTER" > "$LASTBUILDFILE"
-FULL_VERSION="${VERSION}-r${DATESTAMP}-${NEXT_COUNTER}"
 
 umask 022
 
@@ -67,7 +80,7 @@ build_for_os_arch() {
     --create \
     --file="${BUILDDIR}/data.tar" \
     --xattrs \
-    --mtime='1980-01-01 00:00:00' \
+    --mtime='1970-01-01 00:00:00' \
     --mode='a+rX,u+w,go-w' \
     --owner=root \
     --group=root \
