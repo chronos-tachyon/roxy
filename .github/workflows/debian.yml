@@ -23,7 +23,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          body_path: release-notes.txt
+          body_path: ${GITHUB_WORKSPACE}/release-notes.txt
           body: "New release."
           files: |
             *.deb
