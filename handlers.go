@@ -367,6 +367,15 @@ func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f 
 		hdrs.Set("content-encoding", contentEnc)
 	}
 
+	if contentType == "application/javascript" || contentType == "text/javascript" || strings.HasPrefix(contentType, "text/javascript;") {
+		mapFilePath := r.URL.Path + ".map"
+		mapFile, err := h.fs.Open(mapFilePath)
+		if err == nil {
+			mapFile.Close()
+			hdrs.Set("sourcemap", mapFilePath)
+		}
+	}
+
 	size := fi.Size()
 	mtime := fi.ModTime()
 	if size <= defaultMaxCacheSize {

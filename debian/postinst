@@ -37,7 +37,11 @@ chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme
 chown roxy:adm /var/opt/roxy/log
 chmod 2750 /var/opt/roxy/log
 
-if ! systemctl is-active roxy >/dev/null 2>&1 ; then
+systemctl daemon-reload || true
+if systemctl is-active roxy >/dev/null 2>&1 ; then
+  echo '* Running "systemctl restart roxy"...'
+  systemctl restart roxy || true
+else
   echo '* Please run "sudo systemctl start roxy" to start Roxy immediately.'
 fi
 if ! systemctl is-enabled roxy >/dev/null 2>&1 ; then

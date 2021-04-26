@@ -23,3 +23,6 @@ features:
   centrally control your Internet-visible server headers
 * Comprehensive request logging in JSON Lines format
 * Can serve static files directly, without need for nginx, lighttpd, etc.
+
+See [our GitHub Pages site](https://chronos-tachyon.github.io/roxy/) for more
+documentation.
