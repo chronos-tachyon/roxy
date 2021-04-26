@@ -27,4 +27,3 @@ jobs:
           body: "New release."
           files: |
             *.deb
-          fail_on_unmatched_files: true
