@@ -3,8 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 if [ "$RELEASE_MODE" = "true" ]; then
   FULL_VERSION="$GITHUB_REF"
-  FULL_VERSION="${FULL_VERSION##*/}"
-  version_regexp="${FULL_VERSION/./\\.}"
+  FULL_VERSION="${FULL_VERSION##*/v}"
+  version_regexp="v${FULL_VERSION/./\\.}"
   rm -f release-notes.txt
   awk '
     BEGIN { X=0 }
