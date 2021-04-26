@@ -1,6 +1,6 @@
 /roxy
-/roxy.json
 /zkcp
 /demo-backend
+/colorize-logs
 /*.deb
 /release-notes.txt
