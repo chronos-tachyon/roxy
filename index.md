@@ -51,6 +51,21 @@ Roxy is configured using JSON format.  The main config file lives at
 `/etc/opt/roxy/config.json`, while the MIME rules live at
 `/etc/opt/roxy/mime.json`.
 
+The overall layout of `config.json` looks like this:
+
+```
+{
+  "global": {...},  # Object, section "global"
+  "hosts": [...],   # Array of string,  section "hosts"
+  "pages": {...},   # Object, section "pages"
+  "targets": {...}, # Object, section "targets"
+  "rules": [...]    # Array of object, section "rules"
+}
+```
+
+All sections are _technically_ optional, but nearly every setup will
+want to define `"hosts"`, `"targets"`, and `"rules"`.
+
 Here is an example Roxy configuration for `config.json` that demonstrates both
 static content serving and reverse proxying, plus a few simple header
 rewrites:
@@ -122,3 +137,166 @@ rewrites:
   ]
 }
 ```
+
+### Section `"global"`
+
+Section `"global"` groups together miscellaneous configuration items that don't fit in any other category.
+
+It contains the following fields and sub-sections: `"mimeFile"`, `"etcd"`, `"zk"`, and `"storage"`.
+
+```
+{
+  "global": {
+    "mimeFile": "...",  # String, path to mime.json
+    "etcd": {...},      # Object, sub-section "global"."etcd"
+    "zk": {...},        # Object, sub-section "global"."zk"
+    "storage": {...}    # Object, sub-section "global"."storage"
+  },
+  ...
+}
+```
+
+#### Sub-section `"global"."etcd"`
+
+Sub-section `"global"."etcd"` enables the use of [Etcd](https://etcd.io/) to store TLS certificates
+(see sub-section `"global"."storage"`) and to look up backends (see section `"targets"`).
+It has the following structure:
+
+```
+{
+  "global": {
+    ...
+    "etcd": {
+      "endpoints": ["..."],      # Array of strings, addresses of the etcd cluster members
+      "tls": {...},              # TLS client configuration (optional; see below)
+      "username": "...",         # etcd username (optional)
+      "password": "...",         # etcd password (optional)
+      "dialTimeout": "...",      # Duration string, e.g. "5s", max time to wait when connecting
+      "keepAliveTime": "...",    # Duration string, time between sending of keep-alive requests
+      "keepAliveTimeout": "..."  # Duration string, max time without receiving a keep-alive reply
+    },
+    ...
+  },
+  ...
+}
+```
+
+For a single-homed etcd cluster running on `localhost` with no TLS and no username/password security,
+this simplifies to:
+
+```json
+{
+  "global": {
+    "etcd": {
+      "endpoints": ["http://localhost:2379"]
+    }
+  }
+}
+```
+
+Managing an etcd cluster is beyond the scope of this documentation.
+
+#### Sub-section `"global"."zk"`
+
+Sub-section `"global"."zk"` enables the use of [Apache ZooKeeper](https://zookeeper.apache.org/) to
+store TLS certificates (sub-section `"global"."storage"`) and to look up backends (section `"targets"`).
+It has the following structure:
+
+```
+{
+  "global": {
+    ...
+    "zk": {
+      "servers": ["..."],       # Array of strings, addresses of the ZK cluster members
+      "sessionTimeout": "...",  # Duration string, e.g. "30s", max time that the ZK cluster should keep our session alive if we get disconnected
+      "auth": {
+        "scheme": "digest",     # Other schemes are possible, see ZooKeeper docs
+        "raw": "...",           # Base-64 encoded binary data; most users will use "username" and "password" instead
+        "username": "...",      # String, the username to use
+        "password": "..."       # String, the password to use
+      }
+    },
+    ...
+  },
+  ...
+}
+```
+
+For a single-homed ZK cluster running on `localhost` with no authentication:
+
+```json
+{
+  "global": {
+    "zk": {
+      "servers": ["127.0.0.1:2181"]
+    }
+  }
+}
+```
+
+Managing a ZooKeeper cluster is beyond the scope of this documentation.
+
+#### Sub-section `"global"."storage"`
+
+Sub-section `"global"."storage"` determines where Roxy will store TLS certificates
+obtained via the ACME protocol, as well as its long-lived private key for speaking
+with the ACME server.
+It has the following structure:
+
+```
+{
+  "global": {
+    ...
+    "storage": {
+      "engine": "...",  # String, one of "fs", "etcd", or "zk"
+      "path": "..."     # String, meaning depends on which storage engine is in use
+    },
+    ...
+  },
+  ...
+}
+```
+
+The `"path"` field is the name of a directory in the namespace of the given engine.
+
+(Etcd does not have "directories", per se; instead, `"path"` is suffixed with `"/"` to
+form a search prefix.  This feels enough like a directory that the "path" nomenclature
+still fits.)
+
+The default, which takes effect **only** if there is no `"global"."storage"` sub-section at all, is:
+
+```json
+{
+  "global": {
+    "storage": {
+      "engine": "fs",
+      "path": "/var/opt/roxy/lib/acme"
+    }
+  }
+}
+```
+
+### Section `"hosts"`
+
+Section `"hosts"` is a list of host patterns.  A host pattern is a string, which matches one of the
+following patterns: a domain name, a domain name prefixed with `"*."`, or the exact string `"*"`.
+
+This controls which domains Roxy is willing to serve, and more importantly, which domains Roxy is
+willing to obtain [Let's Encrypt](https://letsencrypt.org/) certificates for.
+
+* A domain name, such as `"example.com"`, represents an exact match of that domain.
+
+* A domain name prefixed with `"*."`, such as `"*.example.com"`, means a match of that domain or
+any subdomains beneath it.
+
+* A literal `"*"` means that any requested domain name is considered to match.
+**WARNING: This should be considered a security risk.**
+Someone who doesn't like one of your websites could potentially make HTTPS requests for
+domains that you don't actually own, which will cause Let's Encrypt to block your webserver
+from obtaining future TLS certs.
+
+### Section `"pages"`
+
+### Section `"targets"`
+
+### Section `"rules"`
