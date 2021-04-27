@@ -2,6 +2,8 @@ v0.1.2
   * Implement custom DNS servers, as dns://dns-ip:dns-port/host:port and
     srv://dns-ip:dns-port/domain/service
   * Various minor fixes for the resolver backends
+  * Major improvements and bug fixes for colorize-logs
+  * Minor consistency fixes for Dockerfile and build_deb.sh
 
 v0.1.1
   * Automatic detection of JavaScript source map files (for "SourceMap" header)

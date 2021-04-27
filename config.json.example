@@ -1,6 +1,6 @@
 {
   "global": {
-    "mimeFile": "/opt/roxy/share/misc/mime.json",
+    "mimeFile": "/etc/opt/roxy/mime.json",
     "storage": {
       "engine": "fs",
       "path": "/var/opt/roxy/lib/acme"
@@ -9,11 +9,15 @@
   "hosts": [
     "*.example.com"
   ],
-  "mimeRules": [],
-  "targets": {},
+  "targets": {
+    "srv-www": {
+      "type": "fs",
+      "path": "/srv/www"
+    }
+  },
   "rules": [
     {
-      "target": "ERROR:404"
+      "target": "srv-www"
     }
   ]
 }

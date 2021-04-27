@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -37,7 +38,7 @@ func NewATCResolver(opts Options) (baseresolver.Resolver, error) {
 	dialOpts := make([]grpc.DialOption, 1)
 	if isTLS {
 		serverName := query.Get("lbServerName")
-		if str == "" {
+		if serverName == "" {
 			serverName = strings.TrimRight(lbHost, ".")
 		}
 		tlsConfig := &tls.Config{ServerName: serverName}
