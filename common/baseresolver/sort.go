@@ -61,7 +61,7 @@ func addrDataCompare(a *AddrData, b *AddrData) int {
 	bp := (b.SRVPriority == nil)
 	aw := (a.SRVWeight == nil)
 	bw := (b.SRVWeight == nil)
-	if ap != bp || aw != bw {
+	if ap != aw || ap != bp || aw != bw {
 		panic(fmt.Errorf("SRV records mixed with non-SRV records"))
 	}
 	if ap {

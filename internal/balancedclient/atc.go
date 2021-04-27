@@ -36,9 +36,9 @@ func NewATCResolver(opts Options) (baseresolver.Resolver, error) {
 
 	dialOpts := make([]grpc.DialOption, 1)
 	if isTLS {
-		serverName := lbHost
-		if str := query.Get("serverName"); str != "" {
-			serverName = str
+		serverName := query.Get("lbServerName")
+		if str == "" {
+			serverName = strings.TrimRight(lbHost, ".")
 		}
 		tlsConfig := &tls.Config{ServerName: serverName}
 		dialOpts[0] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))

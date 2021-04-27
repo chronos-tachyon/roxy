@@ -14,8 +14,9 @@ import (
 )
 
 func NewSRVResolver(opts Options) (baseresolver.Resolver, error) {
-	if opts.Target.Authority != "" {
-		return nil, fmt.Errorf("non-empty Target.Authority %q is not supported", opts.Target.Authority)
+	netResolver, err := parseNetResolver(opts.Target.Authority)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Target.Authority: %w", err)
 	}
 
 	ep := opts.Target.Endpoint
@@ -47,7 +48,6 @@ func NewSRVResolver(opts Options) (baseresolver.Resolver, error) {
 	}
 
 	var query url.Values
-	var err error
 	if hasQS {
 		query, err = url.ParseQuery(qs)
 		if err != nil {
@@ -76,7 +76,7 @@ func NewSRVResolver(opts Options) (baseresolver.Resolver, error) {
 		Balancer:     balancer,
 		ResolveFunc: func() ([]*baseresolver.AddrData, error) {
 			// Resolve the SRV records.
-			_, records, err := net.LookupSRV(service, "tcp", name)
+			_, records, err := netResolver.LookupSRV(opts.Context, service, "tcp", name)
 			if err != nil {
 				return nil, err
 			}
@@ -85,9 +85,15 @@ func NewSRVResolver(opts Options) (baseresolver.Resolver, error) {
 			out := make([]*baseresolver.AddrData, 0, len(records))
 			for _, record := range records {
 				// Resolve the A/AAAA records.
-				ipStrList, err := net.LookupHost(record.Target)
+				ipStrList, err := netResolver.LookupHost(opts.Context, record.Target)
 				if err != nil {
 					return nil, err
+				}
+
+				serverName := new(string)
+				*serverName = query.Get("serverName")
+				if *serverName == "" {
+					*serverName = strings.TrimRight(record.Target, ".")
 				}
 
 				priority := new(uint16)
@@ -109,9 +115,6 @@ func NewSRVResolver(opts Options) (baseresolver.Resolver, error) {
 
 					tcpAddr := &net.TCPAddr{IP: ip, Port: int(record.Port)}
 
-					serverName := new(string)
-					*serverName = record.Target
-
 					out = append(out, &baseresolver.AddrData{
 						Addr:           tcpAddr,
 						ServerName:     serverName,
@@ -119,7 +122,8 @@ func NewSRVResolver(opts Options) (baseresolver.Resolver, error) {
 						SRVWeight:      weight,
 						ComputedWeight: computedWeight,
 						Address: resolver.Address{
-							Addr: tcpAddr.String(),
+							Addr:       tcpAddr.String(),
+							ServerName: *serverName,
 						},
 					})
 				}

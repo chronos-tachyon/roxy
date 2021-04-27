@@ -1,10 +1,12 @@
 package balancedclient
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,8 +16,9 @@ import (
 )
 
 func NewDNSResolver(opts Options) (baseresolver.Resolver, error) {
-	if opts.Target.Authority != "" {
-		return nil, fmt.Errorf("non-empty Target.Authority %q is not supported", opts.Target.Authority)
+	netResolver, err := parseNetResolver(opts.Target.Authority)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Target.Authority: %w", err)
 	}
 
 	ep := opts.Target.Endpoint
@@ -74,6 +77,35 @@ func NewDNSResolver(opts Options) (baseresolver.Resolver, error) {
 		}
 	}
 
+	if ip := net.ParseIP(host); ip == nil {
+		if portNum, err := netResolver.LookupPort(opts.Context, "tcp", port); err == nil {
+			tcpAddr := &net.TCPAddr{IP: ip, Port: int(portNum)}
+
+			serverName := new(string)
+			*serverName = query.Get("serverName")
+			if *serverName == "" {
+				*serverName = ip.String()
+			}
+
+			records := []*baseresolver.AddrData{
+				{
+					Addr:       tcpAddr,
+					ServerName: serverName,
+					Address: resolver.Address{
+						Addr:       tcpAddr.String(),
+						ServerName: *serverName,
+					},
+				},
+			}
+
+			return baseresolver.NewStaticResolver(baseresolver.StaticResolverOptions{
+				Random:   opts.Random,
+				Balancer: balancer,
+				Records:  records,
+			})
+		}
+	}
+
 	return baseresolver.NewPollingResolver(baseresolver.PollingResolverOptions{
 		Context:      opts.Context,
 		Random:       opts.Random,
@@ -81,13 +113,13 @@ func NewDNSResolver(opts Options) (baseresolver.Resolver, error) {
 		Balancer:     balancer,
 		ResolveFunc: func() ([]*baseresolver.AddrData, error) {
 			// Resolve the port number.
-			portNum, err := net.LookupPort("tcp", port)
+			portNum, err := netResolver.LookupPort(opts.Context, "tcp", port)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve port %q: %w", port, err)
 			}
 
 			// Resolve the A/AAAA records.
-			ipStrList, err := net.LookupHost(host)
+			ipStrList, err := netResolver.LookupHost(opts.Context, host)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve host %q: %w", host, err)
 			}
@@ -103,17 +135,60 @@ func NewDNSResolver(opts Options) (baseresolver.Resolver, error) {
 				tcpAddr := &net.TCPAddr{IP: ip, Port: int(portNum)}
 
 				serverName := new(string)
-				*serverName = host
+				*serverName = query.Get("serverName")
+				if *serverName == "" {
+					*serverName = strings.TrimRight(host, ".")
+				}
 
 				out[index] = &baseresolver.AddrData{
 					Addr:       tcpAddr,
 					ServerName: serverName,
 					Address: resolver.Address{
-						Addr: tcpAddr.String(),
+						Addr:       tcpAddr.String(),
+						ServerName: *serverName,
 					},
 				}
 			}
 			return out, nil
 		},
 	})
+}
+
+func parseNetResolver(str string) (*net.Resolver, error) {
+	if str == "" {
+		return &net.Resolver{}, nil
+	}
+
+	host, port, err := net.SplitHostPort(str)
+	if err != nil {
+		h, p, err2 := net.SplitHostPort(str + ":53")
+		if err2 == nil {
+			host, port, err = h, p, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse <ip>:<port> %q: %w", str, err)
+		}
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, fmt.Errorf("failed to parse IP address %q", host)
+	}
+
+	udpPortNum, err := net.DefaultResolver.LookupPort(context.Background(), "udp", port)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve port %q: %w", port, err)
+	}
+
+	host = ip.String()
+	port = strconv.Itoa(udpPortNum)
+	hostPort := net.JoinHostPort(host, port)
+
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network string, address string) (net.Conn, error) {
+			var defaultDialer net.Dialer
+			return defaultDialer.DialContext(ctx, network, hostPort)
+		},
+	}, nil
 }

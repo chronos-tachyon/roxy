@@ -3,6 +3,7 @@ package atcresolver
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -15,6 +16,9 @@ import (
 )
 
 func NewBuilder(ctx context.Context, rng *rand.Rand) resolver.Builder {
+	if ctx == nil {
+		panic(errors.New("ctx is nil"))
+	}
 	return myBuilder{ctx, rng}
 }
 
@@ -31,13 +35,6 @@ func (b myBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts re
 	lbHost, lbPort, lbName, query, err := baseresolver.ParseATCTarget(target)
 	if err != nil {
 		return nil, err
-	}
-
-	var balancer baseresolver.BalancerType
-	if str := query.Get("balancer"); str != "" {
-		if err = balancer.Parse(str); err != nil {
-			return nil, fmt.Errorf("failed to parse balancer=%q query string: %w", str, err)
-		}
 	}
 
 	isTLS, err := baseresolver.ParseBool(query.Get("tls"), true)
@@ -66,7 +63,6 @@ func (b myBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts re
 	return baseresolver.NewWatchingResolver(baseresolver.WatchingResolverOptions{
 		Context:     b.ctx,
 		Random:      b.rng,
-		Balancer:    balancer,
 		ResolveFunc: baseresolver.MakeATCResolveFunc(lbcc, lbName, opts.DisableServiceConfig),
 		ClientConn:  cc,
 	})
