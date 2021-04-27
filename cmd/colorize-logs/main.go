@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	getopt "github.com/pborman/getopt/v2"
@@ -12,11 +15,15 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var flagFollow bool
+var (
+	flagFollow     bool
+	flagFollowName bool
+)
 
 func init() {
 	getopt.SetParameters("[<logfile>]")
 	getopt.FlagLong(&flagFollow, "follow", 'f', "follow the log file in real time")
+	getopt.FlagLong(&flagFollowName, "follow-name", 'F', "follow the log file in real time (with periodic checks for log rotation)")
 }
 
 func main() {
@@ -25,34 +32,74 @@ func main() {
 	var consoleWriter io.Writer = zerolog.ConsoleWriter{Out: os.Stdout}
 	log.Logger = log.Output(consoleWriter)
 
-	var (
-		f         *os.File
-		wantClose bool
-	)
-
+	var mu sync.Mutex
+	var inputFile *os.File
+	wantClose := false
 	defer func() {
 		if wantClose {
-			f.Close()
+			inputFile.Close()
 		}
 	}()
 
-	inputFile := "-"
+	inputFileName := "-"
 	if getopt.NArgs() >= 1 {
-		inputFile = getopt.Arg(0)
+		inputFileName = getopt.Arg(0)
 	}
 
-	if inputFile == "-" {
-		f, wantClose = os.Stdin, false
+	if inputFileName == "-" {
+		inputFile, wantClose = os.Stdin, false
 	} else {
 		var err error
-		f, err = os.Open(inputFile)
+		inputFile, err = os.Open(inputFileName)
 		if err != nil {
 			log.Logger.Fatal().
-				Str("inputFile", inputFile).
+				Str("input", inputFileName).
 				Err(err).
 				Msg("failed to open input file")
 		}
 		wantClose = true
+	}
+
+	tryReopen := func() error { return nil }
+	if flagFollowName && wantClose {
+		tryReopen = func() error {
+			inputFile2, err := os.Open(inputFileName)
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+
+			wantClose2 := true
+			defer func() {
+				if wantClose2 {
+					inputFile2.Close()
+				}
+			}()
+
+			fileInfo1, err := inputFile.Stat()
+			if err != nil {
+				return err
+			}
+
+			fileInfo2, err := inputFile2.Stat()
+			if err != nil {
+				return err
+			}
+
+			if stat1, ok1 := fileInfo1.Sys().(*syscall.Stat_t); ok1 {
+				if stat2, ok2 := fileInfo2.Sys().(*syscall.Stat_t); ok2 {
+					if stat1.Dev != stat2.Dev || stat1.Ino != stat2.Ino {
+						mu.Lock()
+						inputFile, inputFile2 = inputFile2, inputFile
+						mu.Unlock()
+					}
+				}
+			}
+			wantClose2 = false
+			return inputFile2.Close()
+		}
 	}
 
 	ch1 := make(chan []byte)
@@ -66,7 +113,14 @@ func main() {
 			wg.Done()
 		}()
 
+		var counter uint
+
+	Top:
+		counter = 0
 		for {
+			mu.Lock()
+			f := inputFile
+			mu.Unlock()
 			buf := make([]byte, 4096)
 			n, err := f.Read(buf)
 			if n > 0 {
@@ -76,14 +130,26 @@ func main() {
 				log.Logger.Error().
 					Err(err).
 					Msg("failed to read from input file")
-				return
+				break
 			}
-			if err == io.EOF && !flagFollow {
-				return
+			if err == io.EOF && !flagFollow && !flagFollowName {
+				break
 			}
 			if err == io.EOF {
+				counter++
 				time.Sleep(250 * time.Millisecond)
+				if counter >= 8 {
+					counter = 0
+					if e := tryReopen(); e != nil {
+						log.Logger.Warn().
+							Err(err).
+							Msg("failed to re-open input file")
+					}
+				}
 			}
+		}
+		if flagFollowName {
+			goto Top
 		}
 	}()
 
@@ -94,14 +160,21 @@ func main() {
 			wg.Done()
 		}()
 
-		var scraps [][]byte
+		var buf []byte
 		var scrapLen int
-		for buf := range ch1 {
+		var scraps [][]byte
+
+		tryFlush := func() bool {
+			if len(buf) == 0 {
+				return false
+			}
+
 			i := bytes.IndexByte(buf, '\n')
 			if i < 0 {
-				scraps = append(scraps, buf)
 				scrapLen += len(buf)
-				continue
+				scraps = append(scraps, buf)
+				buf = nil
+				return false
 			}
 
 			tmp := make([]byte, 0, scrapLen+i+1)
@@ -110,14 +183,20 @@ func main() {
 			}
 			tmp = append(tmp, buf[:i+1]...)
 			buf = buf[i+1:]
-			scraps = nil
 			scrapLen = 0
-
+			scraps = nil
 			ch2 <- string(tmp)
+			return true
+		}
 
-			if len(buf) != 0 {
-				scraps = append(scraps, buf)
-				scrapLen += len(buf)
+		for {
+			var ok bool
+			buf, ok = <-ch1
+			if !ok {
+				break
+			}
+
+			for tryFlush() {
 			}
 		}
 		if scrapLen != 0 {
