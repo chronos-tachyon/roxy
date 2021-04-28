@@ -57,7 +57,6 @@ The overall layout of `config.json` looks like this:
 {
   "global": {...},  # Object, section "global"
   "hosts": [...],   # Array of string,  section "hosts"
-  "pages": {...},   # Object, section "pages"
   "targets": {...}, # Object, section "targets"
   "rules": [...]    # Array of object, section "rules"
 }
@@ -150,7 +149,8 @@ It contains the following fields and sub-sections: `"mimeFile"`, `"etcd"`, `"zk"
     "mimeFile": "...",  # String, path to mime.json
     "etcd": {...},      # Object, sub-section "global"."etcd"
     "zk": {...},        # Object, sub-section "global"."zk"
-    "storage": {...}    # Object, sub-section "global"."storage"
+    "storage": {...},   # Object, sub-section "global"."storage"
+    "pages": {...}      # Object, sub-section "global"."pages"
   },
   ...
 }
@@ -276,6 +276,55 @@ The default, which takes effect **only** if there is no `"global"."storage"` sub
 }
 ```
 
+#### Sub-section `"global"."pages"`
+
+Sub-section `"global"."pages"` tells Roxy where to find your custom HTML templates for error pages,
+redirects, and filesystem index pages.
+It has the following structure:
+
+```
+{
+  "global": {
+    ...
+    "pages": {
+      "rootDir": "...",                 # String, path to the directory which contains template files
+      "map": {...},                     # Object, used to customize individual error codes
+      "defaultContentType": "...",      # String, sets the default value for the "Content-Type" header
+      "defaultContentLanguage": "...",  # String, sets the default value for the "Content-Language" header
+      "defaultContentEncoding": "..."   # String, sets the default value for the "Content-Encoding" header
+    },
+    ...
+  },
+  ...
+}
+```
+
+The `"global"."pages"."map"` field is structured as:
+
+```
+{
+  "global": {
+    ...
+    "pages": {
+      ...
+      "map": {
+        ...
+        "<error-code-or-special>": {  # String, 3-digit HTTP status code or one of: "4xx", "5xx", "redir", "index"
+          "fileName": "...",          # String, relative path to HTML template file in Go "html/template" format
+          "contentType": "...",       # String, value for the "Content-Type" header
+          "contentLanguage": "...",   # String, value for the "Content-Language" header
+          "contentEncoding": "..."    # String, value for the "Content-Encoding" header
+        },
+        ...
+      },
+      ...
+    },
+    ...
+  },
+  ...
+}
+```
+
 ### Section `"hosts"`
 
 Section `"hosts"` is a list of host patterns.  A host pattern is a string, which matches one of the
@@ -294,8 +343,6 @@ any subdomains beneath it.
 Someone who doesn't like one of your websites could potentially make HTTPS requests for
 domains that you don't actually own, which will cause Let's Encrypt to block your webserver
 from obtaining future TLS certs.
-
-### Section `"pages"`
 
 ### Section `"targets"`
 
