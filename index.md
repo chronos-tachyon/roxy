@@ -517,7 +517,7 @@ The replacement string is a template in
 a `.` of type `[]string`, representing the return value from calling
 [`FindStringSubmatch`](https://golang.org/pkg/regexp/#Regexp.FindStringSubmatch)
 on the `"search"` regexp.  As a convenience, the strings `\\0` through `\\9` are synonyms
-for `\{\{ index . N }}`.
+for `{{"{{"}} index . N }}`.
 
 The `"target"` field consists of a target spec.
 
@@ -554,7 +554,7 @@ the form:
           "replace": "/foo/baz\\1"
         }
       ],
-      "target": "REDIR:302:\{\{.}}"
+      "target": "REDIR:302:{{"{{"}}.}}"
     }
   ]
 }
