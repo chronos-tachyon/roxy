@@ -45,6 +45,8 @@ sudo apt update
 sudo apt install roxy
 ```
 
+***
+
 ## Configuring Roxy
 
 Roxy is configured using JSON format.  The main config file lives at
@@ -136,6 +138,8 @@ rewrites:
   ]
 }
 ```
+
+***
 
 ### Section `"global"`
 
@@ -325,6 +329,8 @@ The `"global"."pages"."map"` field is structured as:
 }
 ```
 
+***
+
 ### Section `"hosts"`
 
 Section `"hosts"` is a list of host patterns.  A host pattern is a string, which matches one of the
@@ -347,3 +353,34 @@ from obtaining future TLS certs.
 ### Section `"targets"`
 
 ### Section `"rules"`
+
+***
+
+### TLS client configuration
+
+Some sections, such as `"global"."etcd"` and `"targets"`, optionally take a `"tls"` block to specify
+(1) that TLS should be used, and (2) how to configure it.
+It has the following structure:
+
+```
+...
+"tls": {
+  "skipVerify": bool,         # Bool, if true then no validation whatsoever is performed on the server's certificate
+  "skipVerifyDNSName": bool,  # Bool, if true then no checking is done that the TLS server's certificate matches ServerName (rootCA and exactCN are still checked)
+  "rootCA": "...",            # String, if not empty then it contains the path to the trusted root CAs as a concatenated PEM file; default is to use the system trusted roots
+  "exactCN": "...",           # String, if not empty then it contains the CommonName which must match the TLS server's certificate subject name
+  "forceDNSName": "...",      # String, if not empty then it contains the DNSName or IPAddress which must match the TLS server's certificate extensions
+  "clientCert": "...",        # String, if not empty then it contains the path to a PEM file containing your client cert
+  "clientKey": "..."          # String, if not empty then it contains the path to a PEM file containing your client private key; default is to check clientCert
+},
+...
+```
+
+All fields are optional and have reasonable defaults.  The simplest configuration, in which TLS is used
+with all and only the standard verification steps, is as follows:
+
+```
+...
+"tls": {},
+...
+```
