@@ -362,20 +362,21 @@ func (impl *Impl) loadPages() error {
 		return err
 	}
 
-	if impl.cfg.Pages != nil {
-		if impl.cfg.Pages.Root == "" {
+	if impl.cfg.Global != nil && impl.cfg.Global.Pages != nil {
+		rootDir := impl.cfg.Global.Pages.RootDir
+		if rootDir == "" {
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: "pages",
-				Err:     fmt.Errorf("missing required field \"root\""),
+				Section: "global.pages.rootDir",
+				Err:     errors.New("missing required field"),
 			}
 		}
 
-		abs, err := filepath.Abs(impl.cfg.Pages.Root)
+		abs, err := filepath.Abs(rootDir)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: "pages.root",
+				Section: "global.pages.rootDir",
 				Err:     err,
 			}
 		}
@@ -408,7 +409,7 @@ func (impl *Impl) loadPages() error {
 }
 
 func (impl *Impl) loadPage(key string, rootDir string) error {
-	row, found := impl.cfg.Pages.Map[key]
+	row, found := impl.cfg.Global.Pages.Map[key]
 	if !found {
 		return nil
 	}
@@ -425,7 +426,7 @@ func (impl *Impl) loadPage(key string, rootDir string) error {
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: fmt.Sprintf("pages.map[%q].fileName", key),
+			Section: fmt.Sprintf("global.pages.map[%q].fileName", key),
 			Err:     err,
 		}
 	}
@@ -434,15 +435,23 @@ func (impl *Impl) loadPage(key string, rootDir string) error {
 }
 
 func (impl *Impl) compilePage(key string, contents string, contentType string, contentLang string, contentEnc string) error {
-	if contentType == "" && impl.cfg.Pages != nil {
-		contentType = impl.cfg.Pages.DefaultContentType
+	var cfg *PagesConfig
+	if impl.cfg.Global != nil && impl.cfg.Global.Pages != nil {
+		cfg = impl.cfg.Global.Pages
 	}
-	if contentLang == "" && impl.cfg.Pages != nil {
-		contentLang = impl.cfg.Pages.DefaultContentLang
+
+	if cfg != nil {
+		if contentType == "" {
+			contentType = cfg.DefaultContentType
+		}
+		if contentLang == "" {
+			contentLang = cfg.DefaultContentLang
+		}
+		if contentEnc == "" {
+			contentEnc = cfg.DefaultContentEnc
+		}
 	}
-	if contentEnc == "" && impl.cfg.Pages != nil {
-		contentEnc = impl.cfg.Pages.DefaultContentEnc
-	}
+
 	if contentType == "" {
 		contentType = defaultContentType
 	}
@@ -493,7 +502,7 @@ func (impl *Impl) compilePage(key string, contents string, contentType string, c
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: fmt.Sprintf("pages.map[%q]", key),
+			Section: fmt.Sprintf("global.pages.map[%q]", key),
 			Err:     err,
 		}
 	}

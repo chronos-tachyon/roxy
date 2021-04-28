@@ -13,7 +13,6 @@ import (
 type Config struct {
 	Global  *GlobalConfig            `json:"global"`
 	Hosts   []string                 `json:"hosts"`
-	Pages   *PagesConfig             `json:"pages"`
 	Targets map[string]*TargetConfig `json:"targets"`
 	Rules   []*RuleConfig            `json:"rules"`
 }
@@ -23,6 +22,7 @@ type GlobalConfig struct {
 	Etcd     *EtcdConfig    `json:"etcd"`
 	ZK       *ZKConfig      `json:"zookeeper"`
 	Storage  *StorageConfig `json:"storage"`
+	Pages    *PagesConfig   `json:"pages"`
 }
 
 type EtcdConfig struct {
@@ -54,7 +54,7 @@ type StorageConfig struct {
 }
 
 type PagesConfig struct {
-	Root               string                 `json:"root"`
+	RootDir            string                 `json:"rootDir"`
 	Map                map[string]*PageConfig `json:"map"`
 	DefaultContentType string                 `json:"defaultContentType"`
 	DefaultContentLang string                 `json:"defaultContentLanguage"`
