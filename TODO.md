@@ -21,3 +21,4 @@ Things that I would like to do with Roxy:
 * [x] Optional TLS/mTLS between Roxy and backends
 * [x] Resolve backend IPs through DNS A + port, DNS SRV, [Finagle ServerSets in ZooKeeper](http://stevenskelton.ca/finagle-serverset-clusters-using-zookeeper/), others?
 * [x] Match rules on r.Method
+* [ ] Support WebSockets
