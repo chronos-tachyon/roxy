@@ -428,7 +428,8 @@ A simple target for static file serving might look like this:
 }
 ```
 
-A target that uses mTLS to connect to an HTTPS backend, on the other hand, might look like this:
+A target that uses <span title="mutual TLS"><em>mTLS</em></span> to connect to an HTTPS backend,
+on the other hand, might look like this:
 
 ```json
 {
@@ -582,8 +583,8 @@ should be used, and (2) how to configure it.  It has the following structure:
 ```
 
 All fields are optional and have reasonable defaults.  The simplest configuration, in
-which TLS is used with all and only the standard verification steps, and with no mutual
-TLS, is as follows:
+which TLS is used with all and only the standard verification steps, and with no
+<span title="mutual TLS"><em>mTLS</em></span>, is as follows:
 
 ```
 ...
