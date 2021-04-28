@@ -57,15 +57,16 @@ The overall layout of `config.json` looks like this:
 
 ```
 {
-  "global": {...},  # Object, section "global"
-  "hosts": [...],   # Array of string,  section "hosts"
-  "targets": {...}, # Object, section "targets"
-  "rules": [...]    # Array of object, section "rules"
+  "global": {...},   # Object -----------> Section "global"
+  "hosts": [...],    # Array of Strings -> Section "hosts"
+  "targets": {...},  # Object -----------> Section "targets"
+  "rules": [...]     # Array of Objects -> Section "rules"
 }
 ```
 
 All sections are _technically_ optional, but nearly every setup will
-want to define `"hosts"`, `"targets"`, and `"rules"`.
+want to define [`"hosts"`](#section-hosts),
+[`"targets"`](#section-targets), and [`"rules"`](#section-rules).
 
 Here is an example Roxy configuration for `config.json` that demonstrates both
 static content serving and reverse proxying, plus a few simple header
@@ -145,26 +146,67 @@ rewrites:
 
 Section `"global"` groups together miscellaneous configuration items that don't fit in any other category.
 
-It contains the following fields and sub-sections: `"mimeFile"`, `"etcd"`, `"zk"`, and `"storage"`.
+It contains the following fields and sub-sections:
+* [`"mimeFile"`](#field-globalmimeFile)
+* [`"etcd"`](#subsection-globaletcd)
+* [`"zk"`](#subsection-globalzk)
+* [`"storage"`](#subsection-globalstorage)
+* [`"pages"`](#subsection-globalpages)
 
 ```
 {
   "global": {
-    "mimeFile": "...",  # String, path to mime.json
-    "etcd": {...},      # Object, sub-section "global"."etcd"
-    "zk": {...},        # Object, sub-section "global"."zk"
-    "storage": {...},   # Object, sub-section "global"."storage"
-    "pages": {...}      # Object, sub-section "global"."pages"
+    "mimeFile": "...",  # String -> path to mime.json
+    "etcd": {...},      # Object -> Subsection "global"."etcd"
+    "zk": {...},        # Object -> Subsection "global"."zk"
+    "storage": {...},   # Object -> Subsection "global"."storage"
+    "pages": {...}      # Object -> Subsection "global"."pages"
   },
   ...
 }
 ```
 
-#### Sub-section `"global"."etcd"`
+#### Field `"global"."mimeFile"`
 
-Sub-section `"global"."etcd"` enables the use of [Etcd](https://etcd.io/) to store TLS certificates
-(see sub-section `"global"."storage"`) and to look up backends (see section `"targets"`).
-It has the following structure:
+Field `"global"."mimeFile"` specifies the path to the `mime.json` ancillary configuration file.
+If empty or not specified, it defaults to `"/etc/opt/roxy/mime.json"`.
+
+If the file does not exist, it is not a fatal error.  Instead, Roxy will fall back on its
+built-in defaults, which should be identical to the `mime.json.example` file that ships with
+Roxy.
+
+The MIME file is in JSON format and contains an Array of Objects.  It has the following structure:
+
+```
+[
+  ...
+  {
+    "suffixes": ["..."],       # Array of Strings, list of literal suffixes matched against the full path
+    "contentType": "...",      # String, the "Content-Type" header (default `application/octet-stream`)
+    "contentLanguage": "...",  # String, the "Content-Language" header (default absent)
+    "contentEncoding": "..."   # String, the "Content-Encoding" header (default absent)
+  },
+  ...
+]
+```
+
+Here's a concrete example:
+
+```json
+[
+  {
+    "suffixes": [".html", ".htm"],
+    "contentType": "text/html; charset=utf-8",
+    "contentLanguage": "en-US"
+  }
+]
+```
+
+#### Subsection `"global"."etcd"`
+
+Subsection `"global"."etcd"` enables the use of [Etcd](https://etcd.io/) to store TLS certificates
+(see [subsection `"global"."storage"`](#subsection-globalstorage)) and to look up backends
+(see [section `"targets"`](#section-targets)).  It has the following structure:
 
 ```
 {
@@ -185,7 +227,7 @@ It has the following structure:
 }
 ```
 
-For a single-homed etcd cluster running on `localhost` with no TLS and no username/password security,
+For a single-homed etcd cluster running on `localhost` with no TLS and no authentication,
 this simplifies to:
 
 ```json
@@ -200,11 +242,11 @@ this simplifies to:
 
 Managing an etcd cluster is beyond the scope of this documentation.
 
-#### Sub-section `"global"."zk"`
+#### Subsection `"global"."zk"`
 
-Sub-section `"global"."zk"` enables the use of [Apache ZooKeeper](https://zookeeper.apache.org/) to
-store TLS certificates (sub-section `"global"."storage"`) and to look up backends (section `"targets"`).
-It has the following structure:
+Subsection `"global"."zk"` enables the use of [Apache ZooKeeper](https://zookeeper.apache.org/) to
+store TLS certificates ([subsection `"global"."storage"`](#subsection-globalstorage)) and to look
+up backends ([section `"targets"`](#section-targets)).  It has the following structure:
 
 ```
 {
@@ -226,7 +268,7 @@ It has the following structure:
 }
 ```
 
-For a single-homed ZK cluster running on `localhost` with no authentication:
+For a single-homed ZK cluster running on `localhost` with no authentication, this simplifies to:
 
 ```json
 {
@@ -240,12 +282,11 @@ For a single-homed ZK cluster running on `localhost` with no authentication:
 
 Managing a ZooKeeper cluster is beyond the scope of this documentation.
 
-#### Sub-section `"global"."storage"`
+#### Subsection `"global"."storage"`
 
-Sub-section `"global"."storage"` determines where Roxy will store TLS certificates
+Subsection `"global"."storage"` determines where Roxy will store TLS certificates
 obtained via the ACME protocol, as well as its long-lived private key for speaking
-with the ACME server.
-It has the following structure:
+with the ACME server.  It has the following structure:
 
 ```
 {
@@ -263,9 +304,9 @@ It has the following structure:
 
 The `"path"` field is the name of a directory in the namespace of the given engine.
 
-(Etcd does not have "directories", per se; instead, `"path"` is suffixed with `"/"` to
-form a search prefix.  This feels enough like a directory that the "path" nomenclature
-still fits.)
+(NB: Etcd does not have "directories", per se; instead, `"path"` is suffixed with `"/"`
+to form a search prefix.  This feels enough like a directory that the "path"
+nomenclature still fits.)
 
 The default, which takes effect **only** if there is no `"global"."storage"` sub-section at all, is:
 
@@ -280,11 +321,10 @@ The default, which takes effect **only** if there is no `"global"."storage"` sub
 }
 ```
 
-#### Sub-section `"global"."pages"`
+#### Subsection `"global"."pages"`
 
-Sub-section `"global"."pages"` tells Roxy where to find your custom HTML templates for error pages,
-redirects, and filesystem index pages.
-It has the following structure:
+Subsection `"global"."pages"` tells Roxy where to find your custom HTML templates for error pages,
+redirects, and filesystem index pages.  It has the following structure:
 
 ```
 {
@@ -352,15 +392,180 @@ from obtaining future TLS certs.
 
 ### Section `"targets"`
 
+Section `"targets"` is a map from target names (strings) to target configurations (objects).
+A target name is a unique identifier that will be used by the [`"rules"` section](#section-rules)
+to refer back to the target configuration.
+
+The target configuration has the following structure:
+
+```
+{
+  ...
+  "targets": {
+    ...
+    "target-name": {
+      "type": "...",    # String, one of "fs", "http", or "grpc"
+      "path": "...",    # String, "fs" only, path to the intended directory
+      "target": "...",  # String, "http" and "grpc" only, resolve spec to reach the intended backend
+      "tls": {...}      # Object, "http" and "grpc" only, TLS client configuration (optional, see below)
+    },
+    ...
+  },
+  ...
+}
+```
+
+A simple target for static file serving might look like this:
+
+```json
+{
+  "targets": {
+    "my-target-name": {
+      "type": "fs",
+      "path": "/srv/www"
+    }
+  }
+}
+```
+
+A target that uses mTLS to connect to an HTTPS backend, on the other hand, might look like this:
+
+```json
+{
+  "targets": {
+    "my-target-name": {
+      "type": "http",
+      "target": "dns:///backend.internal:443",
+      "tls": {
+        "clientCert": "/path/to/client/cert.pem",
+        "clientKey": "/path/to/client/key.pem"
+      }
+    }
+  }
+}
+```
+
 ### Section `"rules"`
+
+Section `"rules"` is an array of rules (objects).  A rule is an optional set of matching criteria,
+an optional list of mutations to apply, and an optional target spec.
+
+```
+{
+  ...
+  "rules": [
+    ...
+    {
+      "match": {...},      # Object, a map from header names (strings) to header value regexps (strings)
+      "mutations": [...],  # Array of Objects, each of which specifies a mutation to apply to matching requests
+      "target": "..."      # String, a target spec (described below)
+    },
+    ...
+  ],
+  ...
+}
+```
+
+The `"match"` field consists of zero or more header matches, where each match is the header name (map key) and
+the regular expression which the header value must match (map value).
+
+**NB: the regexp is implicitly anchored with `^` and `$`, i.e. a full string match.**
+
+The rule only applies if **all** header
+matches have successfully matched against the *original, unmodified request*.  If any of the header matches
+fails to match the request, then the current rule is ignored.
+
+There are a few special header names:
+* "Host" matches the request hostname
+* "Method" matches the request HTTP method
+* "Path" matches the path part of the request HTTP URI
+
+The `"mutations"` field consists of zero or more mutations that are applied if (and only if) the request met
+the requirements of the `"match"` field.  The general structure of a mutation object is as follows:
+
+```
+{
+  ...
+  "rules": [
+    ...
+    {
+      ...
+      "mutations": [
+        ...
+        {
+          "type": "...",    # String, one of "request-host", "request-path", "request-query", "request-header", "response-header-pre", or "response-header-post"
+          "header": "...",  # String, the name of the header (only for "request-header", "response-header-pre", or "response-header-post")
+          "search": "...",  # String, a regexp to match against the desired field
+          "replace": "..."  # String, a replacement string (see below)
+        },
+        ...
+      ],
+      ...
+    },
+    ...
+  ],
+  ...
+}
+```
+
+As with the `"match"` field, the regexp in the `"search"` field is implicitly anchored
+with `^` and `$`.
+
+The replacement string is a template in
+[Go `"text/template"` format](https://golang.org/pkg/text/template/), which is called with
+a `.` of type `[]string`, representing the return value from calling
+[`FindStringSubmatch`](https://golang.org/pkg/regexp/#Regexp.FindStringSubmatch)
+on the `"search"` regexp.  As a convenience, the strings `\\0` through `\\9` are synonyms
+for `{{ index . N }}`.
+
+The `"target"` field consists of a target spec.
+
+If the target spec is present at all, it means that **every request** which meets the
+requirements of the `"match"` field will terminate with this rule.  No further rules
+will be processed.  Conversely, if no target spec is present, then processing continues
+to the next matching rule.
+
+A target spec is normally the name of a target configuration in
+[the `"targets"` section](#section-targets).  However, there are a few special patterns
+which specify other behavior:
+
+* `"ERROR:<status>"` causes Roxy to fail the request with the given 4xx or 5xx status code
+* `"REDIR:<status>:<url>"` causes Roxy to send a redirect with the given 3xx status code and URL
+
+The `<url>` in `REDIR:<status>:<url>` is a template in
+[Go `"text/template"` format](https://golang.org/pkg/text/template/), which is called with
+the current [`*url.URL`](https://golang.org/pkg/net/url/#URL) of the request
+(as mutated by all matching rules up to this point).  This means that, if you want to rewrite
+the URL path and then redirect the client in a single rule, you can do it with a mutation of
+the form:
+
+```json
+{
+  "rules": [
+    {
+      "match": {
+        "path": "/foo/bar(/.*)?"
+      },
+      "mutations": [
+        {
+          "type": "request-path",
+          "search": "/foo/bar(/.*)?",
+          "replace": "/foo/baz\\1"
+        }
+      ],
+      "target": "REDIR:302:{{.}}"
+    }
+  ]
+}
+```
 
 ***
 
 ### TLS client configuration
 
-Some sections, such as `"global"."etcd"` and `"targets"`, optionally take a `"tls"` block to specify
-(1) that TLS should be used, and (2) how to configure it.
-It has the following structure:
+Some sections, such as [`"global"."etcd"`](#subsection-globaletcd) and
+[`"targets"`](#section-targets), optionally take a `"tls"` block to specify (1) that TLS
+should be used, and (2) how to configure it.  It has the following structure:
 
 ```
 ...
@@ -376,8 +581,9 @@ It has the following structure:
 ...
 ```
 
-All fields are optional and have reasonable defaults.  The simplest configuration, in which TLS is used
-with all and only the standard verification steps, is as follows:
+All fields are optional and have reasonable defaults.  The simplest configuration, in
+which TLS is used with all and only the standard verification steps, and with no mutual
+TLS, is as follows:
 
 ```
 ...
