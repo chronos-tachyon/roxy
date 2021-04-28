@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	reTargetKey = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:-[0-9A-Za-z]+)*$`)
+	reTargetKey = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:[._+-][0-9A-Za-z]+)*$`)
 )
 
 type Impl struct {

@@ -1,5 +1,6 @@
 v0.1.3
   * config.json: Move top-level section "pages" under "global" section.
+  * config.json: Permit some additional chars in target names.
 
 v0.1.2
   * Implement custom DNS servers, as dns://dns-ip:dns-port/host:port and
