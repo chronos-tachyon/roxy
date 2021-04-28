@@ -1,5 +1,11 @@
 ## Roxy the Frontend Proxy
 
+[![Go](https://img.shields.io/github/go-mod/go-version/chronos-tachyon/roxy)](https://golang.org/)
+[![License](https://img.shields.io/badge/license-Hippocratic%202.1-brightgreen)](https://firstdonoharm.dev/version/2/1/license/)
+[![Build Status](https://img.shields.io/github/workflow/status/chronos-tachyon/roxy/Go)](https://github.com/chronos-tachyon/roxy/actions/workflows/go.yml)
+[![Latest Release](https://img.shields.io/github/v/release/chronos-tachyon/roxy?sort=semver)](https://github.com/chronos-tachyon/roxy/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/chronostachyon/roxy)](https://hub.docker.com/r/chronostachyon/roxy)
+
 > ![Roxy Lalonde](https://chronos-tachyon.net/img/roxy-lalonde.png)
 > 
 > Our mascot, [Roxy Lalonde](https://mspaintadventures.fandom.com/wiki/Roxy_Lalonde).
