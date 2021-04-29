@@ -80,7 +80,7 @@ func MakeATCResolveFunc(lbcc *grpc.ClientConn, lbName string, dsc bool) Watching
 						dataKey := data.Key()
 						events[index] = &Event{
 							Type: DeleteEvent,
-							Key: dataKey,
+							Key:  dataKey,
 							Data: data,
 						}
 					}
