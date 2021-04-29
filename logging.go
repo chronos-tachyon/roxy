@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	zkclient "github.com/go-zookeeper/zk"
+	"github.com/go-zookeeper/zk"
 	multierror "github.com/hashicorp/go-multierror"
-	zerolog "github.com/rs/zerolog"
-	log "github.com/rs/zerolog/log"
-	zap "go.uber.org/zap"
-	zapcore "go.uber.org/zap/zapcore"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var unixZero = time.Unix(0, 0)
@@ -123,7 +123,7 @@ func (_ ZKLoggerBridge) Printf(fmt string, args ...interface{}) {
 	log.Logger.Log().Msgf("zookeeper: "+fmt, args...)
 }
 
-var _ zkclient.Logger = ZKLoggerBridge{}
+var _ zk.Logger = ZKLoggerBridge{}
 
 // }}}
 

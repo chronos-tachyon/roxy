@@ -32,6 +32,8 @@ umask 022
 export LC_ALL="C"
 export TZ="Etc/UTC"
 
+echo "$FULL_VERSION" > version.txt
+
 build_for_os_arch() {
   export GOOS="${1?}"
   export GOARCH="${2?}"

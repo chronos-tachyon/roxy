@@ -64,7 +64,7 @@ type BasicSecurityHandler struct {
 }
 
 func (h BasicSecurityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self';")
 	w.Header().Set("Strict-Transport-Security", "max-age=86400")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
@@ -1263,7 +1263,7 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 		Context:   gRootContext,
 		Target:    parsedTarget,
 		Etcd:      impl.etcd,
-		ZK:        impl.zk,
+		ZK:        impl.zkconn,
 		Dialer:    &gDialer,
 		TLSConfig: tlsConfig,
 	})
@@ -1284,8 +1284,8 @@ func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 	if impl.etcd != nil {
 		resolvers = append(resolvers, etcdresolver.NewBuilder(gRootContext, nil, impl.etcd, ""))
 	}
-	if impl.zk != nil {
-		resolvers = append(resolvers, zkresolver.NewBuilder(gRootContext, nil, impl.zk, ""))
+	if impl.zkconn != nil {
+		resolvers = append(resolvers, zkresolver.NewBuilder(gRootContext, nil, impl.zkconn, ""))
 	}
 
 	dialOpts := make([]grpc.DialOption, 1, 2)

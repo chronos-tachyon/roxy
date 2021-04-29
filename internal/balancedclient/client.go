@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	zkclient "github.com/go-zookeeper/zk"
-	etcdclient "go.etcd.io/etcd/client/v3"
+	"github.com/go-zookeeper/zk"
+	v3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/common/baseresolver"
@@ -21,8 +21,8 @@ type Options struct {
 	Target    resolver.Target
 	Context   context.Context
 	Random    *rand.Rand
-	Etcd      *etcdclient.Client
-	ZK        *zkclient.Conn
+	Etcd      *v3.Client
+	ZK        *zk.Conn
 	Dialer    *net.Dialer
 	TLSConfig *tls.Config
 }

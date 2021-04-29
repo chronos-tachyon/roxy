@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	zkclient "github.com/go-zookeeper/zk"
+	"github.com/go-zookeeper/zk"
 	getopt "github.com/pborman/getopt/v2"
 )
 
@@ -47,26 +47,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	zk, _, err := zkclient.Connect(servers, 30*time.Second)
+	zkconn, _, err := zk.Connect(servers, 30*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: failed to connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer zk.Close()
+	defer zkconn.Close()
 
 	if flagUsername != "" && flagPassword != "" {
 		scheme := "digest"
 		raw := []byte(flagUsername + ":" + flagPassword)
-		err = zk.AddAuth(scheme, raw)
+		err = zkconn.AddAuth(scheme, raw)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: failed to auth: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	_, err = zk.Create(zkPath, data, 0, zkclient.WorldACL(zkclient.PermAll))
-	if err == zkclient.ErrNodeExists {
-		_, err = zk.Set(zkPath, data, -1)
+	_, err = zkconn.Create(zkPath, data, 0, zk.WorldACL(zk.PermAll))
+	if err == zk.ErrNodeExists {
+		_, err = zkconn.Set(zkPath, data, -1)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: failed to create/set zookeeper path %q: %v\n", zkPath, err)

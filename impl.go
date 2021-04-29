@@ -16,10 +16,12 @@ import (
 	"regexp"
 	"time"
 
-	zkclient "github.com/go-zookeeper/zk"
+	"github.com/go-zookeeper/zk"
 	multierror "github.com/hashicorp/go-multierror"
-	log "github.com/rs/zerolog/log"
-	etcdclient "go.etcd.io/etcd/client/v3"
+	"github.com/rs/zerolog/log"
+	v3 "go.etcd.io/etcd/client/v3"
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 var (
@@ -29,9 +31,10 @@ var (
 type Impl struct {
 	configPath string
 	cfg        *Config
+	manager    *autocert.Manager
 	mimeRules  []*MimeRule
-	etcd       *etcdclient.Client
-	zk         *zkclient.Conn
+	etcd       *v3.Client
+	zkconn     *zk.Conn
 	storage    StorageEngine
 	hosts      []*regexp.Regexp
 	pages      map[string]pageData
@@ -69,6 +72,11 @@ func LoadImpl(configPath string) (*Impl, error) {
 			Path: configPath,
 			Err:  err,
 		}
+	}
+
+	err = impl.loadManager()
+	if err != nil {
+		return nil, err
 	}
 
 	err = impl.loadMimeRules()
@@ -112,6 +120,39 @@ func LoadImpl(configPath string) (*Impl, error) {
 	}
 
 	return impl, nil
+}
+
+func (impl *Impl) loadManager() error {
+	acmeDirectoryURL := autocert.DefaultACMEDirectory
+	acmeRegistrationEmail := ""
+	acmeUserAgent := "roxy/" + Version()
+
+	if impl.cfg.Global != nil {
+		if impl.cfg.Global.ACMEDirectoryURL != "" {
+			acmeDirectoryURL = impl.cfg.Global.ACMEDirectoryURL
+		}
+		if impl.cfg.Global.ACMERegistrationEmail != "" {
+			acmeRegistrationEmail = impl.cfg.Global.ACMERegistrationEmail
+		}
+		if impl.cfg.Global.ACMEUserAgent != "" {
+			acmeUserAgent = impl.cfg.Global.ACMEUserAgent
+		}
+	}
+
+	var cache autocert.Cache = CacheWrapper{impl}
+	var hostPolicy autocert.HostPolicy = impl.HostPolicyImpl
+	client := &acme.Client{
+		DirectoryURL: acmeDirectoryURL,
+		UserAgent:    acmeUserAgent,
+	}
+	impl.manager = &autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		Cache:      cache,
+		HostPolicy: hostPolicy,
+		Client:     client,
+		Email:      acmeRegistrationEmail,
+	}
+	return nil
 }
 
 func (impl *Impl) loadMimeRules() error {
@@ -208,7 +249,7 @@ func (impl *Impl) loadEtcd() error {
 		}
 	}
 
-	impl.etcd, err = etcdclient.New(etcdclient.Config{
+	impl.etcd, err = v3.New(v3.Config{
 		Endpoints:            cfg.Endpoints,
 		AutoSyncInterval:     1 * time.Minute,
 		DialTimeout:          dialTimeout,
@@ -252,10 +293,10 @@ func (impl *Impl) loadZK() error {
 	}
 
 	var err error
-	impl.zk, _, err = zkclient.Connect(
+	impl.zkconn, _, err = zk.Connect(
 		cfg.Servers,
 		sessTimeout,
-		zkclient.WithLogger(ZKLoggerBridge{}))
+		zk.WithLogger(ZKLoggerBridge{}))
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
@@ -297,7 +338,7 @@ func (impl *Impl) loadZK() error {
 			}
 		}
 
-		err = impl.zk.AddAuth(scheme, raw)
+		err = impl.zkconn.AddAuth(scheme, raw)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
@@ -572,8 +613,8 @@ func (impl *Impl) Close() error {
 		e = multierror.Append(err, e)
 	}
 
-	if impl.zk != nil {
-		impl.zk.Close()
+	if impl.zkconn != nil {
+		impl.zkconn.Close()
 	}
 
 	if impl.etcd != nil {
@@ -583,6 +624,10 @@ func (impl *Impl) Close() error {
 	}
 
 	return err
+}
+
+func (impl *Impl) ACMEManager() *autocert.Manager {
+	return impl.manager
 }
 
 func (impl *Impl) StorageGet(ctx context.Context, key string) ([]byte, error) {
@@ -644,3 +689,21 @@ func (impl *Impl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger.Warn().Stringer("url", r.URL).Msg("no matching target")
 	writeError(ctx, w, http.StatusNotFound)
 }
+
+type CacheWrapper struct {
+	impl *Impl
+}
+
+func (wrap CacheWrapper) Get(ctx context.Context, key string) ([]byte, error) {
+	return wrap.impl.StorageGet(ctx, key)
+}
+
+func (wrap CacheWrapper) Put(ctx context.Context, key string, data []byte) error {
+	return wrap.impl.StoragePut(ctx, key, data)
+}
+
+func (wrap CacheWrapper) Delete(ctx context.Context, key string) error {
+	return wrap.impl.StorageDelete(ctx, key)
+}
+
+var _ autocert.Cache = CacheWrapper{}

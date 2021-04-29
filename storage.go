@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	zkclient "github.com/go-zookeeper/zk"
-	etcdclient "go.etcd.io/etcd/client/v3"
-	autocert "golang.org/x/crypto/acme/autocert"
+	"github.com/go-zookeeper/zk"
+	v3 "go.etcd.io/etcd/client/v3"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 var (
@@ -85,7 +85,7 @@ var _ StorageEngine = (*FileSystemStorageEngine)(nil)
 // type EtcdStorageEngine {{{
 
 type EtcdStorageEngine struct {
-	etcd    *etcdclient.Client
+	etcd    *v3.Client
 	prefix  string
 	timeout time.Duration
 }
@@ -155,13 +155,13 @@ var _ StorageEngine = (*EtcdStorageEngine)(nil)
 // type ZKStorageEngine {{{
 
 type ZKStorageEngine struct {
-	zk     *zkclient.Conn
+	zkconn *zk.Conn
 	prefix string
 }
 
 func (engine *ZKStorageEngine) Get(ctx context.Context, name string) ([]byte, error) {
 	key := engine.prefix + name
-	data, _, err := engine.zk.Get(key)
+	data, _, err := engine.zkconn.Get(key)
 	if err != nil {
 		return nil, StorageEngineOperationError{
 			Engine: "zk",
@@ -175,12 +175,12 @@ func (engine *ZKStorageEngine) Get(ctx context.Context, name string) ([]byte, er
 
 func (engine *ZKStorageEngine) Put(ctx context.Context, name string, data []byte) error {
 	key := engine.prefix + name
-	_, err := engine.zk.Create(key, data, 0, zkclient.WorldACL(zkclient.PermAll))
+	_, err := engine.zkconn.Create(key, data, 0, zk.WorldACL(zk.PermAll))
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, zkclient.ErrNodeExists) {
-		_, err = engine.zk.Set(key, data, -1)
+	if errors.Is(err, zk.ErrNodeExists) {
+		_, err = engine.zkconn.Set(key, data, -1)
 		if err == nil {
 			return nil
 		}
@@ -195,7 +195,7 @@ func (engine *ZKStorageEngine) Put(ctx context.Context, name string, data []byte
 
 func (engine *ZKStorageEngine) Delete(ctx context.Context, name string) error {
 	key := engine.prefix + name
-	err := engine.zk.Delete(key, -1)
+	err := engine.zkconn.Delete(key, -1)
 	if err != nil {
 		return StorageEngineOperationError{
 			Engine: "zk",
@@ -283,7 +283,7 @@ func init() {
 		return &EtcdStorageEngine{impl.etcd, cfg.Path, 5 * time.Second}, nil
 	})
 	RegisterStorageEngine("zk", func(impl *Impl, cfg *StorageConfig) (StorageEngine, error) {
-		if impl.zk == nil {
+		if impl.zkconn == nil {
 			return nil, StorageEngineCreateError{
 				Engine: "zk",
 				Err:    fmt.Errorf("missing configuration for top-level \"zookeeper\" section"),
@@ -297,6 +297,6 @@ func init() {
 			}
 		}
 
-		return &ZKStorageEngine{impl.zk, cfg.Path}, nil
+		return &ZKStorageEngine{impl.zkconn, cfg.Path}, nil
 	})
 }

@@ -13,4 +13,8 @@ LAST_COUNTER="$(cat "$LASTBUILDFILE")"
 NEXT_COUNTER=$((LAST_COUNTER + 1))
 echo "$NEXT_COUNTER" > "$LASTBUILDFILE"
 FULL_VERSION="${VERSION}-r${DATESTAMP}-${NEXT_COUNTER}"
-docker build -t "roxy:${FULL_VERSION}" -t "roxy:devel" .
+docker build \
+  --build-arg version="$FULL_VERSION" \
+  --tag "roxy:${FULL_VERSION}" \
+  --tag "roxy:devel" \
+  .

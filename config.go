@@ -18,11 +18,14 @@ type Config struct {
 }
 
 type GlobalConfig struct {
-	MimeFile string         `json:"mimeFile"`
-	Etcd     *EtcdConfig    `json:"etcd"`
-	ZK       *ZKConfig      `json:"zookeeper"`
-	Storage  *StorageConfig `json:"storage"`
-	Pages    *PagesConfig   `json:"pages"`
+	MimeFile              string         `json:"mimeFile"`
+	ACMEDirectoryURL      string         `json:"acmeDirectoryURL"`
+	ACMERegistrationEmail string         `json:"acmeRegistrationEmail"`
+	ACMEUserAgent         string         `json:"acmeUserAgent"`
+	Etcd                  *EtcdConfig    `json:"etcd"`
+	ZK                    *ZKConfig      `json:"zookeeper"`
+	Storage               *StorageConfig `json:"storage"`
+	Pages                 *PagesConfig   `json:"pages"`
 }
 
 type EtcdConfig struct {
