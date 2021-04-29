@@ -21,7 +21,7 @@ features:
   application sees them
 * Able to inject and rewrite headers in the outgoing response, allowing you to
   centrally control your Internet-visible server headers
-* Comprehensive request logging in JSON Lines format
+* Comprehensive request logging in [JSON Lines](https://jsonlines.org/) format
 * Can serve static files directly, without need for nginx, lighttpd, etc.
 
 See [our GitHub Pages site](https://chronos-tachyon.github.io/roxy/) for more
