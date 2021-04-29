@@ -31,7 +31,7 @@ func CompileMimeRule(cfg *MimeRuleConfig) (*MimeRule, error) {
 	}, nil
 }
 
-func DetectMimeProperties(impl *Impl, logger *zerolog.Logger, filesystem http.FileSystem, path string) (contentType string, contentLang string, contentEnc string) {
+func DetectMimeProperties(impl *Impl, logger zerolog.Logger, filesystem http.FileSystem, path string) (contentType string, contentLang string, contentEnc string) {
 	contentType = "application/octet-stream"
 	contentLang = ""
 	contentEnc = ""

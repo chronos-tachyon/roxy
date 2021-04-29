@@ -19,7 +19,6 @@ import (
 
 	"github.com/go-zookeeper/zk"
 	multierror "github.com/hashicorp/go-multierror"
-	"github.com/rs/zerolog/log"
 	v3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
@@ -631,6 +630,15 @@ func (impl *Impl) ACMEManager() *autocert.Manager {
 	return impl.manager
 }
 
+func (impl *Impl) HostPolicyImpl(ctx context.Context, host string) error {
+	for _, rx := range impl.hosts {
+		if rx.MatchString(host) {
+			return nil
+		}
+	}
+	return fmt.Errorf("unrecognized hostname %q", host)
+}
+
 func (impl *Impl) StorageGet(ctx context.Context, key string) ([]byte, error) {
 	return impl.storage.Get(ctx, key)
 }
@@ -641,54 +649,6 @@ func (impl *Impl) StoragePut(ctx context.Context, key string, data []byte) error
 
 func (impl *Impl) StorageDelete(ctx context.Context, key string) error {
 	return impl.storage.Delete(ctx, key)
-}
-
-func (impl *Impl) HostPolicyImpl(ctx context.Context, host string) error {
-	for _, rx := range impl.hosts {
-		if rx.MatchString(host) {
-			return nil
-		}
-	}
-	return fmt.Errorf("unrecognized hostname %q", host)
-}
-
-func (impl *Impl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	ctx = context.WithValue(ctx, implKey{}, impl)
-	r = r.WithContext(ctx)
-	logger := log.Ctx(ctx)
-
-	applicableRules := make([]*Rule, 0, len(impl.rules))
-	for _, rule := range impl.rules {
-		if rule.Check(r) {
-			applicableRules = append(applicableRules, rule)
-			if rule.IsTerminal() {
-				break
-			}
-		}
-	}
-
-	for _, rule := range applicableRules {
-		rule.ApplyFirst(w, r)
-	}
-
-	for _, rule := range applicableRules {
-		rule.ApplyPre(w, r)
-	}
-
-	w.(WrappedWriter).SetRules(applicableRules, r)
-
-	lastIndex := len(applicableRules) - 1
-	target := applicableRules[lastIndex].Target
-	if target != nil {
-		target.ServeHTTP(w, r)
-		return
-	}
-
-	r.URL.Scheme = "https"
-	r.URL.Host = r.Host
-	logger.Warn().Stringer("url", r.URL).Msg("no matching target")
-	writeError(ctx, w, http.StatusNotFound)
 }
 
 type CacheWrapper struct {

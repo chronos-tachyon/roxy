@@ -2,23 +2,77 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
+	"net/http"
+	"time"
+
+	"github.com/rs/xid"
+	"github.com/rs/zerolog"
 )
 
-type implKey struct{}
+type ctxKey string
 
-func implFromCtx(ctx context.Context) *Impl {
-	return ctx.Value(implKey{}).(*Impl)
+const (
+	ccKey = ctxKey("roxy.ConnContext")
+	rcKey = ctxKey("roxy.RequestContext")
+)
+
+type ConnContext struct {
+	Context    context.Context
+	Logger     zerolog.Logger
+	Proto      string
+	LocalAddr  net.Addr
+	RemoteAddr net.Addr
 }
 
-type laddrKey struct{}
-
-func laddrFromCtx(ctx context.Context) net.Addr {
-	return ctx.Value(laddrKey{}).(net.Addr)
+func GetConnContext(ctx context.Context) *ConnContext {
+	return ctx.Value(ccKey).(*ConnContext)
 }
 
-type raddrKey struct{}
+func WithConnContext(ctx context.Context, cc *ConnContext) context.Context {
+	if ctx == nil {
+		panic(errors.New("ctx is nil"))
+	}
+	if cc == nil {
+		panic(errors.New("cc is nil"))
+	}
+	return context.WithValue(ctx, ccKey, cc)
+}
 
-func raddrFromCtx(ctx context.Context) net.Addr {
-	return ctx.Value(raddrKey{}).(net.Addr)
+type RequestContext struct {
+	Context      context.Context
+	Logger       zerolog.Logger
+	Proto        string
+	LocalAddr    net.Addr
+	RemoteAddr   net.Addr
+	XID          xid.ID
+	Impl         *Impl
+	Metrics      *Metrics
+	Request      *http.Request
+	Body         WrappedReader
+	Writer       WrappedWriter
+	StartTime    time.Time
+	EndTime      time.Time
+	TargetKey    string
+	TargetConfig *TargetConfig
+}
+
+func (rc *RequestContext) RoxyTarget() string {
+	return fmt.Sprintf("%s; %s", rc.TargetKey, rc.TargetConfig.Target)
+}
+
+func GetRequestContext(ctx context.Context) *RequestContext {
+	return ctx.Value(rcKey).(*RequestContext)
+}
+
+func WithRequestContext(ctx context.Context, rc *RequestContext) context.Context {
+	if ctx == nil {
+		panic(errors.New("ctx is nil"))
+	}
+	if rc == nil {
+		panic(errors.New("rc is nil"))
+	}
+	return context.WithValue(ctx, rcKey, rc)
 }

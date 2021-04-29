@@ -17,21 +17,16 @@ const (
 
 var targetTypeData = []enumData{
 	{"UndefinedTargetType", ""},
-	{"FileSystemTargetType", "filesystem"},
+	{"FileSystemTargetType", "fs"},
 	{"HTTPBackendTargetType", "http"},
 	{"GRPCBackendTargetType", "grpc"},
 }
 
 var targetTypeMap = map[string]TargetType{
-	"":           UndefinedTargetType,
-	"fs":         FileSystemTargetType,
-	"filesystem": FileSystemTargetType,
-	"http":       HTTPBackendTargetType,
-	"https":      HTTPBackendTargetType,
-	"http+tls":   HTTPBackendTargetType,
-	"grpc":       GRPCBackendTargetType,
-	"grpcs":      GRPCBackendTargetType,
-	"grpc+tls":   GRPCBackendTargetType,
+	"":     UndefinedTargetType,
+	"fs":   FileSystemTargetType,
+	"http": HTTPBackendTargetType,
+	"grpc": GRPCBackendTargetType,
 }
 
 func (t TargetType) String() string {

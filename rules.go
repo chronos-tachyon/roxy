@@ -8,10 +8,11 @@ import (
 )
 
 type Rule struct {
-	Match     map[string]*regexp.Regexp
-	Mutations []Mutation
-	TargetKey string
-	Target    http.Handler
+	Match         map[string]*regexp.Regexp
+	Mutations     []Mutation
+	TargetKey     string
+	TargetConfig  *TargetConfig
+	TargetHandler http.Handler
 }
 
 func (rule *Rule) Check(r *http.Request) bool {
@@ -42,7 +43,7 @@ func (rule *Rule) Check(r *http.Request) bool {
 }
 
 func (rule *Rule) IsTerminal() bool {
-	return rule.Target != nil
+	return rule.TargetKey != ""
 }
 
 func (rule *Rule) ApplyFirst(w http.ResponseWriter, r *http.Request) {
@@ -92,20 +93,21 @@ func CompileRule(impl *Impl, cfg *RuleConfig) (*Rule, error) {
 		// pass
 
 	case strings.HasPrefix(out.TargetKey, "ERROR:"):
-		out.Target, err = CompileErrorHandler(impl, out.TargetKey)
+		out.TargetHandler, err = CompileErrorHandler(impl, out.TargetKey)
 		if err != nil {
 			return nil, err
 		}
 
 	case strings.HasPrefix(out.TargetKey, "REDIR:"):
-		out.Target, err = CompileRedirHandler(impl, out.TargetKey)
+		out.TargetHandler, err = CompileRedirHandler(impl, out.TargetKey)
 		if err != nil {
 			return nil, err
 		}
 
 	default:
-		out.Target = impl.targets[out.TargetKey]
-		if out.Target == nil {
+		out.TargetConfig = impl.cfg.Targets[out.TargetKey]
+		out.TargetHandler = impl.targets[out.TargetKey]
+		if out.TargetHandler == nil {
 			return nil, fmt.Errorf("unknown target %q", out.TargetKey)
 		}
 	}

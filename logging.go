@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-zookeeper/zk"
 	multierror "github.com/hashicorp/go-multierror"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"go.uber.org/zap"
@@ -115,11 +117,23 @@ var _ io.WriteCloser = (*RotatingLogWriter)(nil)
 
 // }}}
 
+// type PromLoggerBridge {{{
+
+type PromLoggerBridge struct{}
+
+func (PromLoggerBridge) Println(v ...interface{}) {
+	log.Logger.Log().Msg("prometheus: " + fmt.Sprint(v...))
+}
+
+var _ promhttp.Logger = PromLoggerBridge{}
+
+// }}}
+
 // type ZKLoggerBridge {{{
 
 type ZKLoggerBridge struct{}
 
-func (_ ZKLoggerBridge) Printf(fmt string, args ...interface{}) {
+func (ZKLoggerBridge) Printf(fmt string, args ...interface{}) {
 	log.Logger.Log().Msgf("zookeeper: "+fmt, args...)
 }
 
@@ -132,7 +146,7 @@ var _ zk.Logger = ZKLoggerBridge{}
 type ZapLoggerBridge struct {
 }
 
-func (_ ZapLoggerBridge) Write(p []byte) (int, error) {
+func (ZapLoggerBridge) Write(p []byte) (int, error) {
 	var data map[string]interface{}
 	d := json.NewDecoder(bytes.NewReader(p))
 	d.UseNumber()

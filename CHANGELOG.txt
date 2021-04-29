@@ -1,3 +1,8 @@
+v0.2.0
+  * Added Prometheus metrics (defaults to http://localhost:6800/metrics).
+  * Significant internal refactor work to support the above.
+  * Add more aggressive "Cache-Control" headers to filesystem responses.
+
 v0.1.4
   * Added default value for "roxy --config" flag.
   * Added "roxy --version" flag.

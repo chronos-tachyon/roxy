@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/http"
 	"sync"
 )
 
@@ -46,18 +45,3 @@ func (ref *Ref) Swap(next *Impl) (prev *Impl) {
 	ref.mu.Unlock()
 	return prev
 }
-
-func (ref *Ref) HTTPHandler() http.Handler {
-	return HandlerWrapper{Ref: ref}
-}
-
-type HandlerWrapper struct {
-	Ref *Ref
-}
-
-func (wrap HandlerWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	impl := wrap.Ref.Get()
-	impl.ServeHTTP(w, r)
-}
-
-var _ http.Handler = HandlerWrapper{}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -29,10 +28,10 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
-	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -57,40 +56,222 @@ var (
 	gFileCacheMap map[cacheKey]cacheRow = make(map[cacheKey]cacheRow, 1024)
 )
 
-// type BasicSecurityHandler {{{
-
-type BasicSecurityHandler struct {
-	Next http.Handler
+var gMetrics = map[string]*Metrics{
+	"prom":  NewMetrics("prom"),
+	"http":  NewMetrics("http"),
+	"https": NewMetrics("https"),
 }
 
-func (h BasicSecurityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self';")
-	w.Header().Set("Strict-Transport-Security", "max-age=86400")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("X-XSS-Protection", "1; mode=block")
-	h.Next.ServeHTTP(w, r)
+func init() {
+	for _, metrics := range gMetrics {
+		metrics.MustRegister(prometheus.DefaultRegisterer)
+	}
 }
 
-var _ http.Handler = BasicSecurityHandler{}
+// type Metrics {{{
+
+type Metrics struct {
+	PanicCount                   prometheus.Counter
+	RequestCountByMethod         *prometheus.CounterVec
+	ResponseCountByCode          *prometheus.CounterVec
+	RequestSize                  prometheus.Histogram
+	ResponseSize                 prometheus.Histogram
+	ResponseDuration             prometheus.Histogram
+	ResponseCountByCodeAndTarget *prometheus.CounterVec
+	ProblemCountByTypeAndTarget  *prometheus.CounterVec
+	ResponseSizeByTarget         *prometheus.HistogramVec
+	ResponseDurationByTarget     *prometheus.HistogramVec
+}
+
+func NewMetrics(proto string) *Metrics {
+	m := new(Metrics)
+
+	m.PanicCount = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "roxy",
+			Subsystem: proto,
+			Name:      "panic_count",
+			Help:      "the number of HTTP requests whose handlers paniced",
+		},
+	)
+
+	m.RequestCountByMethod = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "roxy",
+			Subsystem: proto,
+			Name:      "request_by_method_count",
+			Help:      "the number of incoming HTTP requests",
+		},
+		[]string{"method"},
+	)
+
+	m.ResponseCountByCode = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "roxy",
+			Subsystem: proto,
+			Name:      "response_by_code_count",
+			Help:      "the number of outgoing HTTP responses",
+		},
+		[]string{"code"},
+	)
+
+	m.RequestSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "roxy",
+			Subsystem: proto,
+			Name:      "request_size_bytes",
+			Help:      "the size of the incoming HTTP request",
+			Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
+		},
+	)
+
+	m.ResponseSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "roxy",
+			Subsystem: proto,
+			Name:      "response_size_bytes",
+			Help:      "the size of the outgoing HTTP response",
+			Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
+		},
+	)
+
+	m.ResponseDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "roxy",
+			Subsystem: proto,
+			Name:      "response_duration_secs",
+			Help:      "the duration of the HTTP request lifetime",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 10, 7),
+		},
+	)
+
+	if proto == "https" {
+		m.ResponseCountByCodeAndTarget = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "roxy",
+				Subsystem: proto,
+				Name:      "response_by_code_and_target_count",
+				Help:      "the number of outgoing HTTP responses",
+			},
+			[]string{"code", "target"},
+		)
+
+		m.ProblemCountByTypeAndTarget = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "roxy",
+				Subsystem: proto,
+				Name:      "problem_by_type_and_target_count",
+				Help:      "the number of failed HTTP responses",
+			},
+			[]string{"type", "target"},
+		)
+
+		m.ResponseSizeByTarget = prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "roxy",
+				Subsystem: proto,
+				Name:      "response_size_by_target_bytes",
+				Help:      "the size of the outgoing HTTP response",
+				Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
+			},
+			[]string{"target"},
+		)
+
+		m.ResponseDurationByTarget = prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "roxy",
+				Subsystem: proto,
+				Name:      "response_duration_by_target_secs",
+				Help:      "the duration of the HTTP request lifetime",
+				Buckets:   prometheus.ExponentialBuckets(0.001, 10, 7),
+			},
+			[]string{"target"},
+		)
+	}
+
+	for _, method := range []string{
+		http.MethodOptions,
+		http.MethodGet,
+		http.MethodHead,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodPatch,
+		http.MethodDelete,
+	} {
+		m.RequestCountByMethod.WithLabelValues(simplifyHTTPMethod(method))
+	}
+
+	for _, code := range []int{
+		http.StatusOK,
+		http.StatusNoContent,
+		http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusNotModified,
+		http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusInternalServerError,
+		http.StatusServiceUnavailable,
+	} {
+		m.ResponseCountByCode.WithLabelValues(simplifyHTTPStatusCode(code))
+	}
+
+	return m
+}
+
+func (m *Metrics) All() []prometheus.Collector {
+	out := make([]prometheus.Collector, 0, 10)
+	out = append(
+		out,
+		m.PanicCount,
+		m.RequestCountByMethod,
+		m.ResponseCountByCode,
+		m.RequestSize,
+		m.ResponseSize,
+		m.ResponseDuration,
+	)
+	if m.ResponseCountByCodeAndTarget != nil {
+		out = append(
+			out,
+			m.ResponseCountByCodeAndTarget,
+			m.ProblemCountByTypeAndTarget,
+			m.ResponseSizeByTarget,
+			m.ResponseDurationByTarget,
+		)
+	}
+	return out
+}
+
+func (m *Metrics) MustRegister(reg prometheus.Registerer) {
+	reg.MustRegister(m.All()...)
+}
 
 // }}}
 
-// type LoggingHandler {{{
+// type RootHandler {{{
 
-type LoggingHandler struct {
+type RootHandler struct {
+	Ref  *Ref
 	Next http.Handler
 }
 
-func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
+func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := xid.New()
+	idStr := id.String()
+	r.Header.Set("xid", idStr)
+	w.Header().Set("xid", idStr)
+	w.Header().Set("server", "roxy/"+Version())
+	w.Header().Set("content-security-policy", "default-src 'self';")
+	w.Header().Set("strict-transport-security", "max-age=86400")
+	w.Header().Set("x-content-type-options", "nosniff")
+	w.Header().Set("x-xss-protection", "1; mode=block")
 
-	c := log.Ctx(ctx).With()
-	c = c.Str("xid", id.String())
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		c = c.Str("ip", host)
-	}
+	ctx := r.Context()
+	cc := GetConnContext(ctx)
+	impl := h.Ref.Get()
+
+	c := cc.Logger.With()
+	c = c.Str("xid", idStr)
+	c = c.Str("ip", addrWithNoPort(cc.RemoteAddr))
 	c = c.Str("method", r.Method)
 	c = c.Str("host", r.Host)
 	c = c.Str("url", r.URL.String())
@@ -100,39 +281,77 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if value := r.Header.Get("referer"); value != "" {
 		c = c.Str("referer", value)
 	}
-	logger := c.Logger()
 
-	ctx = logger.WithContext(ctx)
+	rc := &RequestContext{
+		Logger:     c.Logger(),
+		Proto:      cc.Proto,
+		LocalAddr:  cc.LocalAddr,
+		RemoteAddr: cc.RemoteAddr,
+		XID:        id,
+		Impl:       impl,
+		Metrics:    gMetrics[cc.Proto],
+		Body:       WrapReader(r.Body),
+		Writer:     WrapWriter(impl, w, r),
+	}
+	ctx = WithRequestContext(ctx, rc)
+	ctx = rc.Logger.WithContext(ctx)
 	ctx = hlog.CtxWithID(ctx, id)
 	r = r.WithContext(ctx)
+	rc.Request = r
+	rc.Context = ctx
 
-	r.Header.Set("xid", id.String())
-	w.Header().Set("xid", id.String())
-
-	ww := WrapWriter(w)
-	ww.SetIsHEAD(r.Method == http.MethodHead)
-
-	logger.Debug().Msg("start request")
-	startTime := time.Now()
+	rc.Logger.Debug().
+		Msg("start request")
+	rc.StartTime = time.Now()
+	rc.Metrics.RequestCountByMethod.WithLabelValues(simplifyHTTPMethod(r.Method)).Inc()
 
 	defer func() {
-		panicValue := recover()
-		endTime := time.Now()
-		elapsed := endTime.Sub(startTime)
-
-		if panicValue != nil {
-			ww.Error(ctx, http.StatusInternalServerError)
+		if !rc.Body.WasClosed() {
+			io.Copy(io.Discard, rc.Body)
+			rc.Body.Close()
 		}
 
-		status := ww.Status()
-		bytesWritten := ww.BytesWritten()
-		sawError := ww.SawError()
-		location := ww.Header().Get("location")
-		contentType := ww.Header().Get("content-type")
+		rc.EndTime = time.Now()
+
+		panicValue := recover()
+		if panicValue != nil {
+			rc.Writer.WriteError(http.StatusInternalServerError)
+			rc.Metrics.PanicCount.Inc()
+		}
+
+		elapsed := rc.EndTime.Sub(rc.StartTime)
+		duration := float64(elapsed) / float64(time.Second)
+		bytesRead := float64(rc.Body.BytesRead())
+		bytesWritten := float64(rc.Writer.BytesWritten())
+		code := simplifyHTTPStatusCode(rc.Writer.Status())
+
+		var problemType string
+		switch {
+		case rc.Writer.SawError():
+			problemType = "error"
+		case rc.Writer.Status() >= 500:
+			problemType = "5xx"
+		case rc.Writer.Status() >= 400:
+			problemType = "4xx"
+		default:
+			problemType = "none"
+		}
+
+		rc.Metrics.ResponseCountByCode.WithLabelValues(code).Inc()
+		rc.Metrics.RequestSize.Observe(bytesRead)
+		rc.Metrics.ResponseSize.Observe(bytesWritten)
+		rc.Metrics.ResponseDuration.Observe(duration)
+
+		if rc.Metrics.ResponseCountByCodeAndTarget != nil {
+			rc.Metrics.ResponseCountByCodeAndTarget.WithLabelValues(code, rc.TargetKey).Inc()
+			rc.Metrics.ProblemCountByTypeAndTarget.WithLabelValues(problemType, rc.TargetKey).Inc()
+			rc.Metrics.ResponseSizeByTarget.WithLabelValues(rc.TargetKey).Observe(bytesWritten)
+			rc.Metrics.ResponseDurationByTarget.WithLabelValues(rc.TargetKey).Observe(duration)
+		}
 
 		var event *zerolog.Event
 		if panicValue != nil {
-			event = logger.Error()
+			event = rc.Logger.Error()
 			switch x := panicValue.(type) {
 			case error:
 				event = event.AnErr("panic", x)
@@ -142,43 +361,128 @@ func (h LoggingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				event = event.Interface("panic", x)
 			}
 		} else {
-			event = logger.Info()
+			event = rc.Logger.Info()
 		}
 		event = event.Dur("elapsed", elapsed)
-		event = event.Int("status", status)
-		if location != "" {
+		event = event.Int("status", rc.Writer.Status())
+		if location := rc.Writer.Header().Get("location"); location != "" {
 			event = event.Str("location", location)
 		}
-		if contentType != "" {
+		if contentType := rc.Writer.Header().Get("content-type"); contentType != "" {
 			event = event.Str("contentType", contentType)
 		}
-		event = event.Int64("bytesWritten", bytesWritten)
-		event = event.Bool("sawError", sawError)
+		event = event.Int64("bytesRead", rc.Body.BytesRead())
+		event = event.Int64("bytesWritten", rc.Writer.BytesWritten())
+		event = event.Bool("sawError", rc.Writer.SawError())
 		event.Msg("end request")
 	}()
 
-	h.Next.ServeHTTP(ww, r)
+	h.Next.ServeHTTP(rc.Writer, rc.Request)
 }
 
-var _ http.Handler = LoggingHandler{}
+var _ http.Handler = RootHandler{}
+
+// }}}
+
+// type InsecureHandler {{{
+
+type InsecureHandler struct {
+	Next         http.Handler
+	mu           sync.Mutex
+	savedImpl    *Impl
+	savedHandler http.Handler
+}
+
+func (h *InsecureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var next http.Handler
+	rc := GetRequestContext(r.Context())
+	rc.TargetKey = "!HTTP"
+
+	h.mu.Lock()
+	if rc.Impl == h.savedImpl {
+		next = h.savedHandler
+	} else {
+		next = rc.Impl.ACMEManager().HTTPHandler(h.Next)
+		h.savedImpl = rc.Impl
+		h.savedHandler = next
+	}
+	h.mu.Unlock()
+
+	next.ServeHTTP(w, r)
+}
+
+var _ http.Handler = (*InsecureHandler)(nil)
+
+// }}}
+
+// type SecureHandler {{{
+
+type SecureHandler struct{}
+
+func (SecureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rc := GetRequestContext(ctx)
+
+	applicableRules := make([]*Rule, 0, len(rc.Impl.rules))
+	for _, rule := range rc.Impl.rules {
+		if rule.Check(rc.Request) {
+			applicableRules = append(applicableRules, rule)
+			if rule.IsTerminal() {
+				break
+			}
+		}
+	}
+
+	for _, rule := range applicableRules {
+		rule.ApplyFirst(rc.Writer, rc.Request)
+	}
+
+	for _, rule := range applicableRules {
+		rule.ApplyPre(rc.Writer, rc.Request)
+	}
+
+	rc.Writer.SetRules(applicableRules)
+
+	if len(applicableRules) != 0 {
+		lastIndex := len(applicableRules) - 1
+		lastRule := applicableRules[lastIndex]
+		if lastRule.IsTerminal() {
+			rc.TargetKey = lastRule.TargetKey
+			rc.TargetConfig = lastRule.TargetConfig
+			rc.Logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+				c = c.Str("key", simplifyTargetKey(lastRule.TargetKey))
+				if lastRule.TargetConfig != nil {
+					c = c.Interface("target", lastRule.TargetConfig)
+				}
+				return c
+			})
+			lastRule.TargetHandler.ServeHTTP(w, r)
+			return
+		}
+	}
+
+	rc.TargetKey = "!EOF"
+	rc.Writer.WriteError(http.StatusNotFound)
+	rc.Request.URL.Scheme = "https"
+	rc.Request.URL.Host = rc.Request.Host
+	rc.Logger.Warn().
+		Str("mutatedURL", rc.Request.URL.String()).
+		Msg("no matching target")
+}
+
+var _ http.Handler = SecureHandler{}
 
 // }}}
 
 // type ErrorHandler {{{
 
 type ErrorHandler struct {
-	status int
+	Status int
 }
 
 func (h ErrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	logger := log.Ctx(ctx)
-
-	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Str("type", "error").Int("errorStatus", h.status)
-	})
-
-	writeError(ctx, w, h.status)
+	rc := GetRequestContext(r.Context())
+	rc.Writer.WriteError(h.Status)
 }
 
 var _ http.Handler = ErrorHandler{}
@@ -188,45 +492,42 @@ var _ http.Handler = ErrorHandler{}
 // type RedirHandler {{{
 
 type RedirHandler struct {
-	tmpl   *template.Template
-	status int
+	Template *template.Template
+	Status   int
 }
 
 func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	logger := log.Ctx(ctx)
+	rc := GetRequestContext(r.Context())
 
-	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Str("type", "redir").Int("redirStatus", h.status)
-	})
-
-	r.URL.Scheme = "https"
-	r.URL.Host = r.Host
+	u := new(url.URL)
+	*u = *rc.Request.URL
+	u.Scheme = "https"
+	u.Host = rc.Request.Host
 
 	var buf strings.Builder
-	err := h.tmpl.Execute(&buf, r.URL)
+	err := h.Template.Execute(&buf, u)
 	if err != nil {
-		logger.Warn().
-			Interface("arg", r.URL).
+		rc.Logger.Warn().
+			Interface("arg", u).
 			Err(err).
 			Msg("failed to execute template")
-		writeError(ctx, w, http.StatusInternalServerError)
+		rc.Writer.WriteError(http.StatusInternalServerError)
 		return
 	}
+	str := buf.String()
 
-	urlStr := buf.String()
-	urlObj, err := url.Parse(urlStr)
+	u2, err := url.Parse(str)
 	if err != nil {
-		logger.Warn().
-			Str("arg", urlStr).
+		rc.Logger.Warn().
+			Str("arg", str).
 			Err(err).
 			Msg("invalid url")
-		writeError(ctx, w, http.StatusInternalServerError)
+		rc.Writer.WriteError(http.StatusInternalServerError)
 		return
 	}
 
-	urlStr2 := urlObj.String()
-	writeRedirect(ctx, w, h.status, urlStr2)
+	str = u2.String()
+	rc.Writer.WriteRedirect(h.Status, str)
 }
 
 var _ http.Handler = RedirHandler{}
@@ -236,35 +537,29 @@ var _ http.Handler = RedirHandler{}
 // type FileSystemHandler {{{
 
 type FileSystemHandler struct {
-	key string
-	cfg *TargetConfig
-	fs  http.FileSystem
+	fs http.FileSystem
 }
 
 func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	logger := log.Ctx(ctx)
+	rc := GetRequestContext(r.Context())
 
-	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Str("key", h.key).Interface("target", h.cfg)
-	})
+	hdrs := rc.Writer.Header()
+	hdrs.Set("cache-control", "public, max-age=86400, must-revalidate")
 
-	if r.Method == http.MethodOptions {
-		hdrs := w.Header()
+	if rc.Request.Method == http.MethodOptions {
 		hdrs.Set("allow", "OPTIONS, GET, HEAD")
-		hdrs.Set("cache-control", "max-age=604800")
-		w.WriteHeader(http.StatusNoContent)
+		rc.Writer.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	if r.Method != http.MethodHead && r.Method != http.MethodGet {
-		hdrs := w.Header()
+	if rc.Request.Method != http.MethodHead && rc.Request.Method != http.MethodGet {
 		hdrs.Set("allow", "OPTIONS, GET, HEAD")
-		writeError(ctx, w, http.StatusMethodNotAllowed)
+		hdrs.Del("cache-control")
+		rc.Writer.WriteError(http.StatusMethodNotAllowed)
 		return
 	}
 
-	reqPath := r.URL.Path
+	reqPath := rc.Request.URL.Path
 	if !strings.HasPrefix(reqPath, "/") {
 		reqPath = "/" + reqPath
 	}
@@ -275,13 +570,13 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(reqPath, "/") {
 			reqPath += "/"
 		}
-		writeRedirect(ctx, w, http.StatusFound, reqPath)
+		rc.Writer.WriteRedirect(http.StatusFound, reqPath)
 		return
 	}
 
 	reqFile, err := h.fs.Open(reqPath)
 	if err != nil {
-		writeError(ctx, w, toHTTPError(err))
+		rc.Writer.WriteError(toHTTPError(err))
 		return
 	}
 
@@ -289,18 +584,18 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reqStat, err := reqFile.Stat()
 	if err != nil {
-		writeError(ctx, w, http.StatusInternalServerError)
+		rc.Writer.WriteError(http.StatusInternalServerError)
 		return
 	}
 
-	if reqStat.IsDir() && !strings.HasSuffix(r.URL.Path, "/") {
+	if reqStat.IsDir() && !strings.HasSuffix(rc.Request.URL.Path, "/") {
 		reqPath += "/"
-		writeRedirect(ctx, w, http.StatusFound, reqPath)
+		rc.Writer.WriteRedirect(http.StatusFound, reqPath)
 		return
 	}
 
-	if !reqStat.IsDir() && strings.HasSuffix(r.URL.Path, "/") {
-		writeRedirect(ctx, w, http.StatusFound, reqPath)
+	if !reqStat.IsDir() && strings.HasSuffix(rc.Request.URL.Path, "/") {
+		rc.Writer.WriteRedirect(http.StatusFound, reqPath)
 		return
 	}
 
@@ -317,7 +612,7 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			idxStat, err := idxFile.Stat()
 			if err != nil {
-				writeError(ctx, w, http.StatusInternalServerError)
+				rc.Writer.WriteError(http.StatusInternalServerError)
 				return
 			}
 
@@ -330,26 +625,23 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// pass
 
 		default:
-			writeError(ctx, w, toHTTPError(err))
+			rc.Writer.WriteError(toHTTPError(err))
 			return
 		}
 	}
 
-	r.URL.Path = reqPath
+	rc.Request.URL.Path = reqPath
 
 	if reqStat.IsDir() {
-		h.ServeDir(w, r, reqFile, reqStat)
+		h.ServeDir(rc, reqFile, reqStat)
 		return
 	}
 
-	h.ServeFile(w, r, reqFile, reqStat)
+	h.ServeFile(rc, reqFile, reqStat)
 }
 
-func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
-	ctx := r.Context()
-	impl := implFromCtx(ctx)
-	logger := log.Ctx(ctx)
-	hdrs := w.Header()
+func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.FileInfo) {
+	hdrs := rc.Writer.Header()
 
 	var (
 		cachePossible bool
@@ -358,7 +650,7 @@ func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f 
 		body          io.ReadSeeker = f
 	)
 
-	contentType, contentLang, contentEnc := DetectMimeProperties(impl, logger, h.fs, r.URL.Path)
+	contentType, contentLang, contentEnc := DetectMimeProperties(rc.Impl, rc.Logger, h.fs, rc.Request.URL.Path)
 	hdrs.Set("content-type", contentType)
 	if contentLang != "" {
 		hdrs.Set("content-language", contentLang)
@@ -368,7 +660,7 @@ func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f 
 	}
 
 	if contentType == "application/javascript" || contentType == "text/javascript" || strings.HasPrefix(contentType, "text/javascript;") {
-		mapFilePath := r.URL.Path + ".map"
+		mapFilePath := rc.Request.URL.Path + ".map"
 		mapFile, err := h.fs.Open(mapFilePath)
 		if err == nil {
 			mapFile.Close()
@@ -392,10 +684,10 @@ func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f 
 			} else {
 				raw, err := ioutil.ReadAll(f)
 				if err != nil {
-					logger.Error().
+					rc.Writer.WriteError(http.StatusInternalServerError)
+					rc.Logger.Error().
 						Err(err).
 						Msg("failed to read file")
-					writeError(ctx, w, http.StatusInternalServerError)
 					return
 				}
 
@@ -468,15 +760,19 @@ func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f 
 				mw := io.MultiWriter(md5writer, sha1writer, sha256writer)
 				size, err = io.Copy(mw, f)
 				if err != nil {
-					logger.Error().Err(err).Msg("failed to read file contents")
-					writeError(ctx, w, http.StatusInternalServerError)
+					rc.Writer.WriteError(http.StatusInternalServerError)
+					rc.Logger.Error().
+						Err(err).
+						Msg("failed to read file contents")
 					return
 				}
 
 				_, err = f.Seek(0, io.SeekStart)
 				if err != nil {
-					logger.Error().Err(err).Msg("failed to seek to beginning")
-					writeError(ctx, w, http.StatusInternalServerError)
+					rc.Writer.WriteError(http.StatusInternalServerError)
+					rc.Logger.Error().
+						Err(err).
+						Msg("failed to seek to beginning")
 					return
 				}
 
@@ -495,24 +791,23 @@ func (h *FileSystemHandler) ServeFile(w http.ResponseWriter, r *http.Request, f 
 
 	setETagHeader(hdrs, "", fi.ModTime())
 
-	logger.Debug().
+	rc.Logger.Debug().
 		Bool("cachePossible", cachePossible).
 		Bool("cacheHit", cacheHit).
 		Bool("tookSlowPath", tookSlowPath).
 		Msg("serve file")
-	http.ServeContent(w, r, fi.Name(), mtime, body)
+	http.ServeContent(rc.Writer, rc.Request, fi.Name(), mtime, body)
 }
 
-func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f http.File, fi fs.FileInfo) {
-	ctx := r.Context()
-	impl := implFromCtx(ctx)
-	logger := log.Ctx(ctx)
-	hdrs := w.Header()
+func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.FileInfo) {
+	hdrs := rc.Writer.Header()
 
 	list, err := f.Readdir(-1)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to read directory")
-		writeError(ctx, w, http.StatusInternalServerError)
+		rc.Writer.WriteError(http.StatusInternalServerError)
+		rc.Logger.Error().
+			Err(err).
+			Msg("failed to read directory")
 		return
 	}
 
@@ -552,7 +847,10 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		if err == nil {
 			name = u.Username
 		} else {
-			logger.Warn().Uint32("uid", uid).Err(err).Msg("failed to look up user by ID")
+			rc.Logger.Warn().
+				Uint32("uid", uid).
+				Err(err).
+				Msg("failed to look up user by ID")
 			name = "#" + str
 		}
 		uidCache[uid] = name
@@ -570,6 +868,10 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		if err == nil {
 			name = g.Name
 		} else {
+			rc.Logger.Warn().
+				Uint32("gid", gid).
+				Err(err).
+				Msg("failed to look up group by ID")
 			name = "#" + str
 		}
 		gidCache[gid] = name
@@ -657,7 +959,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		if e.IsDir {
 			contentType = "inode/directory"
 		} else if !e.IsLink {
-			contentType, contentLang, contentEnc = DetectMimeProperties(impl, logger, h.fs, fullPath)
+			contentType, contentLang, contentEnc = DetectMimeProperties(rc.Impl, rc.Logger, h.fs, fullPath)
 		}
 
 		if contentType == "" {
@@ -676,7 +978,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 	}
 
 	entries := make([]entry, 0, 1+len(list))
-	if r.URL.Path != "/" {
+	if rc.Request.URL.Path != "/" {
 		var e entry
 
 		e.Name = ".."
@@ -687,7 +989,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		e.Group = "-"
 		e.IsHidden = false
 
-		parentDir := path.Dir(r.URL.Path)
+		parentDir := path.Dir(rc.Request.URL.Path)
 		if parentFile, err := h.fs.Open(parentDir); err == nil {
 			if parentInfo, err := parentFile.Stat(); err == nil {
 				populateRealStats(&e, parentInfo, parentDir)
@@ -716,7 +1018,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		}
 		e.IsHidden = strings.HasPrefix(e.Name, ".")
 
-		populateRealStats(&e, fi, path.Join(r.URL.Path, e.Name))
+		populateRealStats(&e, fi, path.Join(rc.Request.URL.Path, e.Name))
 
 		entries = append(entries, e)
 	}
@@ -777,7 +1079,7 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 	}
 
 	data := templateData{
-		Path:             r.URL.Path,
+		Path:             rc.Request.URL.Path,
 		Entries:          entries,
 		NLinkWidth:       maxNLinkWidth,
 		OwnerWidth:       maxOwnerWidth,
@@ -790,14 +1092,16 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 		ContentEncWidth:  maxCEncWidth,
 	}
 
-	page := impl.pages["index"]
+	page := rc.Impl.pages["index"]
 
 	var buf bytes.Buffer
 	buf.Grow(page.size)
 	err = page.tmpl.Execute(&buf, data)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to render index template")
-		writeError(ctx, w, http.StatusInternalServerError)
+		rc.Writer.WriteError(http.StatusInternalServerError)
+		rc.Logger.Error().
+			Err(err).
+			Msg("failed to render index template")
 		return
 	}
 
@@ -823,8 +1127,9 @@ func (h *FileSystemHandler) ServeDir(w http.ResponseWriter, r *http.Request, f h
 	setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
 	setETagHeader(hdrs, "D", fi.ModTime())
 
-	logger.Debug().Msg("serve directory")
-	http.ServeContent(w, r, "", fi.ModTime(), bytes.NewReader(raw))
+	rc.Logger.Debug().
+		Msg("serve directory")
+	http.ServeContent(rc.Writer, rc.Request, "", fi.ModTime(), bytes.NewReader(raw))
 }
 
 var _ http.Handler = (*FileSystemHandler)(nil)
@@ -834,20 +1139,12 @@ var _ http.Handler = (*FileSystemHandler)(nil)
 // type HTTPBackendHandler {{{
 
 type HTTPBackendHandler struct {
-	key    string
-	cfg    *TargetConfig
 	client *balancedclient.BalancedClient
 }
 
 func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := log.Ctx(ctx)
-	laddr := laddrFromCtx(ctx)
-	raddr := raddrFromCtx(ctx)
-
-	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Str("key", h.key).Interface("target", h.cfg)
-	})
+	rc := GetRequestContext(ctx)
 
 	var once sync.Once
 	var addr net.Addr
@@ -859,25 +1156,25 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	r.Header.Set("roxy-target", fmt.Sprintf("%s; %s", h.key, h.cfg.Target))
-	r.Header.Set("x-forwarded-host", r.Host)
-	r.Header.Set("x-forwarded-proto", "https")
-	r.Header.Set("x-forwarded-ip", raddr.String())
-	r.Header.Add("x-forwarded-for", raddr.String())
-	r.Header.Add(
+	rc.Request.Header.Set("roxy-target", rc.RoxyTarget())
+	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
+	rc.Request.Header.Set("x-forwarded-proto", "https")
+	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Add(
 		"forwarded",
 		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
-			quoteForwardedAddr(laddr),
-			quoteForwardedAddr(raddr),
-			r.Host,
+			quoteForwardedAddr(rc.LocalAddr),
+			quoteForwardedAddr(rc.RemoteAddr),
+			rc.Request.Host,
 			"https"))
 
-	if values := r.Header.Values("x-forwarded-for"); len(values) > 1 {
-		r.Header.Set("x-forwarded-for", strings.Join(values, ", "))
+	if values := rc.Request.Header.Values("x-forwarded-for"); len(values) > 1 {
+		rc.Request.Header.Set("x-forwarded-for", strings.Join(values, ", "))
 	}
 
 	innerURL := new(url.URL)
-	*innerURL = *r.URL
+	*innerURL = *rc.Request.URL
 	innerURL.Scheme = "http"
 	innerURL.Host = "example.com"
 	if h.client.IsTLS() {
@@ -885,34 +1182,37 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	innerReq, err := http.NewRequestWithContext(
-		ctx, r.Method, innerURL.String(), r.Body)
+		ctx,
+		rc.Request.Method,
+		innerURL.String(),
+		rc.Body)
 	if err != nil {
 		panic(err)
 	}
 
-	innerReq.Header = make(http.Header, len(r.Header))
-	for key, oldValues := range r.Header {
+	innerReq.Header = make(http.Header, len(rc.Request.Header))
+	for key, oldValues := range rc.Request.Header {
 		newValues := make([]string, len(oldValues))
 		copy(newValues, oldValues)
 		innerReq.Header[key] = newValues
 	}
 
 	innerReq.Close = true
-	innerReq.Host = r.Host
-	innerReq.Header.Set("host", r.Host)
+	innerReq.Host = rc.Request.Host
+	innerReq.Header.Set("host", rc.Request.Host)
 
 	innerResp, err := h.client.Do(innerReq)
 	once.Do(func() {})
 	if addr != nil {
-		logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
+		rc.Logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
 			return c.Str("backend", addr.String())
 		})
 	}
 	if err != nil {
-		logger.Error().
+		rc.Writer.WriteError(http.StatusInternalServerError)
+		rc.Logger.Error().
 			Err(err).
 			Msg("failed subrequest")
-		writeError(ctx, w, http.StatusInternalServerError)
 		return
 	}
 
@@ -923,17 +1223,17 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	hdrs := w.Header()
+	hdrs := rc.Writer.Header()
 	for key, oldValues := range innerResp.Header {
 		newValues := make([]string, len(oldValues))
 		copy(newValues, oldValues)
 		hdrs[key] = newValues
 	}
-	w.WriteHeader(innerResp.StatusCode)
+	rc.Writer.WriteHeader(innerResp.StatusCode)
 
-	_, err = io.Copy(w, innerResp.Body)
+	_, err = io.Copy(rc.Writer, innerResp.Body)
 	if err != nil {
-		logger.Error().
+		rc.Logger.Error().
 			Err(err).
 			Msg("failed subrequest")
 	}
@@ -941,7 +1241,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	needBodyClose = false
 	err = innerResp.Body.Close()
 	if err != nil {
-		logger.Warn().
+		rc.Logger.Warn().
 			Err(err).
 			Msg("failed to close body of subrequest")
 	}
@@ -958,40 +1258,32 @@ var _ http.Handler = (*HTTPBackendHandler)(nil)
 // type GRPCBackendHandler {{{
 
 type GRPCBackendHandler struct {
-	key string
-	cfg *TargetConfig
-	cc  *grpc.ClientConn
+	cc *grpc.ClientConn
 }
 
 func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := log.Ctx(ctx)
-	laddr := laddrFromCtx(ctx)
-	raddr := raddrFromCtx(ctx)
+	rc := GetRequestContext(ctx)
 
-	logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-		return c.Str("key", h.key).Interface("target", h.cfg)
-	})
-
-	r.Header.Set("roxy-target", fmt.Sprintf("%s; %s", h.key, h.cfg.Target))
-	r.Header.Set("x-forwarded-host", r.Host)
-	r.Header.Set("x-forwarded-proto", "https")
-	r.Header.Set("x-forwarded-ip", raddr.String())
-	r.Header.Add("x-forwarded-for", raddr.String())
-	r.Header.Add(
+	rc.Request.Header.Set("roxy-target", rc.RoxyTarget())
+	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
+	rc.Request.Header.Set("x-forwarded-proto", "https")
+	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Add(
 		"forwarded",
 		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
-			quoteForwardedAddr(laddr),
-			quoteForwardedAddr(raddr),
-			r.Host,
+			quoteForwardedAddr(rc.LocalAddr),
+			quoteForwardedAddr(rc.RemoteAddr),
+			rc.Request.Host,
 			"https"))
 
 	var wg sync.WaitGroup
 	needBodyClose := true
 	defer func() {
 		if needBodyClose {
-			io.Copy(io.Discard, r.Body)
-			r.Body.Close()
+			io.Copy(io.Discard, rc.Body)
+			rc.Body.Close()
 		}
 		wg.Wait()
 	}()
@@ -999,8 +1291,10 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webclient := roxypb.NewWebServerClient(h.cc)
 	sc, err := webclient.Serve(ctx)
 	if err != nil {
-		logger.Error().Err(err).Msg("failed to call /roxy.WebServer/Serve")
-		writeError(ctx, w, http.StatusServiceUnavailable)
+		rc.Writer.WriteError(http.StatusServiceUnavailable)
+		rc.Logger.Error().
+			Err(err).
+			Msg("failed to call /roxy.WebServer/Serve")
 		return
 	}
 
@@ -1012,39 +1306,43 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	wg.Add(1)
-	go h.recvThread(ctx, w, sc, &wg)
+	go h.recvThread(rc, sc, &wg)
 
-	kv := make([]*roxypb.KeyValue, 4, 4+len(r.Header))
+	kv := make([]*roxypb.KeyValue, 4, 4+len(rc.Request.Header))
 	kv[0] = &roxypb.KeyValue{Key: ":scheme", Value: "https"}
-	kv[1] = &roxypb.KeyValue{Key: ":method", Value: r.Method}
-	kv[2] = &roxypb.KeyValue{Key: ":authority", Value: r.Host}
-	kv[3] = &roxypb.KeyValue{Key: ":path", Value: r.RequestURI}
+	kv[1] = &roxypb.KeyValue{Key: ":method", Value: rc.Request.Method}
+	kv[2] = &roxypb.KeyValue{Key: ":authority", Value: rc.Request.Host}
+	kv[3] = &roxypb.KeyValue{Key: ":path", Value: rc.Request.URL.Path}
 
-	keys := make(headerNames, 0, len(r.Header))
-	for key := range r.Header {
+	keys := make(headerNames, 0, len(rc.Request.Header))
+	for key := range rc.Request.Header {
 		keys = append(keys, key)
 	}
 	keys.Sort()
 	for _, key := range keys {
 		lc := strings.ToLower(key)
-		for _, value := range r.Header[key] {
+		for _, value := range rc.Request.Header[key] {
 			kv = append(kv, &roxypb.KeyValue{Key: lc, Value: value})
 		}
 	}
 
 	err = sc.Send(&roxypb.WebMessage{Headers: kv})
 	if err != nil {
-		logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Send failed")
+		rc.Logger.Error().
+			Err(err).
+			Msg("/roxy.WebServer/Serve: Send failed")
 		return
 	}
 
 	buf := make([]byte, 1<<20) // 1 MiB
 	for {
-		n, err := io.ReadFull(r.Body, buf)
+		n, err := io.ReadFull(rc.Body, buf)
 		if n > 0 {
 			err2 := sc.Send(&roxypb.WebMessage{BodyChunk: buf[:n]})
 			if err2 != nil {
-				logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Send failed")
+				rc.Logger.Error().
+					Err(err).
+					Msg("/roxy.WebServer/Serve: Send failed")
 				return
 			}
 		}
@@ -1052,19 +1350,23 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
-			logger.Error().Err(err).Msg("failed to Read request body")
+			rc.Logger.Error().
+				Err(err).
+				Msg("failed to Read request body")
 			return
 		}
 	}
 
 	needBodyClose = false
-	err = r.Body.Close()
+	err = rc.Body.Close()
 	if err != nil {
-		logger.Warn().Err(err).Msg("failed to Close request body")
+		rc.Logger.Warn().
+			Err(err).
+			Msg("failed to Close request body")
 	}
 
-	kv = make([]*roxypb.KeyValue, 0, len(r.Trailer))
-	for trailerName, trailerValues := range r.Trailer {
+	kv = make([]*roxypb.KeyValue, 0, len(rc.Request.Trailer))
+	for trailerName, trailerValues := range rc.Request.Trailer {
 		lc := strings.ToLower(trailerName)
 		for _, trailerValue := range trailerValues {
 			kv = append(kv, &roxypb.KeyValue{Key: lc, Value: trailerValue})
@@ -1074,7 +1376,9 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(kv) != 0 {
 		err = sc.Send(&roxypb.WebMessage{Trailers: kv})
 		if err != nil {
-			logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Send failed")
+			rc.Logger.Error().
+				Err(err).
+				Msg("/roxy.WebServer/Serve: Send failed")
 			return
 		}
 	}
@@ -1082,18 +1386,18 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	needCloseSend = false
 	err = sc.CloseSend()
 	if err != nil {
-		logger.Warn().Err(err).Msg("/roxy.WebServer/Server: CloseSend failed")
+		rc.Logger.Warn().
+			Err(err).
+			Msg("/roxy.WebServer/Server: CloseSend failed")
 		return
 	}
 }
 
-func (h *GRPCBackendHandler) recvThread(ctx context.Context, w http.ResponseWriter, sc roxypb.WebServer_ServeClient, wg *sync.WaitGroup) {
-	logger := log.Ctx(ctx)
-
+func (h *GRPCBackendHandler) recvThread(rc *RequestContext, sc roxypb.WebServer_ServeClient, wg *sync.WaitGroup) {
 	needWriteHeader := true
 	defer func() {
 		if needWriteHeader {
-			w.WriteHeader(http.StatusOK)
+			rc.Writer.WriteHeader(http.StatusOK)
 		}
 		wg.Done()
 	}()
@@ -1105,14 +1409,16 @@ Loop:
 			return
 		}
 		if err != nil {
-			logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Recv failed")
 			needWriteHeader = false
-			writeError(ctx, w, http.StatusInternalServerError)
+			rc.Writer.WriteError(http.StatusInternalServerError)
+			rc.Logger.Error().
+				Err(err).
+				Msg("/roxy.WebServer/Serve: Recv failed")
 			return
 		}
 
 		if len(resp.Headers) != 0 && needWriteHeader {
-			hdrs := w.Header()
+			hdrs := rc.Writer.Header()
 			status := ""
 			for _, kv := range resp.Headers {
 				switch kv.Key {
@@ -1126,19 +1432,24 @@ Loop:
 			if status != "" {
 				statusCode, err = strconv.Atoi(status)
 				if err != nil {
-					logger.Warn().Str("arg", status).Err(err).Msg("/roxy.WebServer/Serve: failed to parse \":status\" pseudo-header")
 					statusCode = http.StatusInternalServerError
+					rc.Logger.Warn().
+						Str("arg", status).
+						Err(err).
+						Msg("/roxy.WebServer/Serve: failed to parse \":status\" pseudo-header")
 				}
 			}
 			needWriteHeader = false
-			w.WriteHeader(statusCode)
+			rc.Writer.WriteHeader(statusCode)
 		}
 
 		if len(resp.BodyChunk) != 0 {
 			needWriteHeader = false
-			_, err = w.Write(resp.BodyChunk)
+			_, err = rc.Writer.Write(resp.BodyChunk)
 			if err != nil {
-				logger.Error().Err(err).Msg("failed to Write response body")
+				rc.Logger.Error().
+					Err(err).
+					Msg("failed to Write response body")
 				break Loop
 			}
 		}
@@ -1146,9 +1457,9 @@ Loop:
 		if len(resp.Trailers) != 0 {
 			if needWriteHeader {
 				needWriteHeader = false
-				w.WriteHeader(http.StatusOK)
+				rc.Writer.WriteHeader(http.StatusOK)
 			}
-			hdrs := w.Header()
+			hdrs := rc.Writer.Header()
 			for _, kv := range resp.Trailers {
 				hdrs.Add(kv.Key, kv.Value)
 			}
@@ -1162,7 +1473,9 @@ Loop:
 			return
 		}
 		if err != nil {
-			logger.Error().Err(err).Msg("/roxy.WebServer/Serve: Recv failed")
+			rc.Logger.Error().
+				Err(err).
+				Msg("/roxy.WebServer/Serve: Recv failed")
 			return
 		}
 	}
@@ -1179,17 +1492,18 @@ var _ http.Handler = (*GRPCBackendHandler)(nil)
 func CompileErrorHandler(impl *Impl, arg string) (http.Handler, error) {
 	// format: "ERROR:<status>"
 
-	statusStr := arg[6:]
+	str := arg[6:]
 
-	statusU64, err := strconv.ParseUint(statusStr, 10, 16)
+	u64, err := strconv.ParseUint(str, 10, 16)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse uint %q: %w", statusStr, err)
+		return nil, fmt.Errorf("failed to parse uint %q: %w", str, err)
 	}
-	if statusU64 < 400 || statusU64 >= 600 {
-		return nil, fmt.Errorf("status %d out of range [400..599]", statusU64)
+	if u64 < 400 || u64 >= 600 {
+		return nil, fmt.Errorf("status %d out of range [400..599]", u64)
 	}
+	statusCode := int(u64)
 
-	return ErrorHandler{int(statusU64)}, nil
+	return ErrorHandler{Status: statusCode}, nil
 }
 
 func CompileRedirHandler(impl *Impl, arg string) (http.Handler, error) {
@@ -1198,20 +1512,21 @@ func CompileRedirHandler(impl *Impl, arg string) (http.Handler, error) {
 	statusStr := arg[6:9]
 	templateStr := arg[10:]
 
-	statusU64, err := strconv.ParseUint(statusStr, 10, 16)
+	u64, err := strconv.ParseUint(statusStr, 10, 16)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse uint %q: %w", statusStr, err)
 	}
-	if statusU64 < 300 || statusU64 >= 400 {
-		return nil, fmt.Errorf("status %d out of range [300..399]", statusU64)
+	if u64 < 300 || u64 >= 400 {
+		return nil, fmt.Errorf("status %d out of range [300..399]", u64)
 	}
+	statusCode := int(u64)
 
-	templateObj := template.New("redir")
-	templateObj, err = templateObj.Parse(templateStr)
+	t := template.New("redir")
+	t, err = t.Parse(templateStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile text/template %q: %w", templateStr, err)
 	}
-	return RedirHandler{templateObj, int(statusU64)}, nil
+	return RedirHandler{Template: t, Status: statusCode}, nil
 }
 
 func CompileTarget(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
@@ -1245,7 +1560,7 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 
 	var fs http.FileSystem = http.Dir(abs)
 
-	return &FileSystemHandler{key, cfg, fs}, nil
+	return &FileSystemHandler{fs}, nil
 }
 
 func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
@@ -1270,7 +1585,7 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 	if err != nil {
 		return nil, err
 	}
-	return &HTTPBackendHandler{key, cfg, bc}, nil
+	return &HTTPBackendHandler{bc}, nil
 }
 
 func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
@@ -1303,17 +1618,7 @@ func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 		return nil, err
 	}
 
-	return &GRPCBackendHandler{key, cfg, cc}, nil
-}
-
-func writeRedirect(ctx context.Context, w http.ResponseWriter, statusCode int, urlstr string) {
-	ww := w.(WrappedWriter)
-	ww.Redirect(ctx, statusCode, urlstr)
-}
-
-func writeError(ctx context.Context, w http.ResponseWriter, statusCode int) {
-	ww := w.(WrappedWriter)
-	ww.Error(ctx, statusCode)
+	return &GRPCBackendHandler{cc}, nil
 }
 
 func toHTTPError(err error) int {
@@ -1464,6 +1769,16 @@ func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
 	h.Set("etag", fmt.Sprintf("W/%q", lastMod.UTC().Format("2006.01.02.15.04.05")))
 }
 
+func addrWithNoPort(addr net.Addr) string {
+	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+		if tcpAddr.Zone == "" {
+			return tcpAddr.IP.String()
+		}
+		return tcpAddr.IP.String() + "%" + tcpAddr.Zone
+	}
+	return addr.String()
+}
+
 func quoteForwardedAddr(addr net.Addr) string {
 	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
 		if isIPv6(tcpAddr.IP) {
@@ -1530,6 +1845,8 @@ var _ sort.Interface = fileInfoList(nil)
 
 // }}}
 
+// type headerNames {{{
+
 type headerNames []string
 
 func (list headerNames) Len() int {
@@ -1549,3 +1866,5 @@ func (list headerNames) Less(i, j int) bool {
 func (list headerNames) Sort() {
 	sort.Sort(list)
 }
+
+// }}}
