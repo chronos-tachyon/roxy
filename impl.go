@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-zookeeper/zk"
@@ -230,8 +231,8 @@ func (impl *Impl) loadEtcd() error {
 	if len(cfg.Endpoints) == 0 {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: "etcd",
-			Err:     fmt.Errorf("missing required field \"endpoints\""),
+			Section: "global.etcd.endpoints",
+			Err:     errors.New("missing required field"),
 		}
 	}
 
@@ -244,7 +245,7 @@ func (impl *Impl) loadEtcd() error {
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: "etcd.tls",
+			Section: "global.etcd.tls",
 			Err:     err,
 		}
 	}
@@ -264,7 +265,7 @@ func (impl *Impl) loadEtcd() error {
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: "etcd",
+			Section: "global.etcd",
 			Err:     err,
 		}
 	}
@@ -282,8 +283,8 @@ func (impl *Impl) loadZK() error {
 	if len(cfg.Servers) == 0 {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: "zookeeper",
-			Err:     fmt.Errorf("missing required field \"servers\""),
+			Section: "global.zookeeper.servers",
+			Err:     errors.New("missing required field"),
 		}
 	}
 
@@ -300,7 +301,7 @@ func (impl *Impl) loadZK() error {
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: "zookeeper",
+			Section: "global.zookeeper",
 			Err:     err,
 		}
 	}
@@ -310,8 +311,8 @@ func (impl *Impl) loadZK() error {
 		if scheme == "" {
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: "zookeeper.auth",
-				Err:     fmt.Errorf("missing required field \"scheme\""),
+				Section: "global.zookeeper.auth.scheme",
+				Err:     errors.New("missing required field"),
 			}
 		}
 
@@ -322,18 +323,18 @@ func (impl *Impl) loadZK() error {
 			if err != nil {
 				return ConfigLoadError{
 					Path:    impl.configPath,
-					Section: "zookeeper.auth.raw",
+					Section: "global.zookeeper.auth.raw",
 					Err:     err,
 				}
 			}
 
-		case cfg.Auth.Username != "" && cfg.Auth.Password != "":
+		case cfg.Auth.Username != "":
 			raw = []byte(cfg.Auth.Username + ":" + cfg.Auth.Password)
 
 		default:
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: "zookeeper.auth",
+				Section: "global.zookeeper.auth",
 				Err:     fmt.Errorf("missing required fields \"raw\" or \"username\" + \"password\""),
 			}
 		}
@@ -342,7 +343,7 @@ func (impl *Impl) loadZK() error {
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: "zookeeper.auth",
+				Section: "global.zookeeper.auth",
 				Err:     fmt.Errorf("AddAuth %q, %s: %w", scheme, raw, err),
 			}
 		}
@@ -367,24 +368,8 @@ func (impl *Impl) loadStorageEngine() error {
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
-			Section: "storage",
+			Section: "global.storage",
 			Err:     err,
-		}
-	}
-	return nil
-}
-
-func (impl *Impl) loadHosts() error {
-	var err error
-	impl.hosts = make([]*regexp.Regexp, len(impl.cfg.Hosts))
-	for index, pattern := range impl.cfg.Hosts {
-		impl.hosts[index], err = CompileHostGlob(pattern)
-		if err != nil {
-			return ConfigLoadError{
-				Path:    impl.configPath,
-				Section: fmt.Sprintf("hosts[%d]", index),
-				Err:     err,
-			}
 		}
 	}
 	return nil
@@ -496,7 +481,7 @@ func (impl *Impl) compilePage(key string, contents string, contentType string, c
 	if contentType == "" {
 		contentType = defaultContentType
 	}
-	if contentLang == "" {
+	if contentLang == "" && strings.HasPrefix(contentType, "text/") {
 		contentLang = defaultContentLang
 	}
 	if contentEnc == "" {
@@ -558,6 +543,22 @@ func (impl *Impl) compilePage(key string, contents string, contentType string, c
 	return nil
 }
 
+func (impl *Impl) loadHosts() error {
+	var err error
+	impl.hosts = make([]*regexp.Regexp, len(impl.cfg.Hosts))
+	for index, pattern := range impl.cfg.Hosts {
+		impl.hosts[index], err = CompileHostGlob(pattern)
+		if err != nil {
+			return ConfigLoadError{
+				Path:    impl.configPath,
+				Section: fmt.Sprintf("hosts[%d]", index),
+				Err:     err,
+			}
+		}
+	}
+	return nil
+}
+
 func (impl *Impl) loadTargets() error {
 	var err error
 	impl.targets = make(map[string]http.Handler, len(impl.cfg.Targets))
@@ -565,8 +566,8 @@ func (impl *Impl) loadTargets() error {
 		if !reTargetKey.MatchString(key) {
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: "targets",
-				Err:     fmt.Errorf("invalid backend name %q", key),
+				Section: fmt.Sprintf("targets[%q]", key),
+				Err:     errors.New("invalid backend name"),
 			}
 		}
 

@@ -16,18 +16,25 @@ type Rule struct {
 
 func (rule *Rule) Check(r *http.Request) bool {
 	for name, rx := range rule.Match {
-		var value string
+		var values []string
 		switch {
 		case strings.EqualFold(name, "host"):
-			value = r.Host
+			values = []string{r.Host}
 		case strings.EqualFold(name, "method"):
-			value = r.Method
+			values = []string{r.Method}
 		case strings.EqualFold(name, "path"):
-			value = r.URL.Path
+			values = []string{r.URL.Path}
 		default:
-			value = r.Header.Get(name)
+			values = r.Header.Values(name)
 		}
-		if !rx.MatchString(value) {
+		any := false
+		for _, value := range values {
+			if rx.MatchString(value) {
+				any = true
+				break
+			}
+		}
+		if !any {
 			return false
 		}
 	}
@@ -66,7 +73,7 @@ func CompileRule(impl *Impl, cfg *RuleConfig) (*Rule, error) {
 		for name, pattern := range cfg.Match {
 			out.Match[name], err = regexp.Compile(`^` + pattern + `$`)
 			if err != nil {
-				return nil, fmt.Errorf("match[%q]: failed to compile regex /%s/: %w", name, pattern, err)
+				return nil, fmt.Errorf("match[%q]: failed to compile regex /^%s$/: %w", name, pattern, err)
 			}
 		}
 	}

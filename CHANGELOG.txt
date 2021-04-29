@@ -1,7 +1,10 @@
 v0.1.4
+  * Added default value for "roxy --config" flag.
   * Added "roxy --version" flag.
   * Added trailing ';' to default "Content-Security-Policy" header.
   * Added config fields for controlling the ACME client.
+  * Change default value of "global.mimeFile" to "/etc/opt/roxy/mime.json".
+  * Only set the default "Content-Language" on text/* MIME types.
 
 v0.1.3
   * config.json: Move top-level section "pages" under "global" section.

@@ -32,7 +32,7 @@ var gRootContext context.Context
 var gRootCancel context.CancelFunc
 
 var (
-	flagConfig      string
+	flagConfig      string = defaultConfigFile
 	flagDebug       bool
 	flagTrace       bool
 	flagLogStderr   bool

@@ -13,7 +13,8 @@ const (
 	defaultContentLang = "en"
 	defaultContentEnc  = ""
 
-	defaultMimeFile      = "/opt/roxy/share/misc/mime.json"
+	defaultConfigFile    = "/etc/opt/roxy/config.json"
+	defaultMimeFile      = "/etc/opt/roxy/mime.json"
 	defaultStorageEngine = "fs"
 	defaultStoragePath   = "/var/opt/roxy/lib/acme"
 )

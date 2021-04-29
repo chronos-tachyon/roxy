@@ -220,6 +220,9 @@ var _ StorageEngine = (*ZKStorageEngine)(nil)
 type StorageEngineCtor func(impl *Impl, cfg *StorageConfig) (StorageEngine, error)
 
 func RegisterStorageEngine(name string, ctor StorageEngineCtor) {
+	if ctor == nil {
+		panic(errors.New("ctor is nil"))
+	}
 	gStorageEngineMu.Lock()
 	if gStorageEngineMap == nil {
 		gStorageEngineMap = make(map[string]StorageEngineCtor, 10)
@@ -238,7 +241,7 @@ func NewStorageEngine(impl *Impl, cfg *StorageConfig) (StorageEngine, error) {
 	if ctor == nil {
 		return nil, StorageEngineCreateError{
 			Engine: engine,
-			Err:    fmt.Errorf("unknown storage engine"),
+			Err:    errors.New("unknown storage engine"),
 		}
 	}
 
@@ -250,7 +253,7 @@ func init() {
 		if cfg.Path == "" {
 			return nil, StorageEngineCreateError{
 				Engine: "fs",
-				Err:    fmt.Errorf("expected non-empty path, got %q", cfg.Path),
+				Err:    errors.New("missing required field \"path\""),
 			}
 		}
 
@@ -269,14 +272,14 @@ func init() {
 		if impl.etcd == nil {
 			return nil, StorageEngineCreateError{
 				Engine: "etcd",
-				Err:    fmt.Errorf("missing configuration for top-level \"etcd\" section"),
+				Err:    errors.New("missing configuration for \"global.etcd\" section"),
 			}
 		}
 
 		if cfg.Path == "" {
 			return nil, StorageEngineCreateError{
 				Engine: "etcd",
-				Err:    fmt.Errorf("expected non-empty path, got %q", cfg.Path),
+				Err:    errors.New("missing required field \"path\""),
 			}
 		}
 
@@ -286,14 +289,14 @@ func init() {
 		if impl.zkconn == nil {
 			return nil, StorageEngineCreateError{
 				Engine: "zk",
-				Err:    fmt.Errorf("missing configuration for top-level \"zookeeper\" section"),
+				Err:    errors.New("missing configuration for \"global.zookeeper\" section"),
 			}
 		}
 
 		if cfg.Path == "" {
 			return nil, StorageEngineCreateError{
 				Engine: "zk",
-				Err:    fmt.Errorf("expected non-empty path, got %q", cfg.Path),
+				Err:    errors.New("missing required field \"path\""),
 			}
 		}
 
