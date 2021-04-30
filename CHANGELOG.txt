@@ -1,3 +1,9 @@
+v0.2.1
+  * Add gRPC-based admin interface over AF_UNIX sockets.
+  * Add "roxyctl" CLI for calling the admin interface.
+  * Use the SystemD "sd_notify" API to give SystemD more status data.
+  * Refactor the shutdown logic in consideration of the above changes.
+
 v0.2.0
   * Added Prometheus metrics (defaults to http://localhost:6800/metrics).
   * Significant internal refactor work to support the above.

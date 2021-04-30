@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	multierror "github.com/hashicorp/go-multierror"
-	zerolog "github.com/rs/zerolog"
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"

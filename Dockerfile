@@ -26,11 +26,11 @@ RUN set -euo pipefail; \
     cp /build/mime.json.example /etc/opt/roxy/mime.json.example; \
     cp /build/mime.json.example /etc/opt/roxy/mime.json; \
     chown root:roxy /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example; \
-    chown root:roxy /var/opt/roxy /var/opt/roxy/lib; \
-    chown roxy:roxy /var/opt/roxy/lib/acme; \
+    chown root:roxy /var/opt/roxy; \
+    chown roxy:roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme; \
     chown roxy:adm  /var/opt/roxy/log; \
     chmod 0640 /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example; \
-    chmod 0750 /var/opt/roxy/lib/acme; \
+    chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme; \
     chmod 2750 /var/opt/roxy/log
 
 FROM alpine:3.13 AS final

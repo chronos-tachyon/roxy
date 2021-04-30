@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io/fs"
 	stdlog "log"
 	"net"
 	"net/http"
@@ -14,24 +15,37 @@ import (
 	"syscall"
 	"time"
 
+	multierror "github.com/hashicorp/go-multierror"
 	getopt "github.com/pborman/getopt/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/journald"
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
 
 	"github.com/chronos-tachyon/roxy/grpc/balancer/atcbalancer"
+	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
 var gDialer = net.Dialer{
 	Timeout: 5 * time.Second,
 }
 
-var gLogger *RotatingLogWriter
-
-var gRootContext context.Context
-var gRootCancel context.CancelFunc
+var (
+	gRootContext    context.Context
+	gRootCancel     context.CancelFunc
+	gLogger         *RotatingLogWriter
+	gRef            Ref
+	gAdminServer    *grpc.Server
+	gPromServer     *http.Server
+	gInsecureServer *http.Server
+	gSecureServer   *http.Server
+	gShutdownMu     sync.Mutex
+	gAlreadyClosed  bool
+	gAlreadyTermed  bool
+	gShutdownCh     chan struct{}
+)
 
 var (
 	flagConfig      string = defaultConfigFile
@@ -43,6 +57,8 @@ var (
 	flagVersion     bool
 	flagPromNet     string = "tcp"
 	flagPromAddr    string = "localhost:6800"
+	flagAdminNet    string = "unix"
+	flagAdminAddr   string = "/var/opt/roxy/lib/admin.socket"
 )
 
 func init() {
@@ -57,6 +73,8 @@ func init() {
 	getopt.FlagLong(&flagVersion, "version", 'V', "print version and exit")
 	getopt.FlagLong(&flagPromNet, "prometheus-net", 0, "network for Prometheus monitoring metrics")
 	getopt.FlagLong(&flagPromAddr, "prometheus-addr", 0, "address for Prometheus monitoring metrics")
+	getopt.FlagLong(&flagAdminNet, "admin-net", 0, "network for Admin gRPC interface")
+	getopt.FlagLong(&flagAdminAddr, "admin-addr", 0, "address for Admin gRPC interface")
 }
 
 func main() {
@@ -130,20 +148,22 @@ func main() {
 	gRootContext, gRootCancel = context.WithCancel(gRootContext)
 	defer gRootCancel()
 
-	var ref Ref
 	defer func() {
-		if err := ref.Close(); err != nil {
+		if err := gRef.Close(); err != nil {
 			log.Logger.Error().
 				Err(err).
 				Msg("close")
 		}
 	}()
 
-	err := ref.Load(flagConfig)
+	err := gRef.Load(flagConfig)
 	if err != nil {
 		log.Fatal().Err(err).Send()
 		os.Exit(1)
 	}
+
+	gAdminServer = grpc.NewServer()
+	roxypb.RegisterAdminServer(gAdminServer, AdminServer{})
 
 	var promHandler http.Handler
 	promHandler = promhttp.HandlerFor(
@@ -154,8 +174,8 @@ func main() {
 			MaxRequestsInFlight: 4,
 			EnableOpenMetrics:   true,
 		})
-	promHandler = RootHandler{Ref: &ref, Next: promHandler}
-	promServer := &http.Server{
+	promHandler = RootHandler{Ref: &gRef, Next: promHandler}
+	gPromServer = &http.Server{
 		Handler:           promHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -168,8 +188,8 @@ func main() {
 
 	var insecureHandler http.Handler
 	insecureHandler = &InsecureHandler{Next: nil}
-	insecureHandler = RootHandler{Ref: &ref, Next: insecureHandler}
-	insecureServer := &http.Server{
+	insecureHandler = RootHandler{Ref: &gRef, Next: insecureHandler}
+	gInsecureServer = &http.Server{
 		Handler:           insecureHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -182,14 +202,22 @@ func main() {
 
 	var secureHandler http.Handler
 	secureHandler = SecureHandler{}
-	secureHandler = RootHandler{Ref: &ref, Next: secureHandler}
-	secureServer := &http.Server{
+	secureHandler = RootHandler{Ref: &gRef, Next: secureHandler}
+	gSecureServer = &http.Server{
 		Handler:           secureHandler,
 		ReadHeaderTimeout: 60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 		BaseContext:       MakeBaseContextFunc(),
 		ConnContext:       MakeConnContextFunc("https"),
+	}
+
+	adminListener, err := net.Listen(flagAdminNet, flagAdminAddr)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("proto", "admin").
+			Err(err).
+			Msg("failed to Listen")
 	}
 
 	promListener, err := net.Listen(flagPromNet, flagPromAddr)
@@ -216,187 +244,266 @@ func main() {
 			Msg("failed to Listen")
 	}
 
-	secureListener := &SecureListener{Ref: &ref, Raw: secureListenerRaw}
+	secureListener := &SecureListener{Ref: &gRef, Raw: secureListenerRaw}
 
-	promDoneCh := make(chan struct{})
-	insecureDoneCh := make(chan struct{})
-	secureDoneCh := make(chan struct{})
-	doneCh := make(chan struct{})
+	sdNotify("READY=1")
 
+	gShutdownCh = make(chan struct{})
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
-		defer close(promDoneCh)
-		err := promServer.Serve(promListener)
-		gRootCancel()
-		if !isIgnoredServingError(err) {
+		defer wg.Done()
+		err := gAdminServer.Serve(adminListener)
+		closeShutdownCh()
+		if isRealShutdownError(err) {
+			log.Logger.Error().
+				Str("proto", "admin").
+				Err(err).
+				Msg("failed to Serve")
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := gPromServer.Serve(promListener)
+		closeShutdownCh()
+		if isRealShutdownError(err) {
 			log.Logger.Error().
 				Str("proto", "prom").
 				Err(err).
 				Msg("failed to Serve")
 		}
-		go killServer("http", insecureDoneCh, insecureServer, insecureListener)
-		go killServer("https", secureDoneCh, secureServer, secureListener)
 	}()
 
+	wg.Add(1)
 	go func() {
-		defer close(insecureDoneCh)
-		err := insecureServer.Serve(insecureListener)
-		gRootCancel()
-		if !isIgnoredServingError(err) {
+		defer wg.Done()
+		err := gInsecureServer.Serve(insecureListener)
+		closeShutdownCh()
+		if isRealShutdownError(err) {
 			log.Logger.Error().
 				Str("proto", "http").
 				Err(err).
 				Msg("failed to Serve")
 		}
-		go killServer("prom", promDoneCh, promServer, promListener)
-		go killServer("https", secureDoneCh, secureServer, secureListener)
 	}()
 
+	wg.Add(1)
 	go func() {
-		defer close(secureDoneCh)
-		err := secureServer.Serve(secureListener)
-		gRootCancel()
-		if !isIgnoredServingError(err) {
+		defer wg.Done()
+		err := gSecureServer.Serve(secureListener)
+		closeShutdownCh()
+		if isRealShutdownError(err) {
 			log.Logger.Error().
 				Str("proto", "https").
 				Err(err).
 				Msg("failed to Serve")
 		}
-		go killServer("prom", promDoneCh, promServer, promListener)
-		go killServer("http", insecureDoneCh, insecureServer, insecureListener)
 	}()
 
-	var wg sync.WaitGroup
-	wg.Add(3)
 	go func() {
-		defer wg.Done()
-		<-promDoneCh
-	}()
-	go func() {
-		defer wg.Done()
-		<-insecureDoneCh
-	}()
-	go func() {
-		defer wg.Done()
-		<-secureDoneCh
-	}()
-	go func() {
-		wg.Wait()
-		close(doneCh)
+		select {
+		case <-gRootContext.Done():
+			return
+		case <-gShutdownCh:
+			// pass
+		}
+
+		shutdown(true)
+
+		t := time.NewTimer(5 * time.Second)
+		select {
+		case <-gRootContext.Done():
+			t.Stop()
+			return
+		case <-t.C:
+			// pass
+		}
+
+		shutdown(false)
 	}()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		defer signal.Stop(sigCh)
-		alreadyTermed := false
 		for {
 			sig := <-sigCh
 
-			log.Logger.Warn().
+			log.Logger.Info().
 				Str("sig", sig.String()).
 				Msg("got signal")
 
 			switch sig {
 			case syscall.SIGHUP:
-				reload(&ref)
+				reload()
 
 			case syscall.SIGINT:
 				fallthrough
 			case syscall.SIGTERM:
-				if alreadyTermed {
-					log.Logger.Warn().
-						Msg("got second SIGINT/SIGTERM, forcing dirty shutdown")
-					go killServer("prom", promDoneCh, promServer, promListener)
-					go killServer("http", insecureDoneCh, insecureServer, insecureListener)
-					go killServer("https", secureDoneCh, secureServer, secureListener)
-					return
-				}
-
-				alreadyTermed = true
-				if err := secureServer.Shutdown(gRootContext); !isIgnoredServingError(err) {
-					log.Logger.Error().
-						Str("proto", "https").
-						Err(err).
-						Msg("failed to Shutdown")
-				}
-				if err := insecureServer.Shutdown(gRootContext); !isIgnoredServingError(err) {
-					log.Logger.Error().
-						Str("proto", "http").
-						Err(err).
-						Msg("failed to Shutdown")
-				}
-				if err := promServer.Shutdown(gRootContext); !isIgnoredServingError(err) {
-					log.Logger.Error().
-						Str("proto", "prom").
-						Err(err).
-						Msg("failed to Shutdown")
-				}
-				gRootCancel()
+				shutdown(false)
 			}
 		}
 	}()
 
-	<-doneCh
+	wg.Wait()
 }
 
-func killServer(proto string, ch <-chan struct{}, server *http.Server, listener net.Listener) {
-	err := listener.Close()
-	if !isIgnoredServingError(err) {
-		log.Logger.Warn().
-			Str("proto", proto).
-			Err(err).
-			Msg("failed to Close listener")
+func closeShutdownCh() {
+	gShutdownMu.Lock()
+	if !gAlreadyClosed {
+		gAlreadyClosed = true
+		close(gShutdownCh)
 	}
-
-	t := time.NewTimer(5 * time.Second)
-	select {
-	case <-t.C:
-		err := server.Close()
-		if !isIgnoredServingError(err) {
-			log.Logger.Warn().
-				Str("proto", proto).
-				Err(err).
-				Msg("failed to Close server")
-		}
-
-	case <-ch:
-		t.Stop()
-	}
+	gShutdownMu.Unlock()
 }
 
-func reload(ref *Ref) {
+func reload() error {
+	var errs multierror.Error
+
+	sdNotify("RELOADING=1")
+
 	if gLogger != nil {
 		if err := gLogger.Rotate(); err != nil {
+			errs.Errors = append(errs.Errors, err)
 			log.Logger.Error().
 				Err(err).
 				Msg("failed to rotate log file")
 		}
 	}
 
-	if err := ref.Load(flagConfig); err != nil {
+	if err := gRef.Load(flagConfig); err != nil {
+		errs.Errors = append(errs.Errors, err)
 		log.Logger.Error().
 			Str("path", flagConfig).
 			Err(err).
 			Msg("failed to reload config file")
 	}
+
+	sdNotify("READY=1")
+
+	return errs.ErrorOrNil()
 }
 
-func isIgnoredServingError(err error) bool {
+func shutdown(graceful bool) error {
+	gShutdownMu.Lock()
+	alreadyTermed := gAlreadyTermed
+	gAlreadyTermed = true
+	gShutdownMu.Unlock()
+
+	if alreadyTermed && graceful {
+		return nil
+	}
+
+	if alreadyTermed {
+		log.Logger.Warn().
+			Msg("forcing dirty shutdown")
+		gRootCancel()
+	}
+
+	sdNotify("STOPPING=1")
+
+	var wg sync.WaitGroup
+	errCh := make(chan error)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if alreadyTermed {
+			gAdminServer.Stop()
+		} else {
+			go gAdminServer.GracefulStop()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var action string
+		var err error
+		if alreadyTermed {
+			action = "Close"
+			err = gSecureServer.Close()
+		} else {
+			action = "Shutdown"
+			err = gSecureServer.Shutdown(gRootContext)
+		}
+		if isRealShutdownError(err) {
+			errCh <- fmt.Errorf("failed to %s https server: %w", action, err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var action string
+		var err error
+		if alreadyTermed {
+			action = "Close"
+			err = gInsecureServer.Close()
+		} else {
+			action = "Shutdown"
+			err = gInsecureServer.Shutdown(gRootContext)
+		}
+		if isRealShutdownError(err) {
+			errCh <- fmt.Errorf("failed to %s http server: %w", action, err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var action string
+		var err error
+		if alreadyTermed {
+			action = "Close"
+			err = gPromServer.Close()
+		} else {
+			action = "Shutdown"
+			err = gPromServer.Shutdown(gRootContext)
+		}
+		if isRealShutdownError(err) {
+			errCh <- fmt.Errorf("failed to %s prom server: %w", action, err)
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		if err := gRef.Close(); err != nil {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	var errs multierror.Error
+	for err := range errCh {
+		errs.Errors = append(errs.Errors, err)
+	}
+
+	return errs.ErrorOrNil()
+}
+
+func isRealShutdownError(err error) bool {
 	switch {
 	case err == nil:
-		return true
+		return false
+
+	case errors.Is(err, fs.ErrClosed):
+		return false
 
 	case errors.Is(err, net.ErrClosed):
-		return true
+		return false
 
 	case errors.Is(err, http.ErrServerClosed):
-		return true
+		return false
 
 	case errors.Is(err, context.Canceled):
-		return true
+		return false
 
 	default:
-		return false
+		return true
 	}
 }
 

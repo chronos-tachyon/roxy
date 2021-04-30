@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/template"
 
-	log "github.com/rs/zerolog/log"
+	"github.com/rs/zerolog/log"
 
 	"github.com/chronos-tachyon/roxy/internal/enums"
 )

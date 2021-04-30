@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	zerolog "github.com/rs/zerolog"
+	"github.com/rs/zerolog"
 )
 
 type MimeRule struct {

@@ -1,7 +1,8 @@
 /roxy
-/zkcp
-/demo-backend
+/roxyctl
 /colorize-logs
+/demo-backend
+/zkcp
 /*.deb
 /release-notes.txt
 /version.txt

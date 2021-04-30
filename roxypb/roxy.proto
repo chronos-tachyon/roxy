@@ -53,3 +53,27 @@ message Endpoint {
   int32 shard_id = 7;
   float weight = 8;
 }
+
+service Admin {
+  rpc Ping (PingRequest) returns (PingResponse) {}
+  rpc Reload (ReloadRequest) returns (ReloadResponse) {}
+  rpc Shutdown (ShutdownRequest) returns (ShutdownResponse) {}
+}
+
+message PingRequest {
+}
+
+message PingResponse {
+}
+
+message ReloadRequest {
+}
+
+message ReloadResponse {
+}
+
+message ShutdownRequest {
+}
+
+message ShutdownResponse {
+}
