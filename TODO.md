@@ -12,10 +12,10 @@ Things that I would like to do with Roxy:
 * [ ] Make journald logging more useful
 * [x] Scripts to generate Debian package
 * [x] Scripts to generate Docker image
-* [ ] Prometheus metrics on a new HTTP listen port
+* [x] Prometheus metrics on a new HTTP listen port
 * [x] WrappedWriter.Error should not Write after WriteHeader if r.Method is HEAD
 * [x] Recognize symlinks in FileSystemHandler.ServeDir
-* [ ] User control of in-memory cache threshold
+* [x] User control of in-memory cache threshold
 * [ ] Investigate possible bidirectional support of HTTP trailers to/from backends
 * [ ] Investigate possible use of HTTP body filters to/from backends
 * [x] Optional TLS/mTLS between Roxy and backends

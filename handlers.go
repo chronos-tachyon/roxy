@@ -47,13 +47,42 @@ import (
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
-const defaultMaxCacheSize = 4 << 10 // 4 KiB
-
-const defaultMaxComputeDigestSize = 4 << 20 // 4 MiB
+var (
+	gFileCacheMu    sync.Mutex
+	gFileCacheMap   map[cacheKey]cacheRow = make(map[cacheKey]cacheRow, 1024)
+	gFileCacheBytes int64
+)
 
 var (
-	gFileCacheMu  sync.Mutex
-	gFileCacheMap map[cacheKey]cacheRow = make(map[cacheKey]cacheRow, 1024)
+	promFileCacheCount = prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: "roxy",
+			Subsystem: "https",
+			Name:      "cache_count",
+			Help:      "number of files in the in-RAM cache",
+		},
+		func() float64 {
+			gFileCacheMu.Lock()
+			x := len(gFileCacheMap)
+			gFileCacheMu.Unlock()
+			return float64(x)
+		},
+	)
+
+	promFileCacheBytes = prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: "roxy",
+			Subsystem: "https",
+			Name:      "cache_bytes",
+			Help:      "number of bytes in the in-RAM cache",
+		},
+		func() float64 {
+			gFileCacheMu.Lock()
+			x := gFileCacheBytes
+			gFileCacheMu.Unlock()
+			return float64(x)
+		},
+	)
 )
 
 var gMetrics = map[string]*Metrics{
@@ -66,6 +95,8 @@ func init() {
 	for _, metrics := range gMetrics {
 		metrics.MustRegister(prometheus.DefaultRegisterer)
 	}
+	prometheus.DefaultRegisterer.Register(promFileCacheCount)
+	prometheus.DefaultRegisterer.Register(promFileCacheBytes)
 }
 
 // type Metrics {{{
@@ -668,9 +699,19 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 		}
 	}
 
+	var maxCacheSize int64 = defaultMaxCacheSize
+	if rc.Impl.cfg.Global != nil && rc.Impl.cfg.Global.MaxCacheSize != 0 {
+		maxCacheSize = rc.Impl.cfg.Global.MaxCacheSize
+	}
+
+	var maxComputeDigestSize int64 = defaultMaxComputeDigestSize
+	if rc.Impl.cfg.Global != nil && rc.Impl.cfg.Global.MaxComputeDigestSize != 0 {
+		maxComputeDigestSize = rc.Impl.cfg.Global.MaxComputeDigestSize
+	}
+
 	size := fi.Size()
 	mtime := fi.ModTime()
-	if size <= defaultMaxCacheSize {
+	if size <= maxCacheSize {
 		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
 			cachePossible = true
 			key := cacheKey{st.Dev, st.Ino}
@@ -709,7 +750,11 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 				}
 
 				gFileCacheMu.Lock()
+				if existing, found := gFileCacheMap[key]; found {
+					gFileCacheBytes -= int64(len(existing.bytes))
+				}
 				gFileCacheMap[key] = row
+				gFileCacheBytes += int64(len(row.bytes))
 				gFileCacheMu.Unlock()
 			}
 
@@ -751,7 +796,7 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 			hdrs.Set("etag", etag)
 		}
 
-		if !haveMD5 && !haveSHA1 && !haveSHA256 && fi.Size() <= defaultMaxComputeDigestSize {
+		if !haveMD5 && !haveSHA1 && !haveSHA256 && fi.Size() <= maxComputeDigestSize {
 			if _, err := f.Seek(0, io.SeekStart); err == nil {
 				md5writer := md5.New()
 				sha1writer := sha1.New()

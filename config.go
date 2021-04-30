@@ -22,6 +22,8 @@ type GlobalConfig struct {
 	ACMEDirectoryURL      string         `json:"acmeDirectoryURL"`
 	ACMERegistrationEmail string         `json:"acmeRegistrationEmail"`
 	ACMEUserAgent         string         `json:"acmeUserAgent"`
+	MaxCacheSize          int64          `json:"maxCacheSize"`
+	MaxComputeDigestSize  int64          `json:"maxComputeDigestSize"`
 	Etcd                  *EtcdConfig    `json:"etcd"`
 	ZK                    *ZKConfig      `json:"zookeeper"`
 	Storage               *StorageConfig `json:"storage"`

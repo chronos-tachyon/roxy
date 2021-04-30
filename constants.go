@@ -17,6 +17,9 @@ const (
 	defaultMimeFile      = "/etc/opt/roxy/mime.json"
 	defaultStorageEngine = "fs"
 	defaultStoragePath   = "/var/opt/roxy/lib/acme"
+
+	defaultMaxCacheSize         = 64 << 10 // 64 KiB
+	defaultMaxComputeDigestSize = 4 << 20  // 4 MiB
 )
 
 const defaultIndexPageTemplate = `<!DOCTYPE html>
