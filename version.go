@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-//go:embed "version.txt"
+//go:embed ".version"
 var versionString string
 
 func Version() string {
