@@ -459,18 +459,18 @@ The `"type"` field selects which target type to use for this target configuratio
 
 The `"path"` field is required for `"type": "fs"`, and is forbidden for other types.  It
 specifies the local filesystem directory out of which static content is served.  See
-[`"global.maxCacheSize"`](#field-globalmaxCacheSize) and
-[`"global.maxComputeDigestSize"`](#field-globalmaxComputeDigestSize) for configuration
+[`"global.maxCacheSize"`](#field-globalmaxcachesize) and
+[`"global.maxComputeDigestSize"`](#field-globalmaxcomputedigestsize) for configuration
 options.  The `"fs"` type does _not_ support disabling of automatically-generated
 directory indexes, and only supports index files with the exact name `index.html`.
 
 The `"target"` field is required for `"type": "http"` and `"type": "grpc"`, and is
 forbidden for other types.  It specifies the "target spec", i.e. how to connect to
-the hosts being reverse proxied.  See [the "Target spec" heading](#target-spec).
+the hosts being reverse proxied.  See [the "Target specs" heading](#target-specs).
 
 The `"tls"` field is optional for `"type": "http"` and `"type": "grpc"`, and is
-forbidden for other types.  The syntax is explored below, under the heading
-[TLS client configuration](#tls-client-configuration).
+forbidden for other types.  The syntax is explored below, under
+[the "TLS client configuration" heading](#tls-client-configuration).
 
 A simple target for static file serving might look like this:
 
@@ -485,7 +485,7 @@ A simple target for static file serving might look like this:
 }
 ```
 
-A target that uses <span title="mutual TLS"><em>mTLS</em></span> to connect to an HTTPS backend,
+A target that uses mutual TLS ("mTLS") to connect to an HTTPS backend,
 on the other hand, might look like this:
 
 ```json
@@ -782,7 +782,7 @@ should be used, and (2) how to configure it.  It has the following structure:
 
 All fields are optional and have reasonable defaults.  The simplest configuration, in
 which TLS is used with all and only the standard verification steps, and with no
-<span title="mutual TLS"><em>mTLS</em></span>, is as follows:
+mutual TLS ("mTLS"), is as follows:
 
 ```
 ...
