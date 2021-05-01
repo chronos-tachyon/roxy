@@ -91,12 +91,12 @@ rewrites:
 Section `"global"` groups together miscellaneous configuration items that don't fit in any other category.
 
 It contains the following fields and sub-sections:
-* [`"mimeFile"`](#field-globalmimeFile)
-* [`"acmeDirectoryURL"`](#field-globalacmeDirectoryURL)
-* [`"acmeRegistrationEmail"`](#field-globalacmeRegistrationEmail)
-* [`"acmeUserAgent"`](#field-globalacmeUserAgent)
-* [`"maxCacheSize"`](#field-globalmaxCacheSize)
-* [`"maxComputeDigestSize"`](#field-globalmaxComputeDigestSize)
+* [`"mimeFile"`](#field-globalmimefile)
+* [`"acmeDirectoryURL"`](#field-globalacmedirectoryurl)
+* [`"acmeRegistrationEmail"`](#field-globalacmeregistrationemail)
+* [`"acmeUserAgent"`](#field-globalacmeuseragent)
+* [`"maxCacheSize"`](#field-globalmaxcachesize)
+* [`"maxComputeDigestSize"`](#field-globalmaxcomputedigestsize)
 * [`"etcd"`](#subsection-globaletcd)
 * [`"zk"`](#subsection-globalzk)
 * [`"storage"`](#subsection-globalstorage)
@@ -320,15 +320,16 @@ with the ACME server.  It has the following structure:
 
 The `"global.storage.engine"` field is the name of a storage engine:
 
-* `"fs"` uses the local filesystem; `"global.storage.path"` is a filesystem path (an absolute path is recommended)
-* `"zk"` uses ZooKeeper; `"global.storage.path"` is the absolute path within the ZooKeeper cluster; `"global.zk"` is required for this engine
-* `"etcd"` uses Etcd; `"global.storage.path"` is the absolute "path" within the Etcd cluster; `"global.etcd"` is required for this engine
+* `"fs"` uses a directory within the local filesystem; `"global.storage.path"` is a filesystem path (an absolute path is recommended)
+* `"zk"` uses a directory within ZooKeeper; `"global.storage.path"` is the absolute path within the ZooKeeper cluster; `"global.zk"` is required for this engine
+* `"etcd"` uses a "directory" within Etcd; `"global.storage.path"` is the absolute "path" within the Etcd cluster; `"global.etcd"` is required for this engine
 
-(NB: Etcd does not have "directories", per se; instead, `"path"` is suffixed with `"/"`
-to form a search prefix.  This feels enough like a directory that the "path"
-nomenclature still fits.)
+(NB: Etcd 3.x does not have "paths" and "directories", per se; instead, `"path"` is suffixed with
+`"/"` to form a search prefix, and each "file" is a key-value pair formed by concatenating the search
+prefix with the filename.  This feels enough like a directory that the filesystem-like nomenclature
+still fits, with only a few caveats.)
 
-The default, which takes effect **only** if there is no `"global"."storage"` sub-section at all, is:
+The default, which takes effect **only** if there is no `"global.storage"` sub-section at all, is:
 
 ```json
 {
@@ -465,11 +466,11 @@ directory indexes, and only supports index files with the exact name `index.html
 
 The `"target"` field is required for `"type": "http"` and `"type": "grpc"`, and is
 forbidden for other types.  It specifies the "target spec", i.e. how to connect to
-the hosts being reverse proxied.
+the hosts being reverse proxied.  See [the "Target spec" heading](#target-spec).
 
 The `"tls"` field is optional for `"type": "http"` and `"type": "grpc"`, and is
 forbidden for other types.  The syntax is explored below, under the heading
-[TLS client configuration](#TLS-client-configuration).
+[TLS client configuration](#tls-client-configuration).
 
 A simple target for static file serving might look like this:
 
@@ -615,6 +616,147 @@ the form:
   ]
 }
 ```
+
+***
+
+## Target specs
+
+A target spec is defined similarly to
+[the gRPC Name Syntax](https://github.com/grpc/grpc/blob/master/doc/naming.md):
+a target spec is a URL-like string which contains an optional "scheme", an
+optional "authority", a mandatory "target", and an optional "query".
+
+* `"some_string"` is interpreted as `(nil, nil, "some_string", nil)`
+* `"some:string"` is interpreted as `("some", nil, "string", nil)`
+* `"some:/string"` is interpreted as `("some", nil, "/string", nil)`
+* `"some:///string"` is interpreted as `("some", nil, "string", nil)`
+* `"some:////string"` is interpreted as `("some", nil, "/string", nil)`
+* `"some://long/string"` is interpreted as `("some", "long", "string", nil)`
+* `"some://long/string?q=1"` is interpreted as `("some", "long", "string", "q=1")`
+
+The meaning of the authority, target, and query depends on the scheme.
+
+The following schemes are supported, both for HTTP and for gRPC:
+
+### Scheme `"dns"`
+
+Complete syntax: `"dns://<server:port>/<domain:port>?balancer=<algo>&pollInterval=<dur>&serverName=<name>"`
+
+The `<server:port>` (of the optional authority string) names a specific DNS
+server, overriding your OS `/etc/resolv.conf` settings.  If this is present
+at all, the port is almost always 53, which is the default.  Very few people
+will want to specify this.
+
+The `<domain:port>` (of the mandatory target string) is the domain name to
+resolve, plus a named or numbered port.  The `domain` specifies the A/AAAA
+records to query.  The `port` is optional, with a default of `80` without
+TLS or `443` with TLS.  All hosts must use the same port.
+
+The optional `balancer=<algo>` query parameter specifies the balancer
+algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
+
+The optional `pollInterval=<dur>` query parameter specifies how long to
+cache the DNS query results in memory before making another query.  The
+default is a fairly aggressive `"1m"` (one minute).
+
+The optional `serverName=<name>` query parameter specifies the expected
+DNSName SAN on the TLS certificate, overriding the default of `domain`.
+This only has an effect when TLS is in use.
+
+### Scheme `"srv"`
+
+Complete syntax: `srv://<server:port>/<domain>/<service>?balancer=<algo>&pollInterval=<dur>&serverName=<name>`
+
+The `<server:port>` (of the optional authority string) names a specific DNS
+server, overriding your OS `/etc/resolv.conf` settings.  If this is present
+at all, the port is almost always 53, which is the default.  Very few people
+will want to specify this.
+
+The `<domain>/<service>` (of the mandatory target string) is used to
+construct the domain name to resolve.  Both parts are mandatory.  DNS SRV
+records will be queried at `_<service>._tcp.<domain>`, followed by lookups
+of the A/AAAA records of the resulting domain names.  Each SRV record
+specifies its own port, as well as a priority and weight that can be used
+by a special balancer algorithm.
+
+The optional `balancer=<algo>` query parameter specifies the balancer
+algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
+
+The optional `pollInterval=<dur>` query parameter specifies how long to
+cache the DNS query results in memory before making another query.  The
+default is a fairly aggressive `"1m"` (one minute).
+
+The optional `serverName=<name>` query parameter specifies the expected
+DNSName SAN on the TLS certificate, overriding the default of the domain(s)
+named by the SRV records.  (That is, the default ServerName is the name of
+the A/AAAA records, not the name of the SRV records.)  This only has an
+effect when TLS is in use.
+
+### Scheme `"zk"`
+
+Complete syntax: `zk:///path/to/dir:namedPort?balancer=<algo>`
+
+The authority section must be empty.
+
+The mandatory `path/to/dir` (of the mandatory target string) specifies the path to
+a ZooKeeper directory containing files, one per host, in either of two
+JSON syntaxes:
+* [Finagle ServerSet](https://github.com/twitter/finagle)
+* [Etcd gRPC Naming](https://etcd.io/docs/v3.3/dev-guide/grpc_naming/)
+
+If `path/to/dir` does _not_ begin with a `/`, one is automatically added for you.
+
+The optional `portName` (of the mandatory target string) names a port within the Finagle ServerSet data.
+
+The optional `balancer=<algo>` query parameter specifies the balancer
+algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
+
+### Scheme `"etcd"`
+
+Complete syntax: `etcd:///prefix/string:namedPort?balancer=<algo>`
+
+The mandatory `prefix/string` (of the mandatory target string) specifies the prefix
+of an Etcd keyspace containing key-value pairs, one per host, in either of two
+JSON syntaxes:
+* [Finagle ServerSet](https://github.com/twitter/finagle)
+* [Etcd gRPC Naming](https://etcd.io/docs/v3.3/dev-guide/grpc_naming/)
+
+If `prefix/string` does _not_ begin with a `/`, it **will not** be added for you.
+Etcd 3.x allows keys whose names don't start with `/`, even though the `/` is
+conventional.  If your `prefix/string` starts with a `/`, use four slashes between
+the scheme and the target, like so: `etcd:////path/to/dir`.
+
+The `prefix/string` _must not_ end with a `/`.  One will be automatically added
+for you.
+
+The optional `balancer=<algo>` query parameter specifies the balancer
+algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
+
+***
+
+## Balancer algorithms
+
+### Balancer `"random"`
+
+This balancer picks a host at random with uniform probability.
+
+### Balancer `"roundRobin"`
+
+This balancer shuffles the hosts into a random permutation, then cycles through
+the hosts in that order until the next resolver change.  Each host has uniform
+probability.
+
+### Balancer `"leastLoaded"`
+
+This balancer is not fully implemented yet.  It currently behaves similarly to
+the `"random"` balancer.
+
+### Balancer `"srv"`
+
+This balancer is only valid for [the `"srv"` target scheme](#scheme-srv).  It
+respects the SRV records' priority and weight fields to do weighted, non-uniform
+random selection.  As health checking has not yet been implemented, it will
+never use any priority tier except the one with lowest numeric value.
 
 ***
 
