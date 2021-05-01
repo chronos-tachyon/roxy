@@ -1,4 +1,4 @@
-## Configuring Roxy
+## Roxy: The Full Configuration Reference
 
 Roxy's configuration files use [the JSON format](https://www.json.org/).
 The primary config file lives at `/etc/opt/roxy/config.json`, while
