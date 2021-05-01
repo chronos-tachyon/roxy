@@ -90,7 +90,7 @@ rewrites:
 
 Section `"global"` groups together miscellaneous configuration items that don't fit in any other category.
 
-It contains the following fields and sub-sections:
+It contains the following fields and subsections:
 * [`"mimeFile"`](#field-globalmimefile)
 * [`"acmeDirectoryURL"`](#field-globalacmedirectoryurl)
 * [`"acmeRegistrationEmail"`](#field-globalacmeregistrationemail)
@@ -156,6 +156,11 @@ Here's a concrete example:
 ]
 ```
 
+You can override the "Content-Type", "Content-Language", and "Content-Encoding" headers on a
+file-by-file basis using [extended attributes](https://man7.org/linux/man-pages/man7/xattr.7.html)
+("xattrs"), as described in the docs for
+[field `"global.maxComputeDigestSize"`](#field-globalmaxcomputedigestsize).
+
 ### Field `"global.acmeDirectoryURL"`
 
 Field `"global.acmeDirectoryURL"` controls which ACME server endpoint Roxy uses to obtain TLS
@@ -213,7 +218,7 @@ Roxy respects the following xattrs:
 * `user.md5sum` controls the "Digest: md5=" header; format is 32 lowercase hex digits
 * `user.sha1sum` controls the "Digest: sha1=" header; format is 40 lowercase hex digits
 * `user.sha256sum` controls the "Digest: sha-256=" header; format is 64 lowercase hex digits
-* `user.etag` controls the "ETag" header directly; if omitted, defaults to a function of the strongest available digest
+* `user.etag` controls the "ETag" header directly; format is described in [RFC 7232](https://tools.ietf.org/html/rfc7232#section-2.3) but is typically a double-quoted string that is guaranteed to change whenever the file's content changes; if omitted, defaults to a function of the strongest available digest
 
 You can set the xattrs on a file using the
 [setfattr](https://man7.org/linux/man-pages/man1/setfattr.1.html) command.
@@ -329,7 +334,7 @@ The `"global.storage.engine"` field is the name of a storage engine:
 prefix with the filename.  This feels enough like a directory that the filesystem-like nomenclature
 still fits, with only a few caveats.)
 
-The default, which takes effect **only** if there is no `"global.storage"` sub-section at all, is:
+The default, which takes effect **only** if there is no `"global.storage"` subsection at all, is:
 
 ```json
 {
@@ -353,10 +358,10 @@ redirects, and filesystem index pages.  It has the following structure:
     ...
     "pages": {
       "rootDir": "...",                 # Path to the template directory (a String; required)
-      "map": {...},                     # Used to customize individual error codes (an Object)
       "defaultContentType": "...",      # Default value for the "Content-Type" header (a String)
       "defaultContentLanguage": "...",  # Default value for the "Content-Language" header (a String)
-      "defaultContentEncoding": "..."   # Default value for the "Content-Encoding" header (a String)
+      "defaultContentEncoding": "...",  # Default value for the "Content-Encoding" header (a String)
+      "map": {...}                      # Used to customize individual error codes (an Object)
     },
     ...
   },
@@ -383,26 +388,31 @@ The `"global.pages.map"` field is structured as:
 ```
 
 For HTTP 4xx and 5xx errors, the following keys are checked in `"global.pages.map"`:
+
 * The status code, as a 3-digit numeric string
 * The key `"4xx"` (for codes 400..499) or `"5xx"` (for codes 500..599)
 * The key `"error"`
 
 For HTTP 3xx redirects, the following keys are checked:
+
 * The status code, as a 3-digit numeric string
 * The key `"redir"`
 
 For automatically-generated filesystem directory indexes, the following key is checked:
+
 * The key `"index"`
 
 All fields within `"global.pages.map"` are optional.  In fact, all _entries_ in the map
-are optional.  If there is no entry in the map for a given key, then the defaults are:
-* `"fileName"` is `"<key>.html"`, interpreted relative to `"global.pages.rootDir"`
-* `"contentType"` is the value of `"global.pages.defaultContentType"`
-* `"contentLanguage"` is the value of `"global.pages.defaultContentLanguage"`
-* `"contentEncoding"` is the value of `"global.pages.defaultContentEncoding"`
+are optional.  If there is no entry in the map for a given key, then:
+
+* `"fileName"` defaults to `"<key>.html"`; defaulted or not, this is interpreted relative to `"global.pages.rootDir"`
+* `"contentType"` defaults to `"global.pages.defaultContentType"`
+* `"contentLanguage"` defaults to `"global.pages.defaultContentLanguage"`
+* `"contentEncoding"` defaults to `"global.pages.defaultContentEncoding"`
 
 If the computed filename does not exist, then the next key is tried.  If the `"error"`,
-`"redir"`, or `"index"` keys do not exist, then the Roxy built-in defaults are used.
+`"redir"`, or `"index"` keys do not exist, then the Roxy built-in default templates are
+used.
 
 ***
 
@@ -439,10 +449,10 @@ The target configuration has the following structure:
   "targets": {
     ...
     "<name>": {
-      "type": "...",    # String, one of "fs", "http", or "grpc"
-      "path": "...",    # String, "fs" only, path to the intended directory
-      "target": "...",  # String, "http" and "grpc" only, resolve spec to reach the intended backend
-      "tls": {...}      # Object, "http" and "grpc" only, TLS client configuration (optional, see below)
+      "type": "...",    # The target type (a String; one of "fs", "http", or "grpc"; required)
+      "path": "...",    # Path to the directory to serve (a String)
+      "target": "...",  # Target spec for the host(s) being reverse proxied (a String)
+      "tls": {...}      # TLS client configuration for connecting to the host(s) (an Object)
     },
     ...
   },
@@ -450,9 +460,13 @@ The target configuration has the following structure:
 }
 ```
 
-The `"<name>"` key is a unique identifier for this target configuration.
+The `"<name>"` key is a unique identifier for this target configuration.  The name must
+consist of letters, numbers, or the punctuation characters `_`, `.`, `+`, and `-`.  The
+name cannot begin with a number or punctuation, nor can it end with punctuation, nor can
+two punctuation characters appear next to each other.
 
 The `"type"` field selects which target type to use for this target configuration:
+
 * `"fs"` serves static content out of the local filesystem
 * `"http"` provides reverse proxying to one or more hosts via HTTP (with or without TLS)
 * `"grpc"` provides reverse proxying to one or more hosts via gRPC (with or without TLS)
@@ -461,15 +475,17 @@ The `"path"` field is required for `"type": "fs"`, and is forbidden for other ty
 specifies the local filesystem directory out of which static content is served.  See
 [`"global.maxCacheSize"`](#field-globalmaxcachesize) and
 [`"global.maxComputeDigestSize"`](#field-globalmaxcomputedigestsize) for configuration
-options.  The `"fs"` type does _not_ support disabling of automatically-generated
-directory indexes, and only supports index files with the exact name `index.html`.
+options.
+
+NB: The `"fs"` type does _not_ support disabling of automatically-generated directory
+indexes, and only supports index files with the exact name `index.html`.
 
 The `"target"` field is required for `"type": "http"` and `"type": "grpc"`, and is
 forbidden for other types.  It specifies the "target spec", i.e. how to connect to
 the hosts being reverse proxied.  See [the "Target specs" heading](#target-specs).
 
 The `"tls"` field is optional for `"type": "http"` and `"type": "grpc"`, and is
-forbidden for other types.  The syntax is explored below, under
+forbidden for other types.  The syntax is explored later in this document, under
 [the "TLS client configuration" heading](#tls-client-configuration).
 
 A simple target for static file serving might look like this:
@@ -505,117 +521,106 @@ on the other hand, might look like this:
 
 ## Section `"rules"`
 
-Section `"rules"` is an array of rules (objects).  A rule is an optional set of matching criteria,
-an optional list of mutations to apply, and an optional target spec.
+Section `"rules"` is structured as an Array of Objects, where each Object represents a
+single "rule".  A rule is an optional set of matching criteria, an optional list of
+mutations to apply, and an optional target spec.  It does not make sense to specify a
+rule with no mutations _and_ no target, but nothing prevents you from doing this.
 
 ```
-{
+"rules": [
   ...
-  "rules": [
-    ...
-    {
-      "match": {...},      # Object, a map from header names (strings) to header value regexps (strings)
-      "mutations": [...],  # Array of Objects, each of which specifies a mutation to apply to matching requests
-      "target": "..."      # String, a target spec (described below)
-    },
-    ...
-  ],
+  {
+    "match": {...},      # Headers to match (Object of String)
+    "mutations": [...],  # Mutations to apply to matching requests (Array of Object)
+    "target": "..."      # A target name (String)
+  },
   ...
-}
+]
 ```
 
-The `"match"` field consists of zero or more header matches, where each match is the header name (map key) and
-the regular expression which the header value must match (map value).
+### Field `"match"`
+
+The `"match"` field consists of zero or more header matches, where each match is
+composed of the name of the header (Object key) and the regular expression which
+the header's value must match (Object value).  The header name is case-insensitive.
 
 **NB: the regexp is implicitly anchored with `^` and `$`, i.e. a full string match.**
 
-The rule only applies if **all** header
-matches have successfully matched against the *original, unmodified request*.  If any of the header matches
-fails to match the request, then the current rule is ignored.
+The rule only matches if **all** header matches have successfully matched against
+the _original, unmodified request_, as it existed before any mutation rules.  If
+any of the headers fails to match, then the entire rule is ignored.
+
+Omitting the `"match"` field, or having `"match"` set to an empty Object, will cause
+the rule to match all requests unconditionally.
 
 There are a few special header names:
-* "Host" matches the request hostname
-* "Method" matches the request HTTP method
-* "Path" matches the path part of the request HTTP URI
 
-The `"mutations"` field consists of zero or more mutations that are applied if (and only if) the request met
-the requirements of the `"match"` field.  The general structure of a mutation object is as follows:
+* `"Host"` matches the request hostname
+* `"Method"` matches the request HTTP method
+* `"Path"` matches the path part of the request HTTP URI
+
+### Field `"mutations"`
+
+The `"mutations"` field consists of zero or more mutations that are applied if
+(and only if) the request matched the current rule.  The general structure of a
+mutation object is as follows:
 
 ```
-{
+"mutations": [
   ...
-  "rules": [
-    ...
-    {
-      ...
-      "mutations": [
-        ...
-        {
-          "type": "...",    # String, one of "request-host", "request-path", "request-query", "request-header", "response-header-pre", or "response-header-post"
-          "header": "...",  # String, the name of the header (only for "request-header", "response-header-pre", or "response-header-post")
-          "search": "...",  # String, a regexp to match against the desired field
-          "replace": "..."  # String, a replacement string (see below)
-        },
-        ...
-      ],
-      ...
-    },
-    ...
-  ],
+  {
+    "type": "...",    # The mutation type (a String; required)
+    "header": "...",  # The name of the header to mutate (a String; required for some types)
+    "search": "...",  # The regexp to match against the existing value (a String; required)
+    "replace": "..."  # The replacement for the field's value (a String; required)
+  },
   ...
-}
+]
 ```
 
-As with the `"match"` field, the regexp in the `"search"` field is implicitly anchored
-with `^` and `$`.
+The `"type"` is one of the following mutation types:
+
+* `"request-host"` mutates the incoming request's Host
+* `"request-path"` mutates the path of the incoming request's URI
+* `"request-query"` mutates the query string of the incoming request's URI
+* `"request-header"` mutates the named header of the incoming request
+* `"response-header-pre"` mutates the named header of the outgoing response (happens early)
+* `"response-header-post"` mutates the named header of the outgoing response (happens immediately before sending the reply headers)
+
+The `"header"` field is required for the 3 mutation types that deal with headers, and is
+forbidden otherwise.  It is case-insensitive.
+
+**NB: the regexp is implicitly anchored with `^` and `$`, i.e. a full string match.**
 
 The replacement string is a template in
 [Go `"text/template"` format](https://golang.org/pkg/text/template/), which is called with
-a `.` of type `[]string`, representing the return value from calling
+`.` equal to the `[]string` returned from calling
 [`FindStringSubmatch`](https://golang.org/pkg/regexp/#Regexp.FindStringSubmatch)
-on the `"search"` regexp.  As a convenience, the strings `\\0` through `\\9` are synonyms
-for `{{"{{"}} index . N }}`.
+on the `"search"` regexp.
 
-The `"target"` field consists of a target spec.
+**NB: As a convenience, the strings `\\0` through `\\9` are synonyms for `{{"{{"}} index . N }}` in the `"replace"` string.**
 
-If the target spec is present at all, it means that **every request** which meets the
-requirements of the `"match"` field will terminate with this rule.  No further rules
-will be processed.  Conversely, if no target spec is present, then processing continues
-to the next matching rule.
+### Field `"target"`
 
-A target spec is normally the name of a target configuration in
-[the `"targets"` section](#section-targets).  However, there are a few special patterns
-which specify other behavior:
+The `"target"` field consists of the name of a target (see [Section "Targets"](#section-targets)),
+or one of a handful of special strings indicating a built-in target.
+
+If the `"target"` field is present at all, it means that **every request** which matches
+the current rule will stop processing all later rules.
+**No further rules will be processed (first match wins).**  Conversely, if no `"target"`
+field is present, then processing continues to the next matching rule.
+
+Here are the special built-in targets:
 
 * `"ERROR:<status>"` causes Roxy to fail the request with the given 4xx or 5xx status code
 * `"REDIR:<status>:<url>"` causes Roxy to send a redirect with the given 3xx status code and URL
 
 The `<url>` in `REDIR:<status>:<url>` is a template in
 [Go `"text/template"` format](https://golang.org/pkg/text/template/), which is called with
-the current [`*url.URL`](https://golang.org/pkg/net/url/#URL) of the request
-(as mutated by all matching rules up to this point).  This means that, if you want to rewrite
-the URL path and then redirect the client in a single rule, you can do it with a mutation of
-the form:
-
-```json
-{
-  "rules": [
-    {
-      "match": {
-        "path": "/foo/bar(/.*)?"
-      },
-      "mutations": [
-        {
-          "type": "request-path",
-          "search": "/foo/bar(/.*)?",
-          "replace": "/foo/baz\\1"
-        }
-      ],
-      "target": "REDIR:302:{{"{{"}}.}}"
-    }
-  ]
-}
-```
+`.` equal to a [`*url.URL`](https://golang.org/pkg/net/url/#URL) representing the current
+request URI, with scheme and host filled in, and with all mutations made up to this point.
+This means that, if you want to rewrite the URL and then redirect the client to the mutated
+URL, `"target": "STATUS:302:{{.}}"` will do nicely.
 
 ***
 
