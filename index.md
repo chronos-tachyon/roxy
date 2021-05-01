@@ -1,4 +1,4 @@
-## Roxy the Frontend Proxy
+# Roxy the Frontend Proxy
 
 [![Go](https://img.shields.io/github/go-mod/go-version/chronos-tachyon/roxy)](https://golang.org/)
 [![License](https://img.shields.io/badge/license-Hippocratic%202.1-brightgreen)](https://firstdonoharm.dev/version/2/1/license/)
