@@ -1,3 +1,5 @@
+![Roxy logo](https://chronos-tachyon.net/img/roxy-tshirt.png)
+
 # Roxy: The Full Configuration Reference
 
 Roxy's configuration files use [the JSON format](https://www.json.org/).
