@@ -1,3 +1,4 @@
+/etc/default/roxy
 /etc/logrotate.d/roxy
 /etc/opt/roxy/config.json
 /etc/opt/roxy/config.json.example

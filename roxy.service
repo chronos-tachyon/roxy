@@ -5,9 +5,10 @@ After=network.target
 [Service]
 Type=notify
 NotifyAccess=main
-ExecStart=/opt/roxy/bin/roxy -l /var/opt/roxy/log/roxy.json -c /etc/opt/roxy/config.json
-ExecReload=/opt/roxy/bin/roxyctl reload
-ExecStop=/opt/roxy/bin/roxyctl shutdown
+EnvironmentFile=/etc/default/roxy
+ExecStart=/opt/roxy/bin/roxy $ROXY_FLAGS
+ExecReload=/opt/roxy/bin/roxyctl $ROXYCTL_FLAGS reload
+ExecStop=/opt/roxy/bin/roxyctl $ROXYCTL_FLAGS shutdown
 Restart=always
 User=roxy
 Group=roxy

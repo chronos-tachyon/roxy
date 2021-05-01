@@ -1,0 +1,2 @@
+ROXY_FLAGS="-l /var/opt/roxy/log/roxy.json"
+ROXYCTL_FLAGS=""

@@ -49,6 +49,7 @@ build_for_os_arch() {
 
   mkdir -p \
     "${BUILDDIR}/DEBIAN" \
+    "${BUILDDIR}/etc/default" \
     "${BUILDDIR}/etc/logrotate.d" \
     "${BUILDDIR}/etc/opt/roxy" \
     "${BUILDDIR}/etc/systemd/system" \
@@ -75,6 +76,7 @@ build_for_os_arch() {
   cp mime.json.example "${BUILDDIR}/etc/opt/roxy/mime.json"
   cp logrotate.conf "${BUILDDIR}/opt/roxy/share/misc/logrotate.conf"
   cp logrotate.conf "${BUILDDIR}/etc/logrotate.d/roxy"
+  cp roxy.default "${BUILDDIR}/etc/default/roxy"
   cp roxy.service "${BUILDDIR}/etc/systemd/system/roxy.service"
 
   echo '> tar -cf .../data.tar'

@@ -1,3 +1,6 @@
+v0.2.3
+  * Add /etc/default/roxy to the Debian package, for controlling flags.
+
 v0.2.2
   * Add Prometheus metrics for the in-RAM cache.
   * Make MaxCacheSize and MaxComputeDigestSize configurable.
