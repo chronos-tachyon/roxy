@@ -18,6 +18,9 @@ The overall layout of `config.json` looks like this:
 All sections are _technically_ optional, but nearly every setup will
 want to define [`"hosts"`](#section-hosts),
 [`"targets"`](#section-targets), and [`"rules"`](#section-rules).
+Advanced users will also care about [`"global"`](#section-global).
+
+## Full working example
 
 Here is an example Roxy configuration for `config.json` that demonstrates both
 static content serving and reverse proxying, plus a few simple header
