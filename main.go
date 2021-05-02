@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -102,6 +103,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	if abs, err := processPath(flagConfig); err == nil {
+		flagConfig = abs
+	} else {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+		os.Exit(1)
+	}
+
+	if flagLogFile != "" {
+		if abs, err := processPath(flagLogFile); err == nil {
+			flagLogFile = abs
+		} else {
+			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if strings.HasPrefix(flagPromNet, "unix") && flagPromAddr != "" && flagPromAddr[0] != '@' {
+		if abs, err := processPath(flagPromAddr); err == nil {
+			flagPromAddr = abs
+		} else {
+			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if strings.HasPrefix(flagAdminNet, "unix") && flagAdminAddr != "" && flagAdminAddr[0] != '@' {
+		if abs, err := processPath(flagAdminAddr); err == nil {
+			flagAdminAddr = abs
+		} else {
+			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	zerolog.DurationFieldUnit = time.Second
 	zerolog.DurationFieldInteger = false
@@ -130,7 +165,7 @@ func main() {
 		var err error
 		gLogger, err = NewRotatingLogWriter(flagLogFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fatal: failed to open log file for append: %q: %v", flagLogFile, err)
+			fmt.Fprintf(os.Stderr, "fatal: failed to open log file for append: %q: %v\n", flagLogFile, err)
 			os.Exit(1)
 		}
 		log.Logger = log.Output(gLogger)

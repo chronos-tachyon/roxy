@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -152,6 +153,39 @@ func processPath(in string) (string, error) {
 		}
 		return value
 	})
+
+	if len(expanded) != 0 && expanded[0] == '~' {
+		var userName string
+		var rest string
+		if i := strings.IndexByte(expanded, '/'); i >= 0 {
+			userName, rest = expanded[1:i], expanded[i+1:]
+		} else {
+			userName = expanded[1:]
+		}
+
+		var homeDir string
+		if userName == "" {
+			if value, found := os.LookupEnv("HOME"); found {
+				homeDir = value
+			} else if u, err := user.Current(); err == nil {
+				homeDir = u.HomeDir
+			} else {
+				err = fmt.Errorf("failed to look up current user: %w", err)
+				errs.Errors = append(errs.Errors, err)
+				homeDir = "/home/self"
+			}
+		} else {
+			if u, err := user.Lookup(userName); err == nil {
+				homeDir = u.HomeDir
+			} else {
+				err = fmt.Errorf("failed to look up user %q: %w", userName, err)
+				errs.Errors = append(errs.Errors, err)
+				homeDir = "/home/" + userName
+			}
+		}
+
+		expanded = filepath.Join(homeDir, rest)
+	}
 
 	abs, err := filepath.Abs(expanded)
 	if err != nil {
