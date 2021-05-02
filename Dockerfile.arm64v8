@@ -9,7 +9,7 @@ WORKDIR /build
 COPY ./ ./
 RUN set -euo pipefail; \
     umask 022; \
-    export GOPATH=/go GOOS=linux GOARCH=amd64 CGO_ENABLED=0; \
+    export GOPATH=/go GOOS=linux GOARCH=arm64 CGO_ENABLED=0; \
     if [ "${version}" = "unset" ]; then \
       cat .version > version.txt; \
     else \
@@ -19,6 +19,8 @@ RUN set -euo pipefail; \
     go install ./...; \
     mv /go/pkg /junk; \
     chmod -R a+rX,u+w,go-w /build /go/bin; \
+    mv /go/bin/linux_arm64/* /go/bin; \
+    rmdir /go/bin/linux_arm64; \
     setcap cap_net_bind_service=+ep /go/bin/roxy; \
     addgroup -S roxy -g 400; \
     adduser -S roxy -u 400 -G roxy -h /var/opt/roxy/lib -H -D; \
@@ -37,7 +39,7 @@ RUN set -euo pipefail; \
     chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme; \
     chmod 2750 /var/opt/roxy/log
 
-FROM alpine:3.13 AS final
+FROM arm64v8/alpine:3.13 as final
 COPY --from=builder /opt/roxy/ /opt/roxy/
 COPY --from=builder /go/bin/ /opt/roxy/bin/
 COPY --from=builder /var/opt/roxy/ /var/opt/roxy/

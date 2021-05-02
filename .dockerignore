@@ -1,0 +1,6 @@
+.dockerignore
+.github
+Dockerfile*
+version.txt
+*.sh
+*.md

@@ -1,17 +1,16 @@
 #!/bin/bash
 set -euo pipefail
+
 cd "$(dirname "$0")"
+
+umask 022
+
+export LC_ALL="C"
+export TZ="Etc/UTC"
+
 if [ "${RELEASE_MODE:-false}" = "true" ]; then
   FULL_VERSION="$GITHUB_REF"
   FULL_VERSION="${FULL_VERSION##*/v}"
-  version_regexp="v${FULL_VERSION/./\\.}"
-  rm -f release-notes.txt
-  awk '
-    BEGIN { X=0 }
-    /^v[0-9.]+$/ { X=0 }
-    /^'"${version_regexp}"'$/ { X=1 }
-    X == 1 {print}
-  ' < CHANGELOG.txt > release-notes.txt
 else
   VERSION="$(cat .version)"
   DATESTAMP="$(date --utc +%Y.%m.%d)"
@@ -27,12 +26,14 @@ else
   FULL_VERSION="${VERSION}-r${DATESTAMP}-${NEXT_COUNTER}"
 fi
 
-umask 022
+OUTDIR="$(pwd)"
+SRCDIR="$(mktemp -td "roxy.build_deb.source.$$.XXXXXXXXXX")"
+DELETE_ON_EXIT=( "$SRCDIR" )
+trap 'sudo rm -rf "${DELETE_ON_EXIT[@]}"' EXIT
 
-export LC_ALL="C"
-export TZ="Etc/UTC"
-
-echo "$FULL_VERSION" > version.txt
+cp -a ./* "${SRCDIR}/"
+echo "$FULL_VERSION" > "${SRCDIR}/version.txt"
+cd "$SRCDIR"
 
 build_for_os_arch() {
   export GOOS="${1?}"
@@ -43,7 +44,7 @@ build_for_os_arch() {
   echo "> Building for ${GOOS}/${GOARCH}..."
 
   BUILDDIR="$(mktemp -td "roxy.build_deb.${GOARCH}.$$.XXXXXXXXXX")"
-  trap 'sudo rm -rf "$BUILDDIR"' EXIT
+  DELETE_ON_EXIT=( "${DELETE_ON_EXIT[@]}" "$BUILDDIR" )
 
   export GOPATH="${BUILDDIR}/opt/roxy"
 
@@ -119,10 +120,7 @@ build_for_os_arch() {
 
   DEBFILE="roxy_${FULL_VERSION}_${DEBARCH}.deb"
   echo "> dpkg-deb -b ... ${DEBFILE}"
-  dpkg-deb -b "$BUILDDIR" "$DEBFILE"
-
-  trap '' EXIT
-  sudo rm -rf "$BUILDDIR"
+  dpkg-deb -b "$BUILDDIR" "${OUTDIR}/${DEBFILE}"
 }
 
 build_for_os_arch linux amd64
