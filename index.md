@@ -57,4 +57,5 @@ sudo apt install roxy
 
 See also:
 * The [Full Configuration Reference](configuration.html)
+* [Frequently Asked Questions](faq.html)
 
