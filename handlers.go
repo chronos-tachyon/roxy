@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +18,6 @@ import (
 	"os"
 	"os/user"
 	"path"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +30,6 @@ import (
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
-	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/resolver"
@@ -46,6 +43,19 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/enums"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
+
+type cacheKey struct {
+	dev uint64
+	ino uint64
+}
+
+type cacheRow struct {
+	bytes     []byte
+	mtime     time.Time
+	md5sum    string
+	sha1sum   string
+	sha256sum string
+}
 
 var (
 	gFileCacheMu    sync.Mutex
@@ -1358,19 +1368,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	kv[1] = &roxypb.KeyValue{Key: ":method", Value: rc.Request.Method}
 	kv[2] = &roxypb.KeyValue{Key: ":authority", Value: rc.Request.Host}
 	kv[3] = &roxypb.KeyValue{Key: ":path", Value: rc.Request.URL.Path}
-
-	keys := make(headerNames, 0, len(rc.Request.Header))
-	for key := range rc.Request.Header {
-		keys = append(keys, key)
-	}
-	keys.Sort()
-	for _, key := range keys {
-		lc := strings.ToLower(key)
-		for _, value := range rc.Request.Header[key] {
-			kv = append(kv, &roxypb.KeyValue{Key: lc, Value: value})
-		}
-	}
-
+	kv = appendHeadersToKV(kv, rc.Request.Header)
 	err = sc.Send(&roxypb.WebMessage{Headers: kv})
 	if err != nil {
 		rc.Logger.Error().
@@ -1411,13 +1409,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	kv = make([]*roxypb.KeyValue, 0, len(rc.Request.Trailer))
-	for trailerName, trailerValues := range rc.Request.Trailer {
-		lc := strings.ToLower(trailerName)
-		for _, trailerValue := range trailerValues {
-			kv = append(kv, &roxypb.KeyValue{Key: lc, Value: trailerValue})
-		}
-	}
-
+	kv = appendHeadersToKV(kv, rc.Request.Trailer)
 	if len(kv) != 0 {
 		err = sc.Send(&roxypb.WebMessage{Trailers: kv})
 		if err != nil {
@@ -1598,7 +1590,7 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 		return nil, fmt.Errorf("missing required field \"path\"")
 	}
 
-	abs, err := filepath.Abs(cfg.Path)
+	abs, err := processPath(cfg.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -1665,251 +1657,3 @@ func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 
 	return &GRPCBackendHandler{cc}, nil
 }
-
-func toHTTPError(err error) int {
-	switch {
-	case os.IsNotExist(err):
-		return http.StatusNotFound
-	case os.IsPermission(err):
-		return http.StatusForbidden
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
-func readXattr(f http.File, attr string) ([]byte, error) {
-	fdable, ok := f.(interface{ Fd() uintptr })
-	if !ok {
-		return nil, syscall.ENOTSUP
-	}
-
-	dest := make([]byte, 256)
-	for {
-		n, err := unix.Fgetxattr(int(fdable.Fd()), attr, dest)
-		switch {
-		case err == nil && n < len(dest):
-			return dest[:n], nil
-
-		case err == nil:
-			if len(dest) >= 65536 {
-				return nil, syscall.ERANGE
-			}
-			dest = make([]byte, 2*len(dest))
-
-		case errors.Is(err, syscall.ERANGE):
-			if len(dest) >= 65536 {
-				return nil, err
-			}
-			dest = make([]byte, 2*len(dest))
-
-		case errors.Is(err, syscall.EINTR):
-			// pass
-
-		default:
-			return nil, err
-		}
-	}
-}
-
-func readLinkAt(dir http.File, name string) (string, error) {
-	fdable, ok := dir.(interface{ Fd() uintptr })
-	if !ok {
-		return "", syscall.ENOTSUP
-	}
-
-	dest := make([]byte, 256)
-	for {
-		n, err := unix.Readlinkat(int(fdable.Fd()), name, dest)
-		switch {
-		case err == nil && n < len(dest):
-			return string(dest[:n]), nil
-
-		case err == nil:
-			if len(dest) >= 65536 {
-				return "", syscall.ERANGE
-			}
-			dest = make([]byte, 2*len(dest))
-
-		case errors.Is(err, syscall.EINTR):
-			// pass
-
-		default:
-			return "", err
-		}
-	}
-}
-
-func runeLen(str string) int {
-	var length int
-	for _, ch := range str {
-		_ = ch
-		length++
-	}
-	return length
-}
-
-func trimContentHeader(str string) string {
-	i := strings.IndexByte(str, ';')
-	if i >= 0 {
-		str = str[:i]
-	}
-	return strings.TrimSpace(str)
-}
-
-func hexToBase64(in string) string {
-	raw, err := hex.DecodeString(in)
-	if err != nil {
-		panic(err)
-	}
-	return base64.StdEncoding.EncodeToString(raw)
-}
-
-func setDigestHeader(h http.Header, algo enums.DigestType, b64 string) {
-	h.Add("digest", fmt.Sprintf("%s=%s", algo, b64))
-}
-
-func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
-	if h.Get("etag") != "" {
-		return
-	}
-
-	var (
-		haveMD5    bool
-		haveSHA1   bool
-		haveSHA256 bool
-		sumMD5     string
-		sumSHA1    string
-		sumSHA256  string
-	)
-
-	for _, row := range h.Values("digest") {
-		switch {
-		case strings.HasPrefix(row, "md5="):
-			haveMD5 = true
-			sumMD5 = row[4:]
-		case strings.HasPrefix(row, "sha1="):
-			haveSHA1 = true
-			sumSHA1 = row[5:]
-		case strings.HasPrefix(row, "sha256="):
-			haveSHA256 = true
-			sumSHA256 = row[7:]
-		}
-	}
-
-	if haveSHA256 {
-		h.Set("etag", strconv.Quote(prefix+"Z."+sumSHA256[:16]))
-		return
-	}
-
-	if haveSHA1 {
-		h.Set("etag", strconv.Quote(prefix+"Y."+sumSHA1[:16]))
-		return
-	}
-
-	if haveMD5 {
-		h.Set("etag", strconv.Quote(prefix+"X."+sumMD5[:16]))
-		return
-	}
-
-	h.Set("etag", fmt.Sprintf("W/%q", lastMod.UTC().Format("2006.01.02.15.04.05")))
-}
-
-func addrWithNoPort(addr net.Addr) string {
-	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
-		if tcpAddr.Zone == "" {
-			return tcpAddr.IP.String()
-		}
-		return tcpAddr.IP.String() + "%" + tcpAddr.Zone
-	}
-	return addr.String()
-}
-
-func quoteForwardedAddr(addr net.Addr) string {
-	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
-		if isIPv6(tcpAddr.IP) {
-			return strconv.Quote(tcpAddr.String())
-		}
-	}
-	return addr.String()
-}
-
-func isIPv6(ip net.IP) bool {
-	if len(ip) < 16 {
-		return false
-	}
-	if ip4 := ip.To4(); ip4 != nil {
-		return false
-	}
-	return true
-}
-
-type cacheKey struct {
-	dev uint64
-	ino uint64
-}
-
-type cacheRow struct {
-	bytes     []byte
-	mtime     time.Time
-	md5sum    string
-	sha1sum   string
-	sha256sum string
-}
-
-// type fileInfoList {{{
-
-type fileInfoList []fs.FileInfo
-
-func (list fileInfoList) Len() int {
-	return len(list)
-}
-
-func (list fileInfoList) Less(i, j int) bool {
-	a, b := list[i], list[j]
-
-	aName, aIsDir := a.Name(), a.IsDir()
-	bName, bIsDir := b.Name(), b.IsDir()
-
-	aIsDot := strings.HasPrefix(aName, ".")
-	bIsDot := strings.HasPrefix(bName, ".")
-
-	if aIsDir != bIsDir {
-		return aIsDir
-	}
-	if aIsDot != bIsDot {
-		return aIsDot
-	}
-	return aName < bName
-}
-
-func (list fileInfoList) Swap(i, j int) {
-	list[i], list[j] = list[j], list[i]
-}
-
-var _ sort.Interface = fileInfoList(nil)
-
-// }}}
-
-// type headerNames {{{
-
-type headerNames []string
-
-func (list headerNames) Len() int {
-	return len(list)
-}
-
-func (list headerNames) Swap(i, j int) {
-	list[i], list[j] = list[j], list[i]
-}
-
-func (list headerNames) Less(i, j int) bool {
-	a := strings.ToLower(list[i])
-	b := strings.ToLower(list[j])
-	return a < b
-}
-
-func (list headerNames) Sort() {
-	sort.Sort(list)
-}
-
-// }}}

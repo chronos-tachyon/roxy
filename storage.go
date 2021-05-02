@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,16 +12,45 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+type StorageEngine interface {
+	autocert.Cache
+	Close() error
+}
+
+type StorageEngineCtor func(impl *Impl, cfg *StorageConfig) (StorageEngine, error)
+
 var (
 	gStorageEngineMu  sync.Mutex
 	gStorageEngineMap map[string]StorageEngineCtor
 )
 
-// type StorageEngine {{{
+func NewStorageEngine(impl *Impl, cfg *StorageConfig) (StorageEngine, error) {
+	engine := cfg.Engine
 
-type StorageEngine interface {
-	autocert.Cache
-	Close() error
+	gStorageEngineMu.Lock()
+	ctor := gStorageEngineMap[cfg.Engine]
+	gStorageEngineMu.Unlock()
+
+	if ctor == nil {
+		return nil, StorageEngineCreateError{
+			Engine: engine,
+			Err:    errors.New("unknown storage engine"),
+		}
+	}
+
+	return ctor(impl, cfg)
+}
+
+func RegisterStorageEngine(name string, ctor StorageEngineCtor) {
+	if ctor == nil {
+		panic(errors.New("ctor is nil"))
+	}
+	gStorageEngineMu.Lock()
+	if gStorageEngineMap == nil {
+		gStorageEngineMap = make(map[string]StorageEngineCtor, 10)
+	}
+	gStorageEngineMap[name] = ctor
+	gStorageEngineMu.Unlock()
 }
 
 // type FileSystemStorageEngine {{{
@@ -215,39 +242,6 @@ var _ StorageEngine = (*ZKStorageEngine)(nil)
 
 // }}}
 
-// }}}
-
-type StorageEngineCtor func(impl *Impl, cfg *StorageConfig) (StorageEngine, error)
-
-func RegisterStorageEngine(name string, ctor StorageEngineCtor) {
-	if ctor == nil {
-		panic(errors.New("ctor is nil"))
-	}
-	gStorageEngineMu.Lock()
-	if gStorageEngineMap == nil {
-		gStorageEngineMap = make(map[string]StorageEngineCtor, 10)
-	}
-	gStorageEngineMap[name] = ctor
-	gStorageEngineMu.Unlock()
-}
-
-func NewStorageEngine(impl *Impl, cfg *StorageConfig) (StorageEngine, error) {
-	engine := cfg.Engine
-
-	gStorageEngineMu.Lock()
-	ctor := gStorageEngineMap[cfg.Engine]
-	gStorageEngineMu.Unlock()
-
-	if ctor == nil {
-		return nil, StorageEngineCreateError{
-			Engine: engine,
-			Err:    errors.New("unknown storage engine"),
-		}
-	}
-
-	return ctor(impl, cfg)
-}
-
 func init() {
 	RegisterStorageEngine("fs", func(_ *Impl, cfg *StorageConfig) (StorageEngine, error) {
 		if cfg.Path == "" {
@@ -257,15 +251,14 @@ func init() {
 			}
 		}
 
-		abs, err := filepath.Abs(cfg.Path)
+		abs, err := processPath(cfg.Path)
 		if err != nil {
 			return nil, StorageEngineCreateError{
 				Engine: "fs",
-				Err:    fmt.Errorf("failed to make path %q absolute: %w", cfg.Path, err),
+				Err:    err,
 			}
 		}
 
-		abs = filepath.Clean(abs)
 		return &FileSystemStorageEngine{autocert.DirCache(abs)}, nil
 	})
 	RegisterStorageEngine("etcd", func(impl *Impl, cfg *StorageConfig) (StorageEngine, error) {

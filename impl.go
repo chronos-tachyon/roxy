@@ -176,7 +176,7 @@ func (impl *Impl) loadMimeRules() error {
 			}
 		}
 	} else {
-		mimeFile, err = filepath.Abs(impl.cfg.Global.MimeFile)
+		mimeFile, err := processPath(impl.cfg.Global.MimeFile)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
@@ -397,7 +397,7 @@ func (impl *Impl) loadPages() error {
 			}
 		}
 
-		abs, err := filepath.Abs(rootDir)
+		abs, err := processPath(rootDir)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
