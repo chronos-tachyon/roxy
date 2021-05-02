@@ -28,6 +28,12 @@ such as TLS certificates and modern security-hardening HTTP headers.
 Roxy currently supports HTTP, HTTPS, and gRPC (over both TLS and plaintext) to
 communicate with backend web servers.
 
+## More documentation
+
+See also:
+* The [Full Configuration Reference](configuration.html)
+* [Frequently Asked Questions](faq.html)
+
 ## Installing with Docker
 
 ```sh
@@ -52,10 +58,3 @@ echo 'deb https://apt.chronos-tachyon.net roxy main' | sudo tee /etc/apt/sources
 sudo apt update
 sudo apt install roxy
 ```
-
-## More documentation
-
-See also:
-* The [Full Configuration Reference](configuration.html)
-* [Frequently Asked Questions](faq.html)
-
