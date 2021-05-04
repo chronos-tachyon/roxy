@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io/fs"
 	"math/rand"
-	"reflect"
 	"sync"
 	"time"
 
@@ -33,7 +32,7 @@ type PollingResolverOptions struct {
 	ServiceConfigJSON string
 }
 
-type PollingResolveFunc func() ([]*Resolved, error)
+type PollingResolveFunc func() ([]Resolved, error)
 
 func NewPollingResolver(opts PollingResolverOptions) (*PollingResolver, error) {
 	if opts.Context == nil {
@@ -102,17 +101,17 @@ type PollingResolver struct {
 	sc           *serviceconfig.ParseResult
 	nextRR       uint32
 
-	mu        sync.Mutex
-	cv        *sync.Cond
-	lastID    WatchID
-	watches   map[WatchID]WatchFunc
-	byAddrKey map[string][]*Resolved
-	byUnique  map[string]*Resolved
-	resolved  []*Resolved
-	perm      []int
-	err       multierror.Error
-	ready     bool
-	closed    bool
+	mu       sync.Mutex
+	cv       *sync.Cond
+	lastID   WatchID
+	watches  map[WatchID]WatchFunc
+	byAddr   map[string]*Dynamic
+	byUnique map[string]int
+	resolved []Resolved
+	perm     []int
+	err      multierror.Error
+	ready    bool
+	closed   bool
 }
 
 func (res *PollingResolver) Err() error {
@@ -126,7 +125,7 @@ func (res *PollingResolver) Err() error {
 	return res.err.ErrorOrNil()
 }
 
-func (res *PollingResolver) ResolveAll() ([]*Resolved, error) {
+func (res *PollingResolver) ResolveAll() ([]Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
 
@@ -137,7 +136,7 @@ func (res *PollingResolver) ResolveAll() ([]*Resolved, error) {
 	return res.resolved, res.err.ErrorOrNil()
 }
 
-func (res *PollingResolver) Resolve() (*Resolved, error) {
+func (res *PollingResolver) Resolve() (Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
 
@@ -149,21 +148,14 @@ func (res *PollingResolver) Resolve() (*Resolved, error) {
 }
 
 func (res *PollingResolver) Update(opts UpdateOptions) {
-	addrKey := opts.Addr.String()
+	addr := opts.Addr.String()
 
 	res.mu.Lock()
-	defer res.mu.Unlock()
+	dynamic := res.byAddr[addr]
+	res.mu.Unlock()
 
-	for !res.ready {
-		res.cv.Wait()
-	}
-
-	if res.closed {
-		return
-	}
-
-	for _, data := range res.byAddrKey[addrKey] {
-		data.Update(opts)
+	if dynamic != nil {
+		dynamic.Update(opts)
 	}
 }
 
@@ -180,9 +172,9 @@ func (res *PollingResolver) Watch(fn WatchFunc) WatchID {
 	}
 
 	if res.ready {
-		events := make([]*Event, 0, len(res.resolved))
+		events := make([]Event, 0, len(res.resolved))
 		for _, data := range res.resolved {
-			ev := &Event{
+			ev := Event{
 				Type: UpdateEvent,
 				Key:  data.Unique,
 				Data: data,
@@ -244,7 +236,7 @@ func (res *PollingResolver) resolverThread() {
 
 		res.mu.Lock()
 		res.watches = nil
-		res.byAddrKey = nil
+		res.byAddr = nil
 		res.byUnique = nil
 		res.resolved = nil
 		res.perm = nil
@@ -284,7 +276,7 @@ func (res *PollingResolver) resolverThread() {
 	}
 }
 
-func (res *PollingResolver) onUpdate(newList []*Resolved, newErr error) {
+func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 	for _, data := range newList {
 		data.Check()
 	}
@@ -323,10 +315,10 @@ func (res *PollingResolver) onUpdate(newList []*Resolved, newErr error) {
 		n += len(oldList) + len(newList)
 	}
 
-	events := make([]*Event, 0, n)
+	events := make([]Event, 0, n)
 
 	if newErr != nil {
-		ev := &Event{
+		ev := Event{
 			Type: ErrorEvent,
 			Err:  newErr,
 		}
@@ -338,45 +330,52 @@ func (res *PollingResolver) onUpdate(newList []*Resolved, newErr error) {
 	if !sameList {
 		ResolvedList(newList).Sort()
 
-		newByAddrKey := make(map[string][]*Resolved, len(newList))
-		newByUnique := make(map[string]*Resolved, len(newList))
-		for _, newData := range newList {
-			newByUnique[newData.Unique] = newData
-
+		newByAddr := make(map[string]*Dynamic, len(newList))
+		newByUnique := make(map[string]int, len(newList))
+		for index, newData := range newList {
 			if newData.Addr != nil {
-				addrKey := newData.Addr.String()
-				newByAddrKey[addrKey] = append(newByAddrKey[addrKey], newData)
+				addr := newData.Addr.String()
+				dynamic, found := newByAddr[addr]
+				if !found {
+					dynamic, found = res.byAddr[addr]
+					if !found {
+						dynamic = new(Dynamic)
+					}
+					newByAddr[addr] = dynamic
+				}
+				newData.Dynamic = dynamic
+				newList[index] = newData
 			}
-
-			if oldData := res.byUnique[newData.Unique]; oldData != nil {
-				newData.UpdateFrom(oldData)
-			}
+			newByUnique[newData.Unique] = index
 		}
 
 		for _, oldData := range oldList {
-			newData := newByUnique[oldData.Unique]
-			if newData == nil {
-				ev := &Event{
+			index, found := newByUnique[oldData.Unique]
+			if !found {
+				ev := Event{
 					Type: DeleteEvent,
 					Key:  oldData.Unique,
 				}
 				ev.Check()
 				events = append(events, ev)
-			} else if !reflect.DeepEqual(oldData, newData) {
-				ev := &Event{
-					Type: StatusChangeEvent,
-					Key:  oldData.Unique,
-					Data: newData,
+			} else {
+				newData := newList[index]
+				if !oldData.Equal(newData) {
+					ev := Event{
+						Type: StatusChangeEvent,
+						Key:  newData.Unique,
+						Data: newData,
+					}
+					ev.Check()
+					events = append(events, ev)
 				}
-				ev.Check()
-				events = append(events, ev)
 			}
 		}
 
 		for _, newData := range newList {
-			oldData := res.byUnique[newData.Unique]
-			if oldData == nil {
-				ev := &Event{
+			_, found := res.byUnique[newData.Unique]
+			if !found {
+				ev := Event{
 					Type: UpdateEvent,
 					Key:  newData.Unique,
 					Data: newData,
@@ -386,7 +385,7 @@ func (res *PollingResolver) onUpdate(newList []*Resolved, newErr error) {
 			}
 		}
 
-		res.byAddrKey = newByAddrKey
+		res.byAddr = newByAddr
 		res.byUnique = newByUnique
 		res.resolved = newList
 		res.perm = computePermImpl(res.balancer, res.resolved, res.rng)

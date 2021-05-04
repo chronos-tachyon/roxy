@@ -3,8 +3,9 @@ package roxyresolver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand"
+	"net/url"
+	"strings"
 	"sync"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -29,16 +30,9 @@ func NewEtcdResolver(opts Options) (Resolver, error) {
 		panic(errors.New("Etcd is nil"))
 	}
 
-	etcdPrefix, etcdPort, query, err := ParseEtcdTarget(opts.Target)
+	etcdPrefix, etcdPort, balancer, err := ParseEtcdTarget(opts.Target)
 	if err != nil {
 		return nil, err
-	}
-
-	var balancer BalancerType
-	if str := query.Get("balancer"); str != "" {
-		if err = balancer.Parse(str); err != nil {
-			return nil, fmt.Errorf("failed to parse balancer=%q query string: %w", str, err)
-		}
 	}
 
 	return NewWatchingResolver(WatchingResolverOptions{
@@ -49,9 +43,121 @@ func NewEtcdResolver(opts Options) (Resolver, error) {
 	})
 }
 
+func ParseEtcdTarget(target Target) (etcdPrefix string, etcdPort string, balancer BalancerType, err error) {
+	if target.Authority != "" {
+		err = BadAuthorityError{Authority: target.Authority, Err: ErrExpectEmpty}
+		return
+	}
+
+	ep := target.Endpoint
+	if ep == "" {
+		err = BadEndpointError{Endpoint: target.Endpoint, Err: ErrExpectNonEmpty}
+		return
+	}
+
+	var (
+		qs    string
+		hasQS bool
+	)
+	if i := strings.IndexByte(ep, '?'); i >= 0 {
+		ep, qs, hasQS = ep[:i], ep[i+1:], true
+	}
+
+	if ep == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err:      BadPathError{Path: ep, Err: ErrExpectNonEmpty},
+		}
+		return
+	}
+
+	unescaped, err := url.PathUnescape(ep)
+	if err != nil {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err:      BadPathError{Path: ep, Err: err},
+		}
+		return
+	}
+
+	var hasPort bool
+	if i := strings.IndexByte(unescaped, ':'); i >= 0 {
+		etcdPrefix, etcdPort, hasPort = unescaped[:i], unescaped[i+1:], true
+	} else {
+		etcdPrefix, etcdPort, hasPort = unescaped, "", false
+	}
+
+	if !strings.HasSuffix(etcdPrefix, "/") {
+		etcdPrefix += "/"
+	}
+	if strings.Contains(etcdPrefix, "//") {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: etcdPrefix,
+				Err:  ErrExpectNoDoubleSlash,
+			},
+		}
+		return
+	}
+
+	if hasPort && etcdPort == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPortError{
+				Port: etcdPort,
+				Err:  ErrExpectNonEmpty,
+			},
+		}
+		return
+	}
+	if hasPort && !reNamedPort.MatchString(etcdPort) {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPortError{
+				Port: etcdPort,
+				Err:  ErrFailedToMatch,
+			},
+		}
+		return
+	}
+
+	var query url.Values
+	if hasQS {
+		query, err = url.ParseQuery(qs)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err:      BadQueryStringError{QueryString: qs, Err: err},
+			}
+			return
+		}
+	}
+
+	if str := query.Get("balancer"); str != "" {
+		err = balancer.Parse(str)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err: BadQueryStringError{
+					QueryString: qs,
+					Err: BadQueryParamError{
+						Name:  "balancer",
+						Value: str,
+						Err:   err,
+					},
+				},
+			}
+			return
+		}
+	}
+
+	return
+}
+
 func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPrefix string, etcdPort string) WatchingResolveFunc {
-	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []*Event, error) {
-		ch := make(chan []*Event)
+	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
+		ch := make(chan []Event)
 
 		resp, err := etcdClient.KV.Get(
 			ctx,
@@ -78,9 +184,9 @@ func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPrefix string, etcdPort stri
 			}()
 
 			if len(resp.Kvs) != 0 {
-				events := make([]*Event, 0, len(resp.Kvs))
+				events := make([]Event, 0, len(resp.Kvs))
 				for _, kv := range resp.Kvs {
-					if ev := etcdMapEvent(etcdPort, v3.EventTypePut, kv); ev != nil {
+					if ev := etcdMapEvent(etcdPort, v3.EventTypePut, kv); ev.Type != NoOpEvent {
 						events = append(events, ev)
 					}
 				}
@@ -101,14 +207,14 @@ func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPrefix string, etcdPort stri
 					if err != nil {
 						n++
 					}
-					events := make([]*Event, 0, n)
+					events := make([]Event, 0, n)
 					for _, wev := range wresp.Events {
-						if ev := etcdMapEvent(etcdPort, wev.Type, wev.Kv); ev != nil {
+						if ev := etcdMapEvent(etcdPort, wev.Type, wev.Kv); ev.Type != NoOpEvent {
 							events = append(events, ev)
 						}
 					}
 					if err != nil {
-						ev := &Event{
+						ev := Event{
 							Type: ErrorEvent,
 							Err:  err,
 						}
@@ -133,16 +239,14 @@ type etcdBuilder struct {
 }
 
 func (b etcdBuilder) Scheme() string {
-	return "etcd"
+	return etcdScheme
 }
 
 func (b etcdBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	etcdPrefix, etcdPort, query, err := ParseEtcdTarget(target)
+	etcdPrefix, etcdPort, _, err := ParseEtcdTarget(target)
 	if err != nil {
 		return nil, err
 	}
-
-	_ = query // for future use
 
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:           b.ctx,
@@ -159,19 +263,21 @@ func etcdMapError(err error) error {
 	return err
 }
 
-func etcdMapEvent(portName string, t mvccpb.Event_EventType, kv *mvccpb.KeyValue) *Event {
+func etcdMapEvent(portName string, t mvccpb.Event_EventType, kv *mvccpb.KeyValue) Event {
 	key := string(kv.Key)
 	switch t {
 	case v3.EventTypePut:
 		return ParseServerSetData(portName, key, kv.Value)
 
 	case v3.EventTypeDelete:
-		return &Event{
+		return Event{
 			Type: DeleteEvent,
 			Key:  key,
 		}
 
 	default:
-		return nil
+		return Event{
+			Type: NoOpEvent,
+		}
 	}
 }

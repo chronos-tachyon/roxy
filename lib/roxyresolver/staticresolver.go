@@ -13,7 +13,7 @@ import (
 type StaticResolverOptions struct {
 	Random            *rand.Rand
 	Balancer          BalancerType
-	Records           []*Resolved
+	Records           []Resolved
 	ClientConn        grpcresolver.ClientConn
 	ServiceConfigJSON string
 }
@@ -24,14 +24,22 @@ func NewStaticResolver(opts StaticResolverOptions) (*StaticResolver, error) {
 		rng = syncrand.Global()
 	}
 
-	resolved := opts.Records
-	byAddrKey := make(map[string][]*Resolved, len(resolved))
-	for _, data := range resolved {
-		data.Check()
+	resolved := make([]Resolved, len(opts.Records))
+	copy(resolved, opts.Records)
+
+	byAddr := make(map[string]*Dynamic, len(resolved))
+	for index, data := range resolved {
 		if data.Addr != nil {
-			addrKey := data.Addr.String()
-			byAddrKey[addrKey] = append(byAddrKey[addrKey], data)
+			addr := data.Addr.String()
+			dynamic, found := byAddr[addr]
+			if !found {
+				dynamic = new(Dynamic)
+				byAddr[addr] = dynamic
+			}
+			data.Dynamic = dynamic
+			resolved[index] = data
 		}
+		data.Check()
 	}
 	perm := computePermImpl(opts.Balancer, resolved, rng)
 
@@ -49,44 +57,45 @@ func NewStaticResolver(opts StaticResolverOptions) (*StaticResolver, error) {
 	}
 
 	res := &StaticResolver{
-		rng:       rng,
-		balancer:  opts.Balancer,
-		byAddrKey: byAddrKey,
-		resolved:  resolved,
-		perm:      perm,
+		rng:      rng,
+		balancer: opts.Balancer,
+		byAddr:   byAddr,
+		resolved: resolved,
+		perm:     perm,
 	}
 	return res, nil
 }
 
 type StaticResolver struct {
-	rng       *rand.Rand
-	balancer  BalancerType
-	byAddrKey map[string][]*Resolved
-	resolved  []*Resolved
-	perm      []int
-	nextRR    uint32
+	rng      *rand.Rand
+	balancer BalancerType
+	byAddr   map[string]*Dynamic
+	resolved []Resolved
+	perm     []int
+	nextRR   uint32
 }
 
 func (res *StaticResolver) Err() error {
 	return nil
 }
 
-func (res *StaticResolver) ResolveAll() ([]*Resolved, error) {
+func (res *StaticResolver) ResolveAll() ([]Resolved, error) {
 	return res.resolved, nil
 }
 
-func (res *StaticResolver) Resolve() (*Resolved, error) {
+func (res *StaticResolver) Resolve() (Resolved, error) {
 	if len(res.resolved) == 0 {
-		return nil, ErrNoHealthyBackends
+		return Resolved{}, ErrNoHealthyBackends
 	}
 
 	return balanceImpl(res.balancer, multierror.Error{}, res.resolved, res.rng, res.perm, &res.nextRR)
 }
 
 func (res *StaticResolver) Update(opts UpdateOptions) {
-	addrKey := opts.Addr.String()
-	for _, data := range res.byAddrKey[addrKey] {
-		data.Update(opts)
+	addr := opts.Addr.String()
+	dynamic := res.byAddr[addr]
+	if dynamic != nil {
+		dynamic.Update(opts)
 	}
 }
 
@@ -99,13 +108,14 @@ func (res *StaticResolver) Watch(fn WatchFunc) WatchID {
 		return 0
 	}
 
-	events := make([]*Event, 0, len(res.resolved))
+	events := make([]Event, 0, len(res.resolved))
 	for _, data := range res.resolved {
-		ev := &Event{
+		ev := Event{
 			Type: UpdateEvent,
 			Key:  data.Unique,
 			Data: data,
 		}
+		ev.Check()
 		events = append(events, ev)
 	}
 	fn(events)

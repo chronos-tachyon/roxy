@@ -209,7 +209,7 @@ func main() {
 	}()
 
 	for line := range ch2 {
-		consoleWriter.Write([]byte(line))
+		_, _ = consoleWriter.Write([]byte(line))
 	}
 	wg.Wait()
 }

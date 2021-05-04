@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	grpcresolver "google.golang.org/grpc/resolver"
@@ -19,62 +21,22 @@ func NewDNSBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string
 }
 
 func NewDNSResolver(opts Options) (Resolver, error) {
-	defaultPort := "80"
+	defaultPort := httpPort
 	if opts.IsTLS {
-		defaultPort = "443"
+		defaultPort = httpsPort
 	}
 
-	res, host, port, query, err := ParseDNSTarget(opts.Target, defaultPort)
+	res, host, port, balancer, pollInterval, cdInterval, serverName, err := ParseDNSTarget(opts.Target, defaultPort)
 	if err != nil {
 		return nil, err
 	}
 
-	var balancer BalancerType
-	if str := query.Get("balancer"); str != "" {
-		if err = balancer.Parse(str); err != nil {
-			return nil, fmt.Errorf("failed to parse balancer=%q query string: %w", str, err)
-		}
-	}
-
-	var pollInterval time.Duration
-	if str := query.Get("pollInterval"); str != "" {
-		if pollInterval, err = time.ParseDuration(str); err != nil {
-			return nil, fmt.Errorf("failed to parse pollInterval=%q query string: %w", str, err)
-		}
-	}
-
-	var cdInterval time.Duration
-	if str := query.Get("cooldownInterval"); str != "" {
-		if cdInterval, err = time.ParseDuration(str); err != nil {
-			return nil, fmt.Errorf("failed to parse cooldownInterval=%q query string: %w", str, err)
-		}
-	}
-
-	serverName := query.Get("serverName")
-
-	if tcpAddr := parseIPAndPort(host, port); tcpAddr != nil {
-		if serverName == "" {
-			serverName = tcpAddr.IP.String()
-		}
-		resAddr := Address{
-			Addr:       tcpAddr.String(),
-			ServerName: serverName,
-		}
-		data := &Resolved{
-			Unique:     tcpAddr.String(),
-			ServerName: serverName,
-			Addr:       tcpAddr,
-			Address:    resAddr,
-		}
+	if records := makeStaticRecordsForIP(host, port, serverName); records != nil {
 		return NewStaticResolver(StaticResolverOptions{
 			Random:   opts.Random,
 			Balancer: balancer,
-			Records:  []*Resolved{data},
+			Records:  records,
 		})
-	}
-
-	if serverName == "" {
-		serverName = host
 	}
 	return NewPollingResolver(PollingResolverOptions{
 		Context:          opts.Context,
@@ -86,8 +48,148 @@ func NewDNSResolver(opts Options) (Resolver, error) {
 	})
 }
 
+func ParseDNSTarget(target Target, defaultPort string) (res *net.Resolver, host string, port string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
+	res, err = parseNetResolver(target.Authority)
+	if err != nil {
+		err = BadAuthorityError{Authority: target.Authority, Err: err}
+		return
+	}
+
+	ep := target.Endpoint
+	if ep == "" {
+		err = BadEndpointError{Endpoint: target.Endpoint, Err: ErrExpectNonEmpty}
+		return
+	}
+
+	var (
+		qs    string
+		hasQS bool
+	)
+	if i := strings.IndexByte(ep, '?'); i >= 0 {
+		ep, qs, hasQS = ep[:i], ep[i+1:], true
+	}
+
+	if ep == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err:      BadPathError{Path: ep, Err: ErrExpectNonEmpty},
+		}
+		return
+	}
+
+	hostPort, err := url.PathUnescape(ep)
+	if err != nil {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err:      BadPathError{Path: ep, Err: err},
+		}
+		return
+	}
+
+	host, port, err = net.SplitHostPort(hostPort)
+	if err != nil {
+		h, p, err2 := net.SplitHostPort(hostPort + ":" + defaultPort)
+		if err2 == nil {
+			host, port, err = h, p, nil
+		}
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err: BadPathError{
+					Path: ep,
+					Err:  BadHostPortError{HostPort: hostPort, Err: err},
+				},
+			}
+			return
+		}
+	}
+	if host == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: ep,
+				Err:  BadHostError{Host: host, Err: err},
+			},
+		}
+		return
+	}
+
+	var query url.Values
+	if hasQS {
+		query, err = url.ParseQuery(qs)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err:      BadQueryStringError{QueryString: qs, Err: err},
+			}
+			return
+		}
+	}
+
+	if str := query.Get("balancer"); str != "" {
+		err = balancer.Parse(str)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err: BadQueryStringError{
+					QueryString: qs,
+					Err: BadQueryParamError{
+						Name:  "balancer",
+						Value: str,
+						Err:   err,
+					},
+				},
+			}
+			return
+		}
+	}
+
+	if str := query.Get("pollInterval"); str != "" {
+		pollInterval, err = time.ParseDuration(str)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err: BadQueryStringError{
+					QueryString: qs,
+					Err: BadQueryParamError{
+						Name:  "pollInterval",
+						Value: str,
+						Err:   err,
+					},
+				},
+			}
+			return
+		}
+	}
+
+	if str := query.Get("cooldownInterval"); str != "" {
+		cdInterval, err = time.ParseDuration(str)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err: BadQueryStringError{
+					QueryString: qs,
+					Err: BadQueryParamError{
+						Name:  "cooldownInterval",
+						Value: str,
+						Err:   err,
+					},
+				},
+			}
+			return
+		}
+	}
+
+	serverName = query.Get("serverName")
+
+	return
+}
+
 func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, port string, serverName string) PollingResolveFunc {
-	return func() ([]*Resolved, error) {
+	if serverName == "" {
+		serverName = host
+	}
+	return func() ([]Resolved, error) {
 		// Resolve the port number.
 		portNum, err := res.LookupPort(ctx, "tcp", port)
 		if err != nil {
@@ -100,8 +202,8 @@ func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, por
 			return nil, fmt.Errorf("LookupHost(%q) failed: %w", host, err)
 		}
 
-		// Synthesize a *Resolved for each IP address.
-		out := make([]*Resolved, len(ipStrList))
+		// Synthesize a Resolved for each IP address.
+		out := make([]Resolved, len(ipStrList))
 		for index, ipStr := range ipStrList {
 			ip := net.ParseIP(ipStr)
 			if ip == nil {
@@ -115,7 +217,7 @@ func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, por
 				Addr:       tcpAddr.String(),
 				ServerName: serverName,
 			}
-			out[index] = &Resolved{
+			out[index] = Resolved{
 				Unique:     tcpAddr.String(),
 				ServerName: serverName,
 				Addr:       tcpAddr,
@@ -135,55 +237,22 @@ type dnsBuilder struct {
 }
 
 func (b dnsBuilder) Scheme() string {
-	return "dns"
+	return dnsScheme
 }
 
 func (b dnsBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	res, host, port, query, err := ParseDNSTarget(target, "443")
+	res, host, port, _, pollInterval, cdInterval, serverName, err := ParseDNSTarget(target, httpsPort)
 	if err != nil {
 		return nil, err
 	}
 
-	var pollInterval time.Duration
-	if str := query.Get("pollInterval"); str != "" {
-		if pollInterval, err = time.ParseDuration(str); err != nil {
-			return nil, fmt.Errorf("failed to parse pollInterval=%q query string: %w", str, err)
-		}
-	}
-
-	var cdInterval time.Duration
-	if str := query.Get("cooldownInterval"); str != "" {
-		if cdInterval, err = time.ParseDuration(str); err != nil {
-			return nil, fmt.Errorf("failed to parse cooldownInterval=%q query string: %w", str, err)
-		}
-	}
-
-	serverName := query.Get("serverName")
-
-	if tcpAddr := parseIPAndPort(host, port); tcpAddr != nil {
-		if serverName == "" {
-			serverName = tcpAddr.IP.String()
-		}
-		resAddr := Address{
-			Addr:       tcpAddr.String(),
-			ServerName: serverName,
-		}
-		data := &Resolved{
-			Unique:     tcpAddr.String(),
-			ServerName: serverName,
-			Addr:       tcpAddr,
-			Address:    resAddr,
-		}
+	if records := makeStaticRecordsForIP(host, port, serverName); records != nil {
 		return NewStaticResolver(StaticResolverOptions{
 			Random:            b.rng,
-			Records:           []*Resolved{data},
+			Records:           records,
 			ClientConn:        cc,
 			ServiceConfigJSON: b.serviceConfigJSON,
 		})
-	}
-
-	if serverName == "" {
-		serverName = host
 	}
 	return NewPollingResolver(PollingResolverOptions{
 		Context:           b.ctx,

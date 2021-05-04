@@ -21,12 +21,12 @@ func GetServerSet(addr Address) *membership.ServerSet {
 	return ss
 }
 
-func WithResolved(addr Address, data *Resolved) Address {
+func WithResolved(addr Address, data Resolved) Address {
 	addr.Attributes = addr.Attributes.WithValues(ResolvedAttrKey, data)
 	return addr
 }
 
-func GetResolved(addr Address) *Resolved {
-	data, _ := addr.Attributes.Value(ResolvedAttrKey).(*Resolved)
-	return data
+func GetResolved(addr Address) (data Resolved, ok bool) {
+	data, ok = addr.Attributes.Value(ResolvedAttrKey).(Resolved)
+	return
 }

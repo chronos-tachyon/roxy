@@ -1,8 +1,6 @@
 package roxyresolver
 
 import (
-	"errors"
-	"fmt"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -10,58 +8,14 @@ import (
 )
 
 func NewUnixResolver(opts Options) (Resolver, error) {
-	if opts.Target.Authority != "" && !strings.EqualFold(opts.Target.Authority, "localhost") {
-		return nil, fmt.Errorf("Target.Authority %q is not supported", opts.Target.Authority)
-	}
-
-	ep := opts.Target.Endpoint
-
-	var (
-		qs    string
-		hasQS bool
-	)
-	if i := strings.IndexByte(ep, '?'); i >= 0 {
-		ep, qs, hasQS = ep[:i], ep[i+1:], true
-	}
-
-	if ep == "" {
-		return nil, errors.New("Target.Endpoint is empty")
-	}
-
-	var unixpath string
-	if strings.EqualFold(opts.Target.Scheme, "unix-abstract") {
-		unixpath = "\x00" + ep
-	} else if strings.EqualFold(opts.Target.Scheme, "unix") {
-		if ep[0] == '\x00' || ep[0] == '@' {
-			unixpath = "\x00" + ep[1:]
-		} else {
-			unixpath = filepath.Clean(filepath.FromSlash("/" + ep))
-		}
-	} else {
-		return nil, fmt.Errorf("Target.Scheme %q is not supported", opts.Target.Scheme)
-	}
-
-	var query url.Values
-	if hasQS {
-		var err error
-		query, err = url.ParseQuery(qs)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse Target.Endpoint query string %q: %w", qs, err)
-		}
-	}
-
-	var balancer BalancerType
-	if err := balancer.Parse(query.Get("balancer")); err != nil {
-		return nil, fmt.Errorf("failed to parse balancer=%q query string: %w", query.Get("balancer"), err)
-	}
-
-	unixAddr := &net.UnixAddr{
-		Net:  "unix",
-		Name: unixpath,
+	unixAddr, balancer, err := ParseUnixTarget(opts.Target)
+	if err != nil {
+		return nil, err
 	}
 
 	resAddr := Address{
-		Addr: unixAddr.String(),
+		Addr:       unixAddr.String(),
+		ServerName: "localhost",
 	}
 
 	// https://github.com/grpc/grpc-go/blob/v1.37.0/internal/resolver/unix/unix.go
@@ -78,15 +32,112 @@ func NewUnixResolver(opts Options) (Resolver, error) {
 	// register our own grpcresolver.Builder for "unix" or "unix-abstract",
 	// so we rely on the standard gRPC resolver for those schemes.
 
-	data := &Resolved{
-		Unique:  "unix:" + unixAddr.String(),
-		Addr:    unixAddr,
-		Address: resAddr,
+	data := Resolved{
+		Unique:     "unix:" + unixAddr.String(),
+		ServerName: "localhost",
+		Addr:       unixAddr,
+		Address:    resAddr,
 	}
 
 	return NewStaticResolver(StaticResolverOptions{
 		Random:   opts.Random,
 		Balancer: balancer,
-		Records:  []*Resolved{data},
+		Records:  []Resolved{data},
 	})
+}
+
+func ParseUnixTarget(target Target) (unixAddr *net.UnixAddr, balancer BalancerType, err error) {
+	if target.Authority != "" && !strings.EqualFold(target.Authority, "localhost") {
+		err = BadAuthorityError{
+			Authority: target.Authority,
+			Err:       ErrExpectEmptyOrLocalhost,
+		}
+		return
+	}
+
+	ep := target.Endpoint
+	if ep == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err:      ErrExpectNonEmpty,
+		}
+		return
+	}
+
+	var (
+		qs    string
+		hasQS bool
+	)
+	if i := strings.IndexByte(ep, '?'); i >= 0 {
+		ep, qs, hasQS = ep[:i], ep[i+1:], true
+	}
+
+	if ep == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: ep,
+				Err:  ErrExpectNonEmpty,
+			},
+		}
+		return
+	}
+
+	var unescaped string
+	unescaped, err = url.PathUnescape(ep)
+	if err != nil {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: ep,
+				Err:  err,
+			},
+		}
+		return
+	}
+
+	var unixpath string
+	if strings.EqualFold(target.Scheme, "unix-abstract") {
+		unixpath = "\x00" + unescaped
+	} else if unescaped[0] == '\x00' || unescaped[0] == '@' {
+		unixpath = "\x00" + unescaped[1:]
+	} else {
+		unixpath = filepath.Clean(filepath.FromSlash("/" + unescaped))
+	}
+
+	var query url.Values
+	if hasQS {
+		query, err = url.ParseQuery(qs)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err:      BadQueryStringError{QueryString: qs, Err: err},
+			}
+			return
+		}
+	}
+
+	if str := query.Get("balancer"); str != "" {
+		err = balancer.Parse(str)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err: BadQueryStringError{
+					QueryString: qs,
+					Err: BadQueryParamError{
+						Name:  "balancer",
+						Value: str,
+						Err:   err,
+					},
+				},
+			}
+			return
+		}
+	}
+
+	unixAddr = &net.UnixAddr{
+		Net:  "unix",
+		Name: unixpath,
+	}
+	return
 }

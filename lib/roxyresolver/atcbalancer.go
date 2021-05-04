@@ -27,7 +27,7 @@ func NewATCBalancerBuilder() balancer.Builder {
 type atcBalancerBuilder struct{}
 
 func (b atcBalancerBuilder) Name() string {
-	return "atc_lb"
+	return atcBalancerName
 }
 
 func (b atcBalancerBuilder) Build(cc balancer.ClientConn, opts balancer.BuildOptions) balancer.Balancer {
@@ -174,13 +174,14 @@ func (bal *atcBalancer) regeneratePicker() balancer.Picker {
 	}
 
 	scList := make([]balancer.SubConn, 0, len(bal.subConns))
-	dataList := make([]*Resolved, 0, len(bal.subConns))
+	dataList := make([]Resolved, 0, len(bal.subConns))
 	for addrKey, sci := range bal.subConns {
 		if state, ok := bal.scStates[sci.sc]; ok && state == connectivity.Ready {
 			addr := addrKey
 			addr.Attributes = sci.attrs
+			data, _ := GetResolved(addr)
 			scList = append(scList, sci.sc)
-			dataList = append(dataList, GetResolved(addr))
+			dataList = append(dataList, data)
 		}
 	}
 
@@ -203,7 +204,7 @@ var _ balancer.Balancer = (*atcBalancer)(nil)
 
 type atcPicker struct {
 	scList   []balancer.SubConn
-	dataList []*Resolved
+	dataList []Resolved
 	mu       sync.Mutex
 	next     uint
 }

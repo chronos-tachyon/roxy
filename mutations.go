@@ -437,8 +437,6 @@ func CompileMutation(cfg *MutationConfig) (Mutation, error) {
 	default:
 		return nil, fmt.Errorf("%#v not implemented", cfg.Type)
 	}
-
-	return nil, nil
 }
 
 func hdrGet(hdrs http.Header, name string) string {

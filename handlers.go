@@ -101,8 +101,8 @@ func init() {
 	for _, metrics := range gMetrics {
 		metrics.MustRegister(prometheus.DefaultRegisterer)
 	}
-	prometheus.DefaultRegisterer.Register(promFileCacheCount)
-	prometheus.DefaultRegisterer.Register(promFileCacheBytes)
+	prometheus.DefaultRegisterer.MustRegister(promFileCacheCount)
+	prometheus.DefaultRegisterer.MustRegister(promFileCacheBytes)
 }
 
 // type Metrics {{{
@@ -344,7 +344,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		if !rc.Body.WasClosed() {
-			io.Copy(io.Discard, rc.Body)
+			_, _ = io.Copy(io.Discard, rc.Body)
 			rc.Body.Close()
 		}
 
@@ -1331,10 +1331,9 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"https"))
 
 	var wg sync.WaitGroup
-	needBodyClose := true
 	defer func() {
-		if needBodyClose {
-			io.Copy(io.Discard, rc.Body)
+		if rc.Body.WasClosed() {
+			_, _ = io.Copy(io.Discard, rc.Body)
 			rc.Body.Close()
 		}
 		wg.Wait()
@@ -1353,7 +1352,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	needCloseSend := true
 	defer func() {
 		if needCloseSend {
-			sc.CloseSend()
+			_ = sc.CloseSend()
 		}
 	}()
 
@@ -1397,7 +1396,6 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	needBodyClose = false
 	err = rc.Body.Close()
 	if err != nil {
 		rc.Logger.Warn().

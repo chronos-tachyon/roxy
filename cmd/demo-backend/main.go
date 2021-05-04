@@ -187,15 +187,12 @@ func main() {
 				hdrs.Set("content-type", "text/plain; charset=utf-8")
 				hdrs.Set("content-length", strconv.Itoa(len(corpus)))
 				w.WriteHeader(http.StatusOK)
-				w.Write(corpus)
+				_, _ = w.Write(corpus)
 			}),
 			BaseContext: func(_ net.Listener) context.Context {
 				return ctx
 			},
 		}
-
-		httpListenAndServe = s.ListenAndServe
-		httpShutdown = s.Shutdown
 
 		httpListenAndServe = func() error {
 			var l net.Listener
@@ -209,6 +206,8 @@ func main() {
 			}
 			return s.Serve(l)
 		}
+
+		httpShutdown = s.Shutdown
 	}
 
 	grpcListenAndServe := func() error { return nil }
@@ -329,10 +328,10 @@ func main() {
 	go func() {
 		<-sigch
 		signal.Stop(sigch)
-		ann.Withdraw(ctx)
+		_ = ann.Withdraw(ctx)
 		setAlive(false)
-		grpcShutdown(ctx)
-		httpShutdown(ctx)
+		_ = grpcShutdown(ctx)
+		_ = httpShutdown(ctx)
 		cancelfn()
 		fmt.Println("shutdown")
 		wg.Done()
@@ -389,13 +388,6 @@ func parseHostPort(flagName string, hostPort string) (*net.TCPAddr, error) {
 	}
 
 	return &net.TCPAddr{IP: ip, Port: int(port), Zone: zone}, nil
-}
-
-func hostAndZone(addr *net.TCPAddr) string {
-	if addr.Zone == "" {
-		return addr.IP.String()
-	}
-	return addr.IP.String() + "%" + addr.Zone
 }
 
 type healthServer struct {
@@ -483,9 +475,7 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 			}
 		}
 		if len(msg.Trailers) != 0 {
-			for _, kv := range msg.Trailers {
-				hIn = append(hIn, kv)
-			}
+			hIn = append(hIn, msg.Trailers...)
 		}
 	}
 

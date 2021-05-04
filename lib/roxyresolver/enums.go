@@ -60,7 +60,7 @@ func (t EventType) MarshalJSON() ([]byte, error) {
 }
 
 func (t *EventType) UnmarshalJSON(raw []byte) error {
-	if string(raw) == "null" {
+	if string(raw) == nullString {
 		return nil
 	}
 
@@ -161,7 +161,7 @@ func (t BalancerType) MarshalJSON() ([]byte, error) {
 }
 
 func (t *BalancerType) UnmarshalJSON(raw []byte) error {
-	if string(raw) == "null" {
+	if string(raw) == nullString {
 		return nil
 	}
 

@@ -9,7 +9,7 @@ import (
 
 // type ResolvedList {{{
 
-type ResolvedList []*Resolved
+type ResolvedList []Resolved
 
 func (list ResolvedList) Len() int {
 	return len(list)
@@ -32,7 +32,7 @@ var _ sort.Interface = ResolvedList(nil)
 
 // }}}
 
-func resolvedCompare(a *Resolved, b *Resolved) int {
+func resolvedCompare(a Resolved, b Resolved) int {
 	if a.HasSRV != b.HasSRV {
 		panic(errors.New("SRV records mixed with non-SRV records"))
 	}

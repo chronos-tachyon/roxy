@@ -25,7 +25,7 @@ type WatchingResolverOptions struct {
 	ServiceConfigJSON string
 }
 
-type WatchingResolveFunc func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []*Event, error)
+type WatchingResolveFunc func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error)
 
 func NewWatchingResolver(opts WatchingResolverOptions) (*WatchingResolver, error) {
 	if opts.Context == nil {
@@ -48,17 +48,17 @@ func NewWatchingResolver(opts WatchingResolverOptions) (*WatchingResolver, error
 
 	ctx, cancelFn := context.WithCancel(opts.Context)
 	res := &WatchingResolver{
-		ctx:       ctx,
-		cancelFn:  cancelFn,
-		rng:       rng,
-		balancer:  opts.Balancer,
-		backoff:   expbackoff.BuildDefault(),
-		watchFn:   opts.ResolveFunc,
-		cc:        opts.ClientConn,
-		sc:        parsedServiceConfig,
-		watches:   make(map[WatchID]WatchFunc, 1),
-		byAddrKey: make(map[string][]*Resolved, 16),
-		byUnique:  make(map[string]*Resolved, 16),
+		ctx:      ctx,
+		cancelFn: cancelFn,
+		rng:      rng,
+		balancer: opts.Balancer,
+		backoff:  expbackoff.BuildDefault(),
+		watchFn:  opts.ResolveFunc,
+		cc:       opts.ClientConn,
+		sc:       parsedServiceConfig,
+		watches:  make(map[WatchID]WatchFunc, 1),
+		byAddr:   make(map[string]*Dynamic, 16),
+		byUnique: make(map[string]int, 16),
 	}
 	res.cv = sync.NewCond(&res.mu)
 	go res.resolverThread()
@@ -76,17 +76,17 @@ type WatchingResolver struct {
 	sc       *serviceconfig.ParseResult
 	nextRR   uint32
 
-	mu        sync.Mutex
-	cv        *sync.Cond
-	lastID    WatchID
-	watches   map[WatchID]WatchFunc
-	byAddrKey map[string][]*Resolved
-	byUnique  map[string]*Resolved
-	resolved  []*Resolved
-	perm      []int
-	err       multierror.Error
-	ready     bool
-	closed    bool
+	mu       sync.Mutex
+	cv       *sync.Cond
+	lastID   WatchID
+	watches  map[WatchID]WatchFunc
+	byAddr   map[string]*Dynamic
+	byUnique map[string]int
+	resolved []Resolved
+	perm     []int
+	err      multierror.Error
+	ready    bool
+	closed   bool
 }
 
 func (res *WatchingResolver) Err() error {
@@ -100,7 +100,7 @@ func (res *WatchingResolver) Err() error {
 	return res.err.ErrorOrNil()
 }
 
-func (res *WatchingResolver) ResolveAll() ([]*Resolved, error) {
+func (res *WatchingResolver) ResolveAll() ([]Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
 
@@ -111,7 +111,7 @@ func (res *WatchingResolver) ResolveAll() ([]*Resolved, error) {
 	return res.resolved, res.err.ErrorOrNil()
 }
 
-func (res *WatchingResolver) Resolve() (*Resolved, error) {
+func (res *WatchingResolver) Resolve() (Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
 
@@ -123,21 +123,14 @@ func (res *WatchingResolver) Resolve() (*Resolved, error) {
 }
 
 func (res *WatchingResolver) Update(opts UpdateOptions) {
-	addrKey := opts.Addr.String()
+	addr := opts.Addr.String()
 
 	res.mu.Lock()
-	defer res.mu.Unlock()
+	dynamic := res.byAddr[addr]
+	res.mu.Unlock()
 
-	for !res.ready {
-		res.cv.Wait()
-	}
-
-	if res.closed {
-		return
-	}
-
-	for _, data := range res.byAddrKey[addrKey] {
-		data.Update(opts)
+	if dynamic != nil {
+		dynamic.Update(opts)
 	}
 }
 
@@ -154,9 +147,9 @@ func (res *WatchingResolver) Watch(fn WatchFunc) WatchID {
 	}
 
 	if res.ready {
-		events := make([]*Event, 0, len(res.resolved))
+		events := make([]Event, 0, len(res.resolved))
 		for _, data := range res.resolved {
-			ev := &Event{
+			ev := Event{
 				Type: UpdateEvent,
 				Key:  data.Unique,
 				Data: data,
@@ -208,7 +201,7 @@ func (res *WatchingResolver) resolverThread() {
 
 		res.mu.Lock()
 		res.watches = nil
-		res.byAddrKey = nil
+		res.byAddr = nil
 		res.byUnique = nil
 		res.resolved = nil
 		res.perm = nil
@@ -220,7 +213,7 @@ func (res *WatchingResolver) resolverThread() {
 
 	retries := 0
 
-	var ch <-chan []*Event
+	var ch <-chan []Event
 	var err error
 	for {
 		for {
@@ -233,8 +226,8 @@ func (res *WatchingResolver) resolverThread() {
 				return
 			}
 
-			events := make([]*Event, 1)
-			events[0] = &Event{
+			events := make([]Event, 1)
+			events[0] = Event{
 				Type: ErrorEvent,
 				Err:  err,
 			}
@@ -266,14 +259,14 @@ func (res *WatchingResolver) resolverThread() {
 	}
 }
 
-func (res *WatchingResolver) sendEvents(events []*Event) {
+func (res *WatchingResolver) sendEvents(events []Event) {
 	for _, ev := range events {
 		ev.Check()
 	}
 
 	var newErrors multierror.Error
-	pointersToDelete := make(map[*Resolved]struct{}, len(events))
-	rebuildByAddrKey := false
+	indicesToDelete := make(map[int]struct{}, len(events))
+	rebuildByAddr := false
 	didChange := false
 
 	res.mu.Lock()
@@ -285,24 +278,30 @@ func (res *WatchingResolver) sendEvents(events []*Event) {
 		res.mu.Unlock()
 	}()
 
-	gotDelete := func(unique string) (oldData *Resolved) {
-		oldData = res.byUnique[unique]
-		if oldData != nil {
+	gotDelete := func(unique string) (oldData Resolved, ok bool) {
+		if index, found := res.byUnique[unique]; found {
+			oldData = res.resolved[index]
+			ok = true
 			delete(res.byUnique, unique)
-			pointersToDelete[oldData] = struct{}{}
-			rebuildByAddrKey = true
+			indicesToDelete[index] = struct{}{}
+			rebuildByAddr = true
 			didChange = true
 		}
 		return
 	}
 
-	gotInsert := func(newData *Resolved) {
-		res.resolved = append(res.resolved, newData)
-		res.byUnique[newData.Unique] = newData
+	gotInsert := func(newData Resolved) {
 		if newData.Addr != nil {
-			addrKey := newData.Addr.String()
-			res.byAddrKey[addrKey] = append(res.byAddrKey[addrKey], newData)
+			addr := newData.Addr.String()
+			dynamic, found := res.byAddr[addr]
+			if !found {
+				dynamic = new(Dynamic)
+				res.byAddr[addr] = dynamic
+			}
+			newData.Dynamic = dynamic
 		}
+		res.byUnique[newData.Unique] = len(res.resolved)
+		res.resolved = append(res.resolved, newData)
 		didChange = true
 	}
 
@@ -312,40 +311,42 @@ func (res *WatchingResolver) sendEvents(events []*Event) {
 			res.err.Errors = append(res.err.Errors, ev.Err)
 			newErrors.Errors = append(newErrors.Errors, ev.Err)
 		case UpdateEvent:
-			if oldData := gotDelete(ev.Key); oldData != nil {
-				ev.Data.UpdateFrom(oldData)
-			}
+			gotDelete(ev.Key)
 			gotInsert(ev.Data)
 		case DeleteEvent:
 			gotDelete(ev.Key)
 		case BadDataEvent:
-			if oldData := gotDelete(ev.Key); oldData != nil {
-				ev.Data.UpdateFrom(oldData)
-			}
+			gotDelete(ev.Key)
 			gotInsert(ev.Data)
 			res.err.Errors = append(res.err.Errors, ev.Data.Err)
 			newErrors.Errors = append(newErrors.Errors, ev.Data.Err)
 		}
 	}
 
-	if len(pointersToDelete) != 0 {
-		list := make([]*Resolved, 0, len(res.resolved)-len(pointersToDelete))
-		for _, data := range res.resolved {
-			if _, found := pointersToDelete[data]; !found {
-				list = append(list, data)
+	if len(indicesToDelete) != 0 {
+		n := len(res.resolved) - len(indicesToDelete)
+		newList := make([]Resolved, 0, n)
+		newByUnique := make(map[string]int, n)
+		for index, data := range res.resolved {
+			if _, found := indicesToDelete[index]; !found {
+				newByUnique[data.Unique] = len(newList)
+				newList = append(newList, data)
 			}
 		}
-		res.resolved = list
+		res.resolved = newList
+		res.byUnique = newByUnique
 	}
 
-	if rebuildByAddrKey {
-		for addrKey := range res.byAddrKey {
-			delete(res.byAddrKey, addrKey)
-		}
+	if rebuildByAddr {
+		known := make(map[*Dynamic]struct{}, len(res.byAddr))
 		for _, data := range res.resolved {
-			if data.Addr != nil {
-				addrKey := data.Addr.String()
-				res.byAddrKey[addrKey] = append(res.byAddrKey[addrKey], data)
+			if data.Dynamic != nil {
+				known[data.Dynamic] = struct{}{}
+			}
+		}
+		for addr, dynamic := range res.byAddr {
+			if _, found := known[dynamic]; !found {
+				delete(res.byAddr, addr)
 			}
 		}
 	}

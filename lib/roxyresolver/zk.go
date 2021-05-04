@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"math/rand"
+	"net/url"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,16 +33,9 @@ func NewZKResolver(opts Options) (Resolver, error) {
 		panic(errors.New("ZK is nil"))
 	}
 
-	zkPath, zkPort, query, err := ParseZKTarget(opts.Target)
+	zkPath, zkPort, balancer, err := ParseZKTarget(opts.Target)
 	if err != nil {
 		return nil, err
-	}
-
-	var balancer BalancerType
-	if str := query.Get("balancer"); str != "" {
-		if err = balancer.Parse(str); err != nil {
-			return nil, fmt.Errorf("failed to parse balancer=%q query string: %w", str, err)
-		}
 	}
 
 	return NewWatchingResolver(WatchingResolverOptions{
@@ -51,8 +46,150 @@ func NewZKResolver(opts Options) (Resolver, error) {
 	})
 }
 
+func ParseZKTarget(target Target) (zkPath string, zkPort string, balancer BalancerType, err error) {
+	if target.Authority != "" {
+		err = BadAuthorityError{Authority: target.Authority, Err: ErrExpectEmpty}
+		return
+	}
+
+	ep := target.Endpoint
+	if ep == "" {
+		err = BadEndpointError{Endpoint: target.Endpoint, Err: ErrExpectNonEmpty}
+		return
+	}
+
+	var (
+		qs    string
+		hasQS bool
+	)
+	if i := strings.IndexByte(ep, '?'); i >= 0 {
+		ep, qs, hasQS = ep[:i], ep[i+1:], true
+	}
+
+	if ep == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err:      BadPathError{Path: ep, Err: ErrExpectNonEmpty},
+		}
+		return
+	}
+
+	unescaped, err := url.PathUnescape(ep)
+	if err != nil {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err:      BadPathError{Path: ep, Err: err},
+		}
+		return
+	}
+
+	var hasPort bool
+	if i := strings.IndexByte(unescaped, ':'); i >= 0 {
+		zkPath, zkPort, hasPort = unescaped[:i], unescaped[i+1:], false
+	} else {
+		zkPath, zkPort, hasPort = unescaped, "", true
+	}
+
+	if !strings.HasPrefix(zkPath, "/") {
+		zkPath = "/" + zkPath
+	}
+	if zkPath != "/" && strings.HasSuffix(zkPath, "/") {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: zkPath,
+				Err:  ErrExpectNoEndSlash,
+			},
+		}
+		return
+	}
+	if strings.Contains(zkPath, "//") {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: zkPath,
+				Err:  ErrExpectNoDoubleSlash,
+			},
+		}
+		return
+	}
+	if strings.Contains(zkPath+"/", "/./") {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: zkPath,
+				Err:  ErrExpectNoDot,
+			},
+		}
+		return
+	}
+	if strings.Contains(zkPath+"/", "/../") {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPathError{
+				Path: zkPath,
+				Err:  ErrExpectNoDotDot,
+			},
+		}
+		return
+	}
+
+	if hasPort && zkPort == "" {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPortError{
+				Port: zkPort,
+				Err:  ErrExpectNonEmpty,
+			},
+		}
+		return
+	}
+	if hasPort && !reNamedPort.MatchString(zkPort) {
+		err = BadEndpointError{
+			Endpoint: target.Endpoint,
+			Err: BadPortError{
+				Port: zkPort,
+				Err:  ErrFailedToMatch,
+			},
+		}
+		return
+	}
+
+	var query url.Values
+	if hasQS {
+		query, err = url.ParseQuery(qs)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err:      BadQueryStringError{QueryString: qs, Err: err},
+			}
+			return
+		}
+	}
+
+	if str := query.Get("balancer"); str != "" {
+		err = balancer.Parse(str)
+		if err != nil {
+			err = BadEndpointError{
+				Endpoint: target.Endpoint,
+				Err: BadQueryStringError{
+					QueryString: qs,
+					Err: BadQueryParamError{
+						Name:  "balancer",
+						Value: str,
+						Err:   err,
+					},
+				},
+			}
+			return
+		}
+	}
+
+	return
+}
+
 func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingResolveFunc {
-	return func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []*Event, error) {
+	return func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error) {
 		var children []string
 		var zch <-chan zk.Event
 		var err error
@@ -63,7 +200,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 			return nil, err
 		}
 
-		childEventCh := make(chan *Event)
+		childEventCh := make(chan Event)
 		childDoneCh := make(chan struct{})
 
 		// begin child thread body
@@ -71,8 +208,11 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 
 		childThread := func(myPath string) {
 			defer func() {
-				err := ChildExitError{Path: myPath}
-				childEventCh <- &Event{Type: ErrorEvent, Err: err}
+				err := childExitError{Path: myPath}
+				childEventCh <- Event{
+					Type: ErrorEvent,
+					Err:  err,
+				}
 				wg.Done()
 			}()
 
@@ -104,16 +244,16 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 						break
 					}
 					if zkIsFatalError(err) {
-						childEventCh <- &Event{
+						childEventCh <- Event{
 							Type: DeleteEvent,
 							Key:  myPath,
 						}
 						return
 					}
-					childEventCh <- &Event{
+					childEventCh <- Event{
 						Type: BadDataEvent,
 						Key:  myPath,
-						Data: &Resolved{
+						Data: Resolved{
 							Unique: myPath,
 							Err:    err,
 						},
@@ -136,7 +276,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 					case zk.EventNodeDataChanged:
 						// pass
 					case zk.EventNodeDeleted:
-						childEventCh <- &Event{
+						childEventCh <- Event{
 							Type: DeleteEvent,
 							Key:  myPath,
 						}
@@ -145,16 +285,16 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 						err = zkMapError(zev.Err)
 						if err != nil {
 							if zkIsFatalError(err) {
-								childEventCh <- &Event{
+								childEventCh <- Event{
 									Type: DeleteEvent,
 									Key:  myPath,
 								}
 								return
 							}
-							childEventCh <- &Event{
+							childEventCh <- Event{
 								Type: BadDataEvent,
 								Key:  myPath,
-								Data: &Resolved{
+								Data: Resolved{
 									Unique: myPath,
 									Err:    err,
 								},
@@ -171,7 +311,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 		// end child thread body
 		// }}}
 
-		ch := make(chan []*Event)
+		ch := make(chan []Event)
 		alive := make(map[string]struct{}, 16)
 
 		for _, child := range children {
@@ -207,7 +347,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 					if pathKey, ok := zkIsChildExit(ev); ok {
 						delete(alive, pathKey)
 					} else {
-						ch <- []*Event{ev}
+						ch <- []Event{ev}
 					}
 				case zev := <-zch:
 					switch zev.Type {
@@ -215,7 +355,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 						// pass
 					case zk.EventNodeDeleted:
 						err := fmt.Errorf("node %q was deleted: %w", zkPath, fs.ErrNotExist)
-						ch <- []*Event{
+						ch <- []Event{
 							{
 								Type: ErrorEvent,
 								Err:  err,
@@ -225,7 +365,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 					default:
 						err = zkMapError(zev.Err)
 						if err != nil {
-							ch <- []*Event{
+							ch <- []Event{
 								{
 									Type: ErrorEvent,
 									Err:  err,
@@ -238,7 +378,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string) WatchingRe
 					children, _, zch, err = zkconn.ChildrenW(zkPath)
 					err = zkMapError(err)
 					if err != nil {
-						ch <- []*Event{
+						ch <- []Event{
 							{
 								Type: ErrorEvent,
 								Err:  err,
@@ -276,16 +416,14 @@ type zkBuilder struct {
 }
 
 func (b zkBuilder) Scheme() string {
-	return "zk"
+	return zkScheme
 }
 
 func (b zkBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	zkPath, zkPort, query, err := ParseZKTarget(target)
+	zkPath, zkPort, _, err := ParseZKTarget(target)
 	if err != nil {
 		return nil, err
 	}
-
-	_ = query // for future use
 
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:           b.ctx,
@@ -298,9 +436,9 @@ func (b zkBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcres
 
 // }}}
 
-func zkIsChildExit(ev *Event) (pathKey string, ok bool) {
-	if ev != nil && ev.Type == ErrorEvent {
-		if xerr, ok2 := ev.Err.(ChildExitError); ok2 {
+func zkIsChildExit(ev Event) (pathKey string, ok bool) {
+	if ev.Type == ErrorEvent {
+		if xerr, ok2 := ev.Err.(childExitError); ok2 {
 			pathKey = xerr.Path
 			ok = true
 		}

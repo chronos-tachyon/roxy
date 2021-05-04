@@ -258,7 +258,7 @@ func NewDummyZapConfig() *zap.Config {
 }
 
 func init() {
-	zap.RegisterSink("dummy", func(u *url.URL) (zap.Sink, error) {
+	_ = zap.RegisterSink("dummy", func(u *url.URL) (zap.Sink, error) {
 		return ZapLoggerBridge{}, nil
 	})
 

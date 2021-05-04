@@ -91,7 +91,7 @@ func WrapWriter(impl *Impl, w http.ResponseWriter, r *http.Request) WrappedWrite
 	type fancyInterface interface {
 		http.ResponseWriter
 		http.Flusher
-		http.CloseNotifier
+		http.CloseNotifier // nolint:staticcheck
 		http.Hijacker
 		io.ReaderFrom
 	}
@@ -312,6 +312,7 @@ type fancyWrappedWriter struct {
 	basicWrappedWriter
 }
 
+// nolint:staticcheck
 func (fw *fancyWrappedWriter) CloseNotify() <-chan bool {
 	return fw.basicWrappedWriter.next.(http.CloseNotifier).CloseNotify()
 }
@@ -334,7 +335,7 @@ func (fw *fancyWrappedWriter) ReadFrom(r io.Reader) (int64, error) {
 
 var (
 	_ WrappedWriter      = (*fancyWrappedWriter)(nil)
-	_ http.CloseNotifier = (*fancyWrappedWriter)(nil)
+	_ http.CloseNotifier = (*fancyWrappedWriter)(nil) // nolint:staticcheck
 	_ http.Hijacker      = (*fancyWrappedWriter)(nil)
 	_ http.Flusher       = (*fancyWrappedWriter)(nil)
 	_ io.ReaderFrom      = (*fancyWrappedWriter)(nil)
@@ -404,7 +405,7 @@ func writeErrorPage(bw *basicWrappedWriter, page pageData, statusCode int, u *ur
 	if err := page.tmpl.Execute(&buf, data); err != nil {
 		panic(err)
 	}
-	rendered := []byte(buf.String())
+	rendered := buf.Bytes()
 
 	hdrs := bw.Header()
 	hdrs.Set("content-type", page.contentType)
@@ -416,5 +417,5 @@ func writeErrorPage(bw *basicWrappedWriter, page pageData, statusCode int, u *ur
 	}
 	hdrs.Set("content-length", strconv.Itoa(len(rendered)))
 	bw.WriteHeader(statusCode)
-	bw.Write(rendered)
+	_, _ = bw.Write(rendered)
 }

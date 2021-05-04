@@ -95,7 +95,7 @@ func (impl *atcImpl) Announce(ctx context.Context, ss *membership.ServerSet) err
 		},
 	})
 	if err != nil {
-		rc.CloseAndRecv()
+		_, _ = rc.CloseAndRecv()
 		return err
 	}
 

@@ -347,7 +347,7 @@ func main() {
 			// pass
 		}
 
-		shutdown(true)
+		_ = shutdown(true)
 
 		t := time.NewTimer(5 * time.Second)
 		select {
@@ -358,7 +358,7 @@ func main() {
 			// pass
 		}
 
-		shutdown(false)
+		_ = shutdown(false)
 	}()
 
 	sigCh := make(chan os.Signal, 1)
@@ -373,12 +373,12 @@ func main() {
 
 			switch sig {
 			case syscall.SIGHUP:
-				reload()
+				_ = reload()
 
 			case syscall.SIGINT:
 				fallthrough
 			case syscall.SIGTERM:
-				shutdown(false)
+				_ = shutdown(false)
 			}
 		}
 	}()
@@ -514,6 +514,9 @@ func shutdown(graceful bool) error {
 
 	var errs multierror.Error
 	for err := range errCh {
+		log.Logger.Error().
+			Err(err).
+			Msg("shutdown error")
 		errs.Errors = append(errs.Errors, err)
 	}
 
@@ -582,8 +585,8 @@ func (l *SecureListener) Accept() (net.Conn, error) {
 	}
 
 	if tcpConn, ok := rawConn.(*net.TCPConn); ok {
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(3 * time.Minute)
+		_ = tcpConn.SetKeepAlive(true)
+		_ = tcpConn.SetKeepAlivePeriod(3 * time.Minute)
 	}
 
 	var tlsConfig *tls.Config

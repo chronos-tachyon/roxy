@@ -9,7 +9,7 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 )
 
-func computePermImpl(bal BalancerType, resolved []*Resolved, rng *rand.Rand) []int {
+func computePermImpl(bal BalancerType, resolved []Resolved, rng *rand.Rand) []int {
 	switch bal {
 	case RoundRobinBalancer:
 		return rng.Perm(len(resolved))
@@ -46,35 +46,25 @@ func computePermImpl(bal BalancerType, resolved []*Resolved, rng *rand.Rand) []i
 	}
 }
 
-func balanceImpl(bal BalancerType, errs multierror.Error, resolved []*Resolved, rng *rand.Rand, perm []int, nextRR *uint32) (*Resolved, error) {
+func balanceImpl(bal BalancerType, errs multierror.Error, resolved []Resolved, rng *rand.Rand, perm []int, nextRR *uint32) (Resolved, error) {
 	if len(resolved) == 0 {
 		err := errs.ErrorOrNil()
 		if err == nil {
 			err = ErrNoHealthyBackends
 		}
-		return nil, err
+		return Resolved{}, err
 	}
 
 	switch bal {
 	case RandomBalancer:
-		candidates := make([]*Resolved, 0, len(resolved))
-		for _, data := range resolved {
-			if data.IsHealthy() {
-				candidates = append(candidates, data)
-			}
-		}
-		if data := pickUniformRandom(candidates, rng); data != nil {
+		candidates := findHealthyCandidates(resolved)
+		if data, ok := pickUniformRandom(candidates, rng); ok {
 			return data, nil
 		}
 
 	case LeastLoadedBalancer:
-		candidates := make([]*Resolved, 0, len(resolved))
-		for _, data := range resolved {
-			if data.IsHealthy() {
-				candidates = append(candidates, data)
-			}
-		}
-		if data := pickWeightedRandom(candidates, rng, loadWeightFn); data != nil {
+		candidates := findHealthyCandidates(resolved)
+		if data, ok := pickWeightedRandom(candidates, rng, loadWeightFn); ok {
 			return data, nil
 		}
 
@@ -89,7 +79,7 @@ func balanceImpl(bal BalancerType, errs multierror.Error, resolved []*Resolved, 
 		}
 		if start < length {
 			a := resolved[start]
-			candidates := make([]*Resolved, 1, length-start)
+			candidates := make([]Resolved, 1, length-start)
 			candidates[0] = a
 			for end := start + 1; end < length; end++ {
 				b := resolved[end]
@@ -100,19 +90,14 @@ func balanceImpl(bal BalancerType, errs multierror.Error, resolved []*Resolved, 
 					candidates = append(candidates, b)
 				}
 			}
-			if data := pickWeightedRandom(candidates, rng, standardWeightFn); data != nil {
+			if data, ok := pickWeightedRandom(candidates, rng, standardWeightFn); ok {
 				return data, nil
 			}
 		}
 
 	case WeightedRandomBalancer:
-		candidates := make([]*Resolved, 0, len(resolved))
-		for _, data := range resolved {
-			if data.IsHealthy() {
-				candidates = append(candidates, data)
-			}
-		}
-		if data := pickWeightedRandom(candidates, rng, standardWeightFn); data != nil {
+		candidates := findHealthyCandidates(resolved)
+		if data, ok := pickWeightedRandom(candidates, rng, standardWeightFn); ok {
 			return data, nil
 		}
 
@@ -133,13 +118,23 @@ func balanceImpl(bal BalancerType, errs multierror.Error, resolved []*Resolved, 
 	}
 
 	if err := errs.ErrorOrNil(); err != nil {
-		return nil, err
+		return Resolved{}, err
 	}
 
-	return nil, ErrNoHealthyBackends
+	return Resolved{}, ErrNoHealthyBackends
 }
 
-var standardWeightFn = func(data *Resolved) float32 {
+func findHealthyCandidates(resolved []Resolved) []Resolved {
+	candidates := make([]Resolved, 0, len(resolved))
+	for _, data := range resolved {
+		if data.IsHealthy() {
+			candidates = append(candidates, data)
+		}
+	}
+	return candidates
+}
+
+var standardWeightFn = func(data Resolved) float32 {
 	weight := data.Weight
 	if weight < minWeight {
 		weight = minWeight
@@ -150,7 +145,7 @@ var standardWeightFn = func(data *Resolved) float32 {
 	return weight
 }
 
-var loadWeightFn = func(data *Resolved) float32 {
+var loadWeightFn = func(data Resolved) float32 {
 	load, _ := data.GetLoad()
 	if load < minLoad {
 		load = minLoad
@@ -161,7 +156,7 @@ var loadWeightFn = func(data *Resolved) float32 {
 	return 1.0 / load
 }
 
-func computeCumulativeProbabilities(candidates []*Resolved, fn func(*Resolved) float32) []float32 {
+func computeCumulativeProbabilities(candidates []Resolved, fn func(Resolved) float32) []float32 {
 	weights := make([]float32, len(candidates))
 	var sumOfWeights float32
 	for index, data := range candidates {
@@ -188,34 +183,34 @@ func computeCumulativeProbabilities(candidates []*Resolved, fn func(*Resolved) f
 	return cumulative
 }
 
-func pickUniformRandom(candidates []*Resolved, rng *rand.Rand) *Resolved {
+func pickUniformRandom(candidates []Resolved, rng *rand.Rand) (Resolved, bool) {
 	if len(candidates) == 0 {
-		return nil
+		return Resolved{}, false
 	}
 	if len(candidates) == 1 {
-		return candidates[0]
+		return candidates[0], true
 	}
 	index := rng.Intn(len(candidates))
-	return candidates[index]
+	return candidates[index], true
 }
 
-func pickWeightedRandom(candidates []*Resolved, rng *rand.Rand, fn func(*Resolved) float32) *Resolved {
+func pickWeightedRandom(candidates []Resolved, rng *rand.Rand, fn func(Resolved) float32) (Resolved, bool) {
 	if len(candidates) == 0 {
-		return nil
+		return Resolved{}, false
 	}
 	if len(candidates) == 1 {
-		return candidates[0]
+		return candidates[0], true
 	}
 
 	cumulative := computeCumulativeProbabilities(candidates, fn)
 	k := rng.Float32()
 	for index, boundary := range cumulative {
 		if k < boundary {
-			return candidates[index]
+			return candidates[index], true
 		}
 	}
 
 	// fallback in case of bad floating point math
 	index := len(candidates) - 1
-	return candidates[index]
+	return candidates[index], true
 }
