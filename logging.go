@@ -75,14 +75,14 @@ func (w *RotatingLogWriter) Close() error {
 		w.cv.Wait()
 	}
 
-	var err error
-	if e := w.file.Sync(); e != nil {
-		err = multierror.Append(err, e)
+	var errs multierror.Error
+	if err := w.file.Sync(); err != nil {
+		errs.Errors = append(errs.Errors, err)
 	}
-	if e := w.file.Close(); e != nil {
-		err = multierror.Append(err, e)
+	if err := w.file.Close(); err != nil {
+		errs.Errors = append(errs.Errors, err)
 	}
-	return err
+	return errs.ErrorOrNil()
 }
 
 func (w *RotatingLogWriter) Rotate() error {
@@ -195,11 +195,11 @@ func (ZapLoggerBridge) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (_ ZapLoggerBridge) Sync() error {
+func (ZapLoggerBridge) Sync() error {
 	return nil
 }
 
-func (_ ZapLoggerBridge) Close() error {
+func (ZapLoggerBridge) Close() error {
 	return nil
 }
 

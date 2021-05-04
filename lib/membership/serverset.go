@@ -111,41 +111,41 @@ func (st ServerSetStatus) MarshalJSON() ([]byte, error) {
 	return json.Marshal(st.String())
 }
 
-func (ptr *ServerSetStatus) UnmarshalJSON(raw []byte) error {
+func (st *ServerSetStatus) UnmarshalJSON(raw []byte) error {
 	if string(raw) == "null" {
 		return nil
 	}
 
-	if st, found := serversetStatusMap[string(raw)]; found {
-		*ptr = st
+	if num, found := serversetStatusMap[string(raw)]; found {
+		*st = num
 		return nil
 	}
 
 	var str string
 	err0 := json.Unmarshal(raw, &str)
 	if err0 == nil {
-		if st, found := serversetStatusMap[str]; found {
-			*ptr = st
+		if num, found := serversetStatusMap[str]; found {
+			*st = num
 			return nil
 		}
 		for index, data := range serversetStatusData {
 			if strings.EqualFold(str, data.Name) {
-				*ptr = ServerSetStatus(index)
+				*st = ServerSetStatus(index)
 				return nil
 			}
 		}
-		*ptr = 0
+		*st = 0
 		return fmt.Errorf("unknown ServerSetStatus %q", str)
 	}
 
 	var num uint8
 	err1 := json.Unmarshal(raw, &num)
 	if err1 == nil {
-		*ptr = ServerSetStatus(num)
+		*st = ServerSetStatus(num)
 		return nil
 	}
 
-	*ptr = 0
+	*st = 0
 	return err0
 
 }

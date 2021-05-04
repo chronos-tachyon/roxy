@@ -809,7 +809,7 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 				sha256writer := sha256.New()
 
 				mw := io.MultiWriter(md5writer, sha1writer, sha256writer)
-				size, err = io.Copy(mw, f)
+				_, err = io.Copy(mw, f)
 				if err != nil {
 					rc.Writer.WriteError(http.StatusInternalServerError)
 					rc.Logger.Error().
@@ -841,6 +841,7 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 	}
 
 	setETagHeader(hdrs, "", fi.ModTime())
+	hdrs.Set("content-length", strconv.FormatInt(size, 10))
 
 	rc.Logger.Debug().
 		Bool("cachePossible", cachePossible).
@@ -1605,11 +1606,11 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 	parsedTarget := roxyresolver.ParseTargetString(cfg.Target)
 
 	res, err := roxyresolver.New(roxyresolver.Options{
-		Target:    parsedTarget,
-		IsTLS:     (tlsConfig != nil),
-		Context:   gRootContext,
-		Etcd:      impl.etcd,
-		ZK:        impl.zkconn,
+		Target:  parsedTarget,
+		IsTLS:   (tlsConfig != nil),
+		Context: gRootContext,
+		Etcd:    impl.etcd,
+		ZK:      impl.zkconn,
 	})
 	if err != nil {
 		return nil, err

@@ -59,41 +59,41 @@ func (t EventType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
-func (ptr *EventType) UnmarshalJSON(raw []byte) error {
+func (t *EventType) UnmarshalJSON(raw []byte) error {
 	if string(raw) == "null" {
 		return nil
 	}
 
 	var str string
 	if err := json.Unmarshal(raw, &str); err != nil {
-		*ptr = 0
+		*t = 0
 		return err
 	}
 
-	return ptr.Parse(str)
+	return t.Parse(str)
 }
 
-func (ptr *EventType) Parse(str string) error {
+func (t *EventType) Parse(str string) error {
 	if num, ok := eventTypeMap[str]; ok {
-		*ptr = num
+		*t = num
 		return nil
 	}
 
 	for index, row := range eventTypeData {
 		if strings.EqualFold(str, row.Name) || strings.EqualFold(str, row.GoName) {
-			*ptr = EventType(index)
+			*t = EventType(index)
 			return nil
 		}
 	}
 
 	for key, num := range eventTypeMap {
 		if strings.EqualFold(str, key) {
-			*ptr = num
+			*t = num
 			return nil
 		}
 	}
 
-	*ptr = 0
+	*t = 0
 	return fmt.Errorf("illegal event type %q; expected one of %q", str, makeAllowedNames(eventTypeData))
 }
 
@@ -127,19 +127,19 @@ var balancerTypeData = []enumData{
 }
 
 var balancerTypeMap = map[string]BalancerType{
-	"":                      RandomBalancer,
-	"random":                RandomBalancer,
-	"rand":                  RandomBalancer,
-	"r":                     RandomBalancer,
-	"roundRobin":            RoundRobinBalancer,
-	"rr":                    RoundRobinBalancer,
-	"leastLoaded":           LeastLoadedBalancer,
-	"ll":                    LeastLoadedBalancer,
-	"srv":                   SRVBalancer,
-	"weightedRandom":        WeightedRandomBalancer,
-	"wr":                    WeightedRandomBalancer,
-	"weightedRoundRobin":    WeightedRoundRobinBalancer,
-	"wrr":                   WeightedRoundRobinBalancer,
+	"":                   RandomBalancer,
+	"random":             RandomBalancer,
+	"rand":               RandomBalancer,
+	"r":                  RandomBalancer,
+	"roundRobin":         RoundRobinBalancer,
+	"rr":                 RoundRobinBalancer,
+	"leastLoaded":        LeastLoadedBalancer,
+	"ll":                 LeastLoadedBalancer,
+	"srv":                SRVBalancer,
+	"weightedRandom":     WeightedRandomBalancer,
+	"wr":                 WeightedRandomBalancer,
+	"weightedRoundRobin": WeightedRoundRobinBalancer,
+	"wrr":                WeightedRoundRobinBalancer,
 }
 
 func (t BalancerType) String() string {
@@ -160,41 +160,41 @@ func (t BalancerType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
-func (ptr *BalancerType) UnmarshalJSON(raw []byte) error {
+func (t *BalancerType) UnmarshalJSON(raw []byte) error {
 	if string(raw) == "null" {
 		return nil
 	}
 
 	var str string
 	if err := json.Unmarshal(raw, &str); err != nil {
-		*ptr = 0
+		*t = 0
 		return err
 	}
 
-	return ptr.Parse(str)
+	return t.Parse(str)
 }
 
-func (ptr *BalancerType) Parse(str string) error {
+func (t *BalancerType) Parse(str string) error {
 	if num, ok := balancerTypeMap[str]; ok {
-		*ptr = num
+		*t = num
 		return nil
 	}
 
 	for index, row := range balancerTypeData {
 		if strings.EqualFold(str, row.Name) || strings.EqualFold(str, row.GoName) {
-			*ptr = BalancerType(index)
+			*t = BalancerType(index)
 			return nil
 		}
 	}
 
 	for key, num := range balancerTypeMap {
 		if strings.EqualFold(str, key) {
-			*ptr = num
+			*t = num
 			return nil
 		}
 	}
 
-	*ptr = 0
+	*t = 0
 	return fmt.Errorf("illegal balancer type %q; expected one of %q", str, makeAllowedNames(balancerTypeData))
 }
 

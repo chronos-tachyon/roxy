@@ -599,18 +599,18 @@ func (impl *Impl) loadRules() error {
 }
 
 func (impl *Impl) Close() error {
-	var err error
+	var errs multierror.Error
 
 	for _, handler := range impl.targets {
 		if closer, ok := handler.(io.Closer); ok {
-			if e := closer.Close(); e != nil {
-				e = multierror.Append(err, e)
+			if err := closer.Close(); err != nil {
+				errs.Errors = append(errs.Errors, err)
 			}
 		}
 	}
 
-	if e := impl.storage.Close(); e != nil {
-		e = multierror.Append(err, e)
+	if err := impl.storage.Close(); err != nil {
+		errs.Errors = append(errs.Errors, err)
 	}
 
 	if impl.zkconn != nil {
@@ -618,12 +618,12 @@ func (impl *Impl) Close() error {
 	}
 
 	if impl.etcd != nil {
-		if e := impl.etcd.Close(); e != nil {
-			e = multierror.Append(err, e)
+		if err := impl.etcd.Close(); err != nil {
+			errs.Errors = append(errs.Errors, err)
 		}
 	}
 
-	return err
+	return errs.ErrorOrNil()
 }
 
 func (impl *Impl) ACMEManager() *autocert.Manager {

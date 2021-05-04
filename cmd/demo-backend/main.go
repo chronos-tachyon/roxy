@@ -171,13 +171,16 @@ func main() {
 
 				sort.Strings(headerNames)
 
-				fmt.Printf("[%s] [%s] [%s] [%s]\n", r.Method, r.Host, r.URL, r.Proto)
+				size, _ := io.Copy(io.Discard, r.Body)
+
+				fmt.Printf("HTTP - [%s] [%s] [%s] [%s]\n", r.Method, r.Host, r.URL, r.Proto)
 				for _, name := range headerNames {
 					values := r.Header.Values(name)
 					for _, value := range values {
 						fmt.Printf("[%s]: %s\n", name, value)
 					}
 				}
+				fmt.Printf("body: %d bytes\n", size)
 				fmt.Printf("\n")
 
 				hdrs := w.Header()
@@ -450,9 +453,6 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 	hostIn := ""
 	pathIn := ""
 
-	_ = schemeIn
-	_ = hostIn
-
 	for {
 		var msg *roxypb.WebMessage
 		msg, err = ws.Recv()
@@ -468,7 +468,6 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 		}
 		if len(msg.Headers) != 0 {
 			for _, kv := range msg.Headers {
-				hIn = append(hIn, kv)
 				switch kv.Key {
 				case ":scheme":
 					schemeIn = kv.Value
@@ -478,6 +477,8 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 					hostIn = kv.Value
 				case ":path":
 					pathIn = kv.Value
+				default:
+					hIn = append(hIn, kv)
 				}
 			}
 		}
@@ -488,10 +489,12 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 		}
 	}
 
+	fmt.Printf("GRPC - [%s] [%s] [%s] [%s]\n", schemeIn, methodIn, hostIn, pathIn)
 	kvList(hIn).Sort()
 	for _, kv := range hIn {
 		fmt.Printf("[%s]: %s\n", kv.Key, kv.Value)
 	}
+	fmt.Printf("body: %d bytes\n", len(bIn))
 	fmt.Print("\n")
 
 	bOut := []byte(nil)

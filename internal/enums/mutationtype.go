@@ -62,19 +62,30 @@ func (t MutationType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
-func (ptr *MutationType) UnmarshalJSON(raw []byte) error {
-	*ptr = 0
-
-	var str string
-	if err := json.Unmarshal(raw, &str); err != nil {
-		return err
-	}
-
-	if num, ok := mutationTypeMap[strings.ToLower(str)]; ok {
-		*ptr = num
+func (t *MutationType) UnmarshalJSON(raw []byte) error {
+	if string(raw) == "null" {
 		return nil
 	}
 
+	var str string
+	if err := json.Unmarshal(raw, &str); err != nil {
+		*t = 0
+		return err
+	}
+
+	if num, ok := mutationTypeMap[str]; ok {
+		*t = num
+		return nil
+	}
+
+	for key, num := range mutationTypeMap {
+		if strings.EqualFold(key, str) {
+			*t = num
+			return nil
+		}
+	}
+
+	*t = 0
 	return fmt.Errorf("illegal mutation type %q; expected one of %q", str, makeAllowedNames(mutationTypeData))
 }
 

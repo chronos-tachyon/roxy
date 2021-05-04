@@ -47,19 +47,30 @@ func (t TargetType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
-func (ptr *TargetType) UnmarshalJSON(raw []byte) error {
-	*ptr = 0
-
-	var str string
-	if err := json.Unmarshal(raw, &str); err != nil {
-		return err
-	}
-
-	if num, ok := targetTypeMap[strings.ToLower(str)]; ok {
-		*ptr = num
+func (t *TargetType) UnmarshalJSON(raw []byte) error {
+	if string(raw) == "null" {
 		return nil
 	}
 
+	var str string
+	if err := json.Unmarshal(raw, &str); err != nil {
+		*t = 0
+		return err
+	}
+
+	if num, ok := targetTypeMap[str]; ok {
+		*t = num
+		return nil
+	}
+
+	for key, num := range targetTypeMap {
+		if strings.EqualFold(key, str) {
+			*t = num
+			return nil
+		}
+	}
+
+	*t = 0
 	return fmt.Errorf("illegal target type %q; expected one of %q", str, makeAllowedNames(targetTypeData))
 }
 

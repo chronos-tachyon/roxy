@@ -171,6 +171,14 @@
     "contentType": "application/json"
   },
   {
+    "suffixes": [".yaml", ".yml"],
+    "contentType": "application/yaml"
+  },
+  {
+    "suffixes": [".toml"],
+    "contentType": "application/toml"
+  },
+  {
     "suffixes": [".ogx"],
     "contentType": "application/ogg"
   },
