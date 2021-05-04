@@ -1,3 +1,11 @@
+v0.3.0
+  * Implement WeightedRandomBalancer and WeightedRoundRobinBalancer balancers
+  * Change ATC protocol to be event-oriented
+  * Create new "announcer" library for backends to easily publish their IP:port
+  * Use "announcer" library in demo-backend
+  * Implement gRPC health checking in demo-backend
+  * Significant refactor/cleanup work on resolvers/balancers
+
 v0.2.4
   * Changes to build and release process
   * Docker multiarch support for arm64v8

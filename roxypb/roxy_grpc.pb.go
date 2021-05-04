@@ -136,8 +136,8 @@ var WebServer_ServiceDesc = grpc.ServiceDesc{
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AirTrafficControlClient interface {
-	Balance(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_BalanceClient, error)
 	Report(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ReportClient, error)
+	Balance(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_BalanceClient, error)
 }
 
 type airTrafficControlClient struct {
@@ -148,39 +148,8 @@ func NewAirTrafficControlClient(cc grpc.ClientConnInterface) AirTrafficControlCl
 	return &airTrafficControlClient{cc}
 }
 
-func (c *airTrafficControlClient) Balance(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_BalanceClient, error) {
-	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[0], "/roxy.AirTrafficControl/Balance", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &airTrafficControlBalanceClient{stream}
-	return x, nil
-}
-
-type AirTrafficControl_BalanceClient interface {
-	Send(*BalanceRequest) error
-	Recv() (*BalanceResponse, error)
-	grpc.ClientStream
-}
-
-type airTrafficControlBalanceClient struct {
-	grpc.ClientStream
-}
-
-func (x *airTrafficControlBalanceClient) Send(m *BalanceRequest) error {
-	return x.ClientStream.SendMsg(m)
-}
-
-func (x *airTrafficControlBalanceClient) Recv() (*BalanceResponse, error) {
-	m := new(BalanceResponse)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 func (c *airTrafficControlClient) Report(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ReportClient, error) {
-	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[1], "/roxy.AirTrafficControl/Report", opts...)
+	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[0], "/roxy.AirTrafficControl/Report", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -213,12 +182,43 @@ func (x *airTrafficControlReportClient) CloseAndRecv() (*ReportResponse, error) 
 	return m, nil
 }
 
+func (c *airTrafficControlClient) Balance(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_BalanceClient, error) {
+	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[1], "/roxy.AirTrafficControl/Balance", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &airTrafficControlBalanceClient{stream}
+	return x, nil
+}
+
+type AirTrafficControl_BalanceClient interface {
+	Send(*BalanceRequest) error
+	Recv() (*BalanceResponse, error)
+	grpc.ClientStream
+}
+
+type airTrafficControlBalanceClient struct {
+	grpc.ClientStream
+}
+
+func (x *airTrafficControlBalanceClient) Send(m *BalanceRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *airTrafficControlBalanceClient) Recv() (*BalanceResponse, error) {
+	m := new(BalanceResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // AirTrafficControlServer is the server API for AirTrafficControl service.
 // All implementations must embed UnimplementedAirTrafficControlServer
 // for forward compatibility
 type AirTrafficControlServer interface {
-	Balance(AirTrafficControl_BalanceServer) error
 	Report(AirTrafficControl_ReportServer) error
+	Balance(AirTrafficControl_BalanceServer) error
 	mustEmbedUnimplementedAirTrafficControlServer()
 }
 
@@ -226,11 +226,11 @@ type AirTrafficControlServer interface {
 type UnimplementedAirTrafficControlServer struct {
 }
 
-func (UnimplementedAirTrafficControlServer) Balance(AirTrafficControl_BalanceServer) error {
-	return status.Errorf(codes.Unimplemented, "method Balance not implemented")
-}
 func (UnimplementedAirTrafficControlServer) Report(AirTrafficControl_ReportServer) error {
 	return status.Errorf(codes.Unimplemented, "method Report not implemented")
+}
+func (UnimplementedAirTrafficControlServer) Balance(AirTrafficControl_BalanceServer) error {
+	return status.Errorf(codes.Unimplemented, "method Balance not implemented")
 }
 func (UnimplementedAirTrafficControlServer) mustEmbedUnimplementedAirTrafficControlServer() {}
 
@@ -243,32 +243,6 @@ type UnsafeAirTrafficControlServer interface {
 
 func RegisterAirTrafficControlServer(s grpc.ServiceRegistrar, srv AirTrafficControlServer) {
 	s.RegisterService(&AirTrafficControl_ServiceDesc, srv)
-}
-
-func _AirTrafficControl_Balance_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(AirTrafficControlServer).Balance(&airTrafficControlBalanceServer{stream})
-}
-
-type AirTrafficControl_BalanceServer interface {
-	Send(*BalanceResponse) error
-	Recv() (*BalanceRequest, error)
-	grpc.ServerStream
-}
-
-type airTrafficControlBalanceServer struct {
-	grpc.ServerStream
-}
-
-func (x *airTrafficControlBalanceServer) Send(m *BalanceResponse) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func (x *airTrafficControlBalanceServer) Recv() (*BalanceRequest, error) {
-	m := new(BalanceRequest)
-	if err := x.ServerStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
 func _AirTrafficControl_Report_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -297,6 +271,32 @@ func (x *airTrafficControlReportServer) Recv() (*ReportRequest, error) {
 	return m, nil
 }
 
+func _AirTrafficControl_Balance_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AirTrafficControlServer).Balance(&airTrafficControlBalanceServer{stream})
+}
+
+type AirTrafficControl_BalanceServer interface {
+	Send(*BalanceResponse) error
+	Recv() (*BalanceRequest, error)
+	grpc.ServerStream
+}
+
+type airTrafficControlBalanceServer struct {
+	grpc.ServerStream
+}
+
+func (x *airTrafficControlBalanceServer) Send(m *BalanceResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *airTrafficControlBalanceServer) Recv() (*BalanceRequest, error) {
+	m := new(BalanceRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // AirTrafficControl_ServiceDesc is the grpc.ServiceDesc for AirTrafficControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -306,14 +306,14 @@ var AirTrafficControl_ServiceDesc = grpc.ServiceDesc{
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "Balance",
-			Handler:       _AirTrafficControl_Balance_Handler,
-			ServerStreams: true,
+			StreamName:    "Report",
+			Handler:       _AirTrafficControl_Report_Handler,
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "Report",
-			Handler:       _AirTrafficControl_Report_Handler,
+			StreamName:    "Balance",
+			Handler:       _AirTrafficControl_Balance_Handler,
+			ServerStreams: true,
 			ClientStreams: true,
 		},
 	},

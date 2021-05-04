@@ -20,38 +20,58 @@ message KeyValue {
 }
 
 service AirTrafficControl {
-  rpc Balance (stream BalanceRequest) returns (stream BalanceResponse) {}
   rpc Report (stream ReportRequest) returns (ReportResponse) {}
-}
-
-message BalanceRequest {
-  string name = 1;
-}
-
-message BalanceResponse {
-  string name = 1;
-  string service_config = 2;
-  repeated Endpoint endpoints = 3;
+  rpc Balance (stream BalanceRequest) returns (stream BalanceResponse) {}
 }
 
 message ReportRequest {
-  string name = 1;
-  float load = 2;
-  Endpoint endpoint = 3;
+  message FirstReport {
+    string name = 1;
+    string unique = 2;
+    string location = 3;
+    string server_name = 4;
+    int32 shard_id = 5;
+    bytes ip = 6;
+    string zone = 7;
+    uint32 port = 8;
+    bool has_shard_id = 16;
+  }
+  float load = 1;
+  FirstReport first_report = 2;
 }
 
 message ReportResponse {
 }
 
-message Endpoint {
-  bytes ip = 1;
-  string zone = 2;
-  uint32 port = 3;
-  string unique = 4;
-  string server_name = 5;
-  string location = 6;
-  int32 shard_id = 7;
-  float weight = 8;
+message BalanceRequest {
+  string name = 1;
+  string location = 2;
+}
+
+message BalanceResponse {
+  repeated Event events = 1;
+  string name = 2;
+  bool is_sharded = 3;
+}
+
+message Event {
+  enum Type {
+    UNKNOWN = 0;
+    INSERT_IP = 1;
+    DELETE_IP = 2;
+    UPDATE_WEIGHT = 3;
+    NEW_SERVICE_CONFIG = 4;
+  }
+  Type event_type = 1;
+  string unique = 2;
+  string location = 3;
+  string server_name = 4;
+  int32 shard_id = 5;
+  bytes ip = 6;
+  string zone = 7;
+  uint32 port = 8;
+  float weight = 9;
+  string service_config_json = 64;
 }
 
 service Admin {

@@ -4,62 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/go-zookeeper/zk"
-	v3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/grpc/resolver"
-
-	"github.com/chronos-tachyon/roxy/common/baseresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 )
 
-type Options struct {
-	Target    resolver.Target
-	Context   context.Context
-	Random    *rand.Rand
-	Etcd      *v3.Client
-	ZK        *zk.Conn
-	Dialer    *net.Dialer
-	TLSConfig *tls.Config
-}
-
-func New(opts Options) (*BalancedClient, error) {
-	res, err := NewResolver(opts)
-	if err != nil {
-		return nil, err
-	}
-	return NewWithResolver(res, opts.Dialer, opts.TLSConfig)
-}
-
-func NewResolver(opts Options) (baseresolver.Resolver, error) {
-	scheme := strings.ToLower(opts.Target.Scheme)
-	switch scheme {
-	case "unix":
-		fallthrough
-	case "unix-abstract":
-		return NewUnixResolver(opts)
-	case "":
-		fallthrough
-	case "dns":
-		return NewDNSResolver(opts)
-	case "srv":
-		return NewSRVResolver(opts)
-	case "etcd":
-		return NewEtcdResolver(opts)
-	case "zk":
-		return NewZKResolver(opts)
-	case "atc":
-		return NewATCResolver(opts)
-	default:
-		return nil, fmt.Errorf("Target.Scheme %q is not supported", opts.Target.Scheme)
-	}
-}
-
-func NewWithResolver(res baseresolver.Resolver, dialer *net.Dialer, tlsConfig *tls.Config) (*BalancedClient, error) {
+func New(res roxyresolver.Resolver, dialer *net.Dialer, tlsConfig *tls.Config) (*BalancedClient, error) {
 	if res == nil {
 		panic(fmt.Errorf("Resolver is nil"))
 	}
@@ -109,12 +61,12 @@ func NewWithResolver(res baseresolver.Resolver, dialer *net.Dialer, tlsConfig *t
 // type BalancedClient {{{
 
 type BalancedClient struct {
-	res    baseresolver.Resolver
+	res    roxyresolver.Resolver
 	client *http.Client
 	isTLS  bool
 }
 
-func (bc *BalancedClient) Resolver() baseresolver.Resolver {
+func (bc *BalancedClient) Resolver() roxyresolver.Resolver {
 	return bc.res
 }
 

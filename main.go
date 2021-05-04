@@ -25,7 +25,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 
-	"github.com/chronos-tachyon/roxy/grpc/balancer/atcbalancer"
+	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -177,7 +177,7 @@ func main() {
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(log.Logger)
 
-	atcbalancer.SetLogger(log.Logger.With().Str("package", "atcbalancer").Logger())
+	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
 	gRootContext = context.Background()
 	gRootContext, gRootCancel = context.WithCancel(gRootContext)

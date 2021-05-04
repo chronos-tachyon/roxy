@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -26,8 +25,10 @@ import (
 	v3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/chronos-tachyon/roxy/common/membership"
+	"github.com/chronos-tachyon/roxy/lib/announcer"
+	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -43,11 +44,11 @@ var (
 	flagEtcdServers     string = "http://127.0.0.1:2379"
 	flagEtcdUsername    string = ""
 	flagEtcdPassword    string = ""
-	flagEtcdHTTPPath    string = "/demo/http"
-	flagEtcdGRPCPath    string = "/demo/grpc"
+	flagEtcdPath        string = "/demo"
 	flagATCServers      string = "ipv4:127.0.0.1:2987"
-	flagATCServerName   string = ""
+	flagATCDNSName      string = ""
 	flagATCName         string = "demo"
+	flagATCLocation     string = ""
 	flagUnique          string = ""
 	flagShakespeareFile string = "/dev/null"
 )
@@ -64,13 +65,26 @@ func init() {
 	getopt.FlagLong(&flagEtcdServers, "etcd-servers", 'E', "comma-separated list of Etcd endpoints to advertise to")
 	getopt.FlagLong(&flagEtcdUsername, "etcd-username", 'u', "username for Etcd")
 	getopt.FlagLong(&flagEtcdPassword, "etcd-password", 'p', "password for Etcd")
-	getopt.FlagLong(&flagEtcdHTTPPath, "etcd-http-path", 0, "Etcd key to advertise as (HTTP or HTTPS)")
-	getopt.FlagLong(&flagEtcdGRPCPath, "etcd-grpc-path", 0, "Etcd key to advertise as (gRPC or gRPCS)")
+	getopt.FlagLong(&flagEtcdPath, "etcd-path", 0, "Etcd key to advertise as")
 	getopt.FlagLong(&flagATCServers, "atc-servers", 'A', "gRPC target of ATC servers to advertise to")
-	getopt.FlagLong(&flagATCServerName, "atc-servername", 0, "TLS ServerName of ATC servers (enables TLS)")
+	getopt.FlagLong(&flagATCDNSName, "atc-dnsname", 0, "TLS DNSName of ATC servers (enables TLS)")
 	getopt.FlagLong(&flagATCName, "atc-name", 'a', "ATC service name to advertise as")
+	getopt.FlagLong(&flagATCLocation, "atc-location", 0, "ATC location name to advertise as")
 	getopt.FlagLong(&flagUnique, "unique", 'H', "unique identifier; defaults to os.Hostname()")
 	getopt.FlagLong(&flagShakespeareFile, "shakespeare-file", 'f', "file to serve; recommend using https://ocw.mit.edu/ans7870/6/6.006/s08/lecturenotes/files/t8.shakespeare.txt")
+}
+
+var (
+	gAliveMu   sync.Mutex
+	gAliveCV   *sync.Cond = sync.NewCond(&gAliveMu)
+	gAliveBool bool       = false
+)
+
+func setAlive(value bool) {
+	gAliveMu.Lock()
+	gAliveBool = value
+	gAliveCV.Broadcast()
+	gAliveMu.Unlock()
 }
 
 func main() {
@@ -101,6 +115,9 @@ func main() {
 			panic(fmt.Errorf("--shakespeare-file: failed to read file %q: %w", flagShakespeareFile, err))
 		}
 	}
+
+	ann := announcer.New()
+	defer ann.Close()
 
 	var (
 		httpAddr *net.TCPAddr
@@ -135,6 +152,8 @@ func main() {
 			NextProtos:   []string{"h2", "http/1.1"},
 		}
 	}
+
+	setAlive(true)
 
 	var wg sync.WaitGroup
 
@@ -193,6 +212,8 @@ func main() {
 	grpcShutdown := func(_ context.Context) error { return nil }
 	if grpcAddr != nil {
 		s := grpc.NewServer()
+		hs := &healthServer{}
+		healthpb.RegisterHealthServer(s, hs)
 		wss := &webServerServer{corpus: corpus}
 		roxypb.RegisterWebServerServer(s, wss)
 
@@ -215,8 +236,6 @@ func main() {
 		}
 	}
 
-	advertiseZK := func() error { return nil }
-	shutdownZK := func() error { return nil }
 	if flagZKServers != "" {
 		if flagZKPath == "" || flagZKPath[0] != '/' || flagZKPath[len(flagZKPath)-1] == '/' {
 			panic(fmt.Errorf("--zk-path: invalid path %q", flagZKPath))
@@ -228,60 +247,13 @@ func main() {
 			panic(err)
 		}
 
-		advertiseZK = func() error {
-			if httpAddr == nil && grpcAddr == nil {
-				return nil
-			}
+		defer zkconn.Close()
 
-			var member membership.ServerSet
-			if httpAddr != nil {
-				member.ServiceEndpoint = &membership.ServerSetEndpoint{
-					Host: hostAndZone(httpAddr),
-					Port: uint16(httpAddr.Port),
-				}
-			} else if grpcAddr != nil {
-				member.ServiceEndpoint = &membership.ServerSetEndpoint{
-					Host: hostAndZone(grpcAddr),
-					Port: uint16(grpcAddr.Port),
-				}
-			}
-			member.AdditionalEndpoints = make(map[string]*membership.ServerSetEndpoint, 2)
-			if httpAddr != nil {
-				member.AdditionalEndpoints["http"] = &membership.ServerSetEndpoint{
-					Host: hostAndZone(httpAddr),
-					Port: uint16(httpAddr.Port),
-				}
-			}
-			if grpcAddr != nil {
-				member.AdditionalEndpoints["grpc"] = &membership.ServerSetEndpoint{
-					Host: hostAndZone(grpcAddr),
-					Port: uint16(grpcAddr.Port),
-				}
-			}
-			member.Status = membership.StatusAlive
-
-			memberData, err := json.Marshal(&member)
-			if err != nil {
-				return err
-			}
-
-			memberPath := path.Join(flagZKPath, flagUnique)
-			_, err = zkconn.CreateProtectedEphemeralSequential(memberPath, memberData, zk.WorldACL(zk.PermAll))
-			if err != nil {
-				return err
-			}
-
-			return nil
-		}
-
-		shutdownZK = func() error {
-			zkconn.Close()
-			return nil
+		if err := ann.AddZK(zkconn, flagZKPath, flagUnique); err != nil {
+			panic(err)
 		}
 	}
 
-	advertiseEtcd := func() error { return nil }
-	shutdownEtcd := func() error { return nil }
 	if flagEtcdServers != "" {
 		endpoints := strings.Split(flagEtcdServers, ",")
 
@@ -296,68 +268,13 @@ func main() {
 			panic(err)
 		}
 
-		lease, err := etcd.Lease.Grant(ctx, 30)
-		if err != nil {
+		defer etcd.Close()
+
+		if err := ann.AddEtcd(etcd, flagEtcdPath, flagUnique); err != nil {
 			panic(err)
-		}
-
-		ch, err := etcd.Lease.KeepAlive(ctx, lease.ID)
-		if err != nil {
-			panic(err)
-		}
-
-		wg.Add(1)
-		go func() {
-			for range ch {
-			}
-			wg.Done()
-		}()
-
-		advertiseEtcd = func() error {
-			if httpAddr != nil && flagEtcdHTTPPath != "" {
-				var member membership.GRPC
-				member.Op = membership.GRPCOpAdd
-				member.Addr = httpAddr.String()
-				memberData, err := json.Marshal(&member)
-				if err != nil {
-					return err
-				}
-
-				httpPath := flagEtcdHTTPPath + "/" + flagUnique
-				_, err = etcd.KV.Put(ctx, httpPath, string(memberData), v3.WithLease(lease.ID))
-				if err != nil {
-					return err
-				}
-			}
-
-			if grpcAddr != nil && flagEtcdGRPCPath != "" {
-				var member membership.GRPC
-				member.Op = membership.GRPCOpAdd
-				member.Addr = grpcAddr.String()
-				memberData, err := json.Marshal(&member)
-				if err != nil {
-					return err
-				}
-
-				grpcPath := flagEtcdGRPCPath + "/" + flagUnique
-				_, err = etcd.KV.Put(ctx, grpcPath, string(memberData), v3.WithLease(lease.ID))
-				if err != nil {
-					return err
-				}
-			}
-
-			return nil
-		}
-
-		shutdownEtcd = func() error {
-			etcd.Lease.Revoke(ctx, lease.ID)
-			etcd.Close()
-			return nil
 		}
 	}
 
-	advertiseATC := func() error { return nil }
-	shutdownATC := func() error { return nil }
 	if flagATCServers != "" {
 		if grpcAddr == nil {
 			panic(fmt.Errorf("must specify --listen-grpc with --atc-servers"))
@@ -368,14 +285,13 @@ func main() {
 		}
 
 		dialOpts := make([]grpc.DialOption, 1)
-		if flagATCServerName == "" {
+		if flagATCDNSName == "" {
 			dialOpts[0] = grpc.WithInsecure()
 		} else {
-			dialOpts[0] = grpc.WithTransportCredentials(
-				credentials.NewTLS(
-					&tls.Config{
-						ServerName: flagATCServerName,
-					}))
+			tlsConfig := &tls.Config{
+				ServerName: flagATCDNSName,
+			}
+			dialOpts[0] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 		}
 
 		cc, err := grpc.DialContext(ctx, flagATCServers, dialOpts...)
@@ -383,43 +299,24 @@ func main() {
 			panic(fmt.Errorf("--atc-servers: failed to dial %q: %w", flagATCServers, err))
 		}
 
-		atcclient := roxypb.NewAirTrafficControlClient(cc)
-
-		var rc roxypb.AirTrafficControl_ReportClient
-
-		advertiseATC = func() error {
-			var err error
-			rc, err = atcclient.Report(ctx)
-			if err != nil {
-				return err
-			}
-
-			err = rc.Send(&roxypb.ReportRequest{
-				Name: flagATCName,
-				Endpoint: &roxypb.Endpoint{
-					Ip:         []byte(grpcAddr.IP),
-					Zone:       grpcAddr.Zone,
-					Port:       uint32(grpcAddr.Port),
-					Unique:     flagUnique,
-					ShardId:    -1,
-					Weight:     1.0,
-				},
-			})
-			if err != nil {
-				return err
-			}
-
-			// TODO: start thread to continuously report load
-
-			return nil
+		if err := ann.AddATC(cc, flagATCName, flagUnique, flagATCLocation, "grpc", nil); err != nil {
+			panic(err)
 		}
+	}
 
-		shutdownATC = func() error {
-			if rc != nil {
-				rc.CloseAndRecv()
-			}
-			return nil
-		}
+	ss := &membership.ServerSet{
+		AdditionalEndpoints: make(map[string]*membership.ServerSetEndpoint, 2),
+		Status:              membership.StatusAlive,
+	}
+	if httpAddr != nil {
+		endpoint := membership.ServerSetEndpointFromTCPAddr(httpAddr)
+		ss.ServiceEndpoint = endpoint
+		ss.AdditionalEndpoints["http"] = endpoint
+	}
+	if grpcAddr != nil {
+		endpoint := membership.ServerSetEndpointFromTCPAddr(grpcAddr)
+		ss.ServiceEndpoint = endpoint
+		ss.AdditionalEndpoints["grpc"] = endpoint
 	}
 
 	sigch := make(chan os.Signal, 1)
@@ -429,25 +326,16 @@ func main() {
 	go func() {
 		<-sigch
 		signal.Stop(sigch)
+		ann.Withdraw(ctx)
+		setAlive(false)
 		grpcShutdown(ctx)
 		httpShutdown(ctx)
-		shutdownATC()
-		shutdownEtcd()
-		shutdownZK()
 		cancelfn()
 		fmt.Println("shutdown")
 		wg.Done()
 	}()
 
-	if err := advertiseZK(); err != nil {
-		panic(err)
-	}
-
-	if err := advertiseEtcd(); err != nil {
-		panic(err)
-	}
-
-	if err := advertiseATC(); err != nil {
+	if err := ann.Announce(ctx, ss); err != nil {
 		panic(err)
 	}
 
@@ -505,6 +393,48 @@ func hostAndZone(addr *net.TCPAddr) string {
 		return addr.IP.String()
 	}
 	return addr.IP.String() + "%" + addr.Zone
+}
+
+type healthServer struct {
+	healthpb.UnimplementedHealthServer
+}
+
+func (s *healthServer) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
+	gAliveMu.Lock()
+	status := healthpb.HealthCheckResponse_NOT_SERVING
+	if gAliveBool {
+		status = healthpb.HealthCheckResponse_SERVING
+	}
+	gAliveMu.Unlock()
+	return &healthpb.HealthCheckResponse{Status: status}, nil
+}
+
+func (s *healthServer) Watch(req *healthpb.HealthCheckRequest, ws healthpb.Health_WatchServer) error {
+	for {
+		gAliveMu.Lock()
+		wasAlive := gAliveBool
+		gAliveMu.Unlock()
+
+		status := healthpb.HealthCheckResponse_NOT_SERVING
+		if wasAlive {
+			status = healthpb.HealthCheckResponse_SERVING
+		}
+
+		if err := ws.Send(&healthpb.HealthCheckResponse{Status: status}); err != nil {
+			return err
+		}
+
+		if !wasAlive {
+			break
+		}
+
+		gAliveMu.Lock()
+		for gAliveBool == wasAlive {
+			gAliveCV.Wait()
+		}
+		gAliveMu.Unlock()
+	}
+	return nil
 }
 
 type webServerServer struct {

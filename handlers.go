@@ -34,13 +34,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/resolver"
 
-	"github.com/chronos-tachyon/roxy/common/baseresolver"
-	_ "github.com/chronos-tachyon/roxy/grpc/balancer/atcbalancer"
-	"github.com/chronos-tachyon/roxy/grpc/resolver/atcresolver"
-	"github.com/chronos-tachyon/roxy/grpc/resolver/etcdresolver"
-	"github.com/chronos-tachyon/roxy/grpc/resolver/zkresolver"
 	"github.com/chronos-tachyon/roxy/internal/balancedclient"
 	"github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -1606,19 +1602,20 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 		return nil, err
 	}
 
-	parsedTarget, err := baseresolver.ParseTargetString(cfg.Target)
+	parsedTarget := roxyresolver.ParseTargetString(cfg.Target)
+
+	res, err := roxyresolver.New(roxyresolver.Options{
+		Target:    parsedTarget,
+		IsTLS:     (tlsConfig != nil),
+		Context:   gRootContext,
+		Etcd:      impl.etcd,
+		ZK:        impl.zkconn,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	bc, err := balancedclient.New(balancedclient.Options{
-		Context:   gRootContext,
-		Target:    parsedTarget,
-		Etcd:      impl.etcd,
-		ZK:        impl.zkconn,
-		Dialer:    &gDialer,
-		TLSConfig: tlsConfig,
-	})
+	bc, err := balancedclient.New(res, &gDialer, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1631,24 +1628,24 @@ func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 		return nil, err
 	}
 
-	resolvers := make([]resolver.Builder, 0, 3)
-	resolvers = append(resolvers, atcresolver.NewBuilder(gRootContext, nil))
+	resolvers := make([]resolver.Builder, 3, 5)
+	resolvers[0] = roxyresolver.NewIPBuilder(nil, "")
+	resolvers[1] = roxyresolver.NewDNSBuilder(gRootContext, nil, "")
+	resolvers[2] = roxyresolver.NewATCBuilder(gRootContext, nil)
 	if impl.etcd != nil {
-		resolvers = append(resolvers, etcdresolver.NewBuilder(gRootContext, nil, impl.etcd, ""))
+		resolvers = append(resolvers, roxyresolver.NewEtcdBuilder(gRootContext, nil, impl.etcd, ""))
 	}
 	if impl.zkconn != nil {
-		resolvers = append(resolvers, zkresolver.NewBuilder(gRootContext, nil, impl.zkconn, ""))
+		resolvers = append(resolvers, roxyresolver.NewZKBuilder(gRootContext, nil, impl.zkconn, ""))
 	}
 
-	dialOpts := make([]grpc.DialOption, 1, 2)
+	dialOpts := make([]grpc.DialOption, 2)
 	if tlsConfig != nil {
 		dialOpts[0] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	} else {
 		dialOpts[0] = grpc.WithInsecure()
 	}
-	if len(resolvers) != 0 {
-		dialOpts = append(dialOpts, grpc.WithResolvers(resolvers...))
-	}
+	dialOpts[1] = grpc.WithResolvers(resolvers...)
 
 	cc, err := grpc.DialContext(gRootContext, cfg.Target, dialOpts...)
 	if err != nil {
