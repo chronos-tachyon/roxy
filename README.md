@@ -1,10 +1,11 @@
 # roxy
 
 [![Go](https://img.shields.io/github/go-mod/go-version/chronos-tachyon/roxy)](https://golang.org/)
+[![Latest Release](https://img.shields.io/github/v/release/chronos-tachyon/roxy?sort=semver)](https://github.com/chronos-tachyon/roxy/releases)
 [![License](https://img.shields.io/badge/license-Hippocratic%202.1-brightgreen)](https://firstdonoharm.dev/version/2/1/license/)
 [![Build Status](https://img.shields.io/github/workflow/status/chronos-tachyon/roxy/Go)](https://github.com/chronos-tachyon/roxy/actions/workflows/go.yml)
-[![Latest Release](https://img.shields.io/github/v/release/chronos-tachyon/roxy?sort=semver)](https://github.com/chronos-tachyon/roxy/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/chronostachyon/roxy)](https://hub.docker.com/r/chronostachyon/roxy)
+[![Go Report Card](https://goreportcard.com/badge/github.com/chronos-tachyon/roxy)](https://goreportcard.com/report/github.com/chronos-tachyon/roxy)
 
 **Roxy the Frontend Proxy**
 
