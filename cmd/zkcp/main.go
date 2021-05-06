@@ -1,77 +1,102 @@
 package main
 
 import (
-	"fmt"
 	"io/ioutil"
-	"os"
-	"strings"
-	"time"
 
 	"github.com/go-zookeeper/zk"
 	getopt "github.com/pborman/getopt/v2"
+	"github.com/rs/zerolog/log"
+
+	"github.com/chronos-tachyon/roxy/lib/mainutil"
 )
 
 var (
-	flagServers  string
-	flagUsername string
-	flagPassword string
+	flagZK      string = "127.0.0.1:2181"
+	flagReverse bool
 )
 
 func init() {
-	getopt.SetParameters("<src-local-path> <dst-zookeeper-path>")
-	getopt.FlagLong(&flagServers, "servers", 's', "comma-separated list of zookeeper servers")
-	getopt.FlagLong(&flagUsername, "username", 'u', "auth username")
-	getopt.FlagLong(&flagPassword, "password", 'p', "auth password")
+	getopt.SetParameters("<src> <dest>")
+	getopt.FlagLong(&flagZK, "zk", 'Z', "ZooKeeper client configuration")
+	getopt.FlagLong(&flagReverse, "reverse", 'r', "copy from ZooKeeper to filesystem, instead of filesystem to ZooKeeper")
 }
 
 func main() {
 	getopt.Parse()
 
-	if flagServers == "" {
-		fmt.Fprintf(os.Stderr, "fatal: missing required flag \"-s\" / \"--servers\"\n")
-		os.Exit(1)
+	mainutil.InitContext()
+	defer mainutil.CancelRootContext()
+	ctx := mainutil.RootContext()
+
+	mainutil.InitLogging()
+	defer mainutil.DoneLogging()
+
+	var zc mainutil.ZKConfig
+	err := zc.Parse(flagZK)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagZK).
+			Err(err).
+			Msg("--zk: failed to parse")
 	}
 
 	if getopt.NArgs() != 2 {
-		fmt.Fprintf(os.Stderr, "fatal: wrong number of positional arguments: expected 2, got %d\n", getopt.NArgs())
-		os.Exit(1)
+		log.Logger.Fatal().
+			Int("expected", 2).
+			Int("actual", getopt.NArgs()).
+			Msg("wrong number of positional arguments")
 	}
+	srcPath := getopt.Arg(0)
+	dstPath := getopt.Arg(1)
 
-	servers := strings.Split(flagServers, ",")
-	localPath := getopt.Arg(0)
-	zkPath := getopt.Arg(1)
-
-	data, err := ioutil.ReadFile(localPath)
+	zkconn, err := zc.Connect(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: failed to read local file %q: %v\n", localPath, err)
-		os.Exit(1)
-	}
-
-	zkconn, _, err := zk.Connect(servers, 30*time.Second)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: failed to connect: %v\n", err)
-		os.Exit(1)
+		log.Logger.Fatal().
+			Interface("config", zc).
+			Err(err).
+			Msg("--zk: failed to connect")
 	}
 	defer zkconn.Close()
 
-	if flagUsername != "" && flagPassword != "" {
-		scheme := "digest"
-		raw := []byte(flagUsername + ":" + flagPassword)
-		err = zkconn.AddAuth(scheme, raw)
+	if flagReverse {
+		data, _, err := zkconn.Get(srcPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fatal: failed to auth: %v\n", err)
-			os.Exit(1)
+			log.Logger.Fatal().
+				Str("path", srcPath).
+				Err(err).
+				Msg("failed to read ZooKeeper node")
+		}
+
+		err = ioutil.WriteFile(dstPath, data, 0666)
+		if err != nil {
+			log.Logger.Fatal().
+				Str("path", dstPath).
+				Err(err).
+				Msg("failed to write filesystem file")
+		}
+	} else {
+		data, err := ioutil.ReadFile(srcPath)
+		if err != nil {
+			log.Logger.Fatal().
+				Str("path", srcPath).
+				Err(err).
+				Msg("failed to read filesystem file")
+		}
+
+		_, err = zkconn.Create(dstPath, data, 0, zk.WorldACL(zk.PermAll))
+		if err == zk.ErrNodeExists {
+			_, err = zkconn.Set(dstPath, data, -1)
+		}
+		if err != nil {
+			log.Logger.Fatal().
+				Str("path", dstPath).
+				Err(err).
+				Msg("failed to Create or Set ZooKeeper node")
 		}
 	}
 
-	_, err = zkconn.Create(zkPath, data, 0, zk.WorldACL(zk.PermAll))
-	if err == zk.ErrNodeExists {
-		_, err = zkconn.Set(zkPath, data, -1)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: failed to create/set zookeeper path %q: %v\n", zkPath, err)
-		os.Exit(1)
-	}
-
-	fmt.Fprintf(os.Stderr, "%q => %q: OK\n", localPath, zkPath)
+	log.Logger.Info().
+		Str("source", srcPath).
+		Str("destination", dstPath).
+		Msg("OK")
 }

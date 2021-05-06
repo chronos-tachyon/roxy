@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,13 +14,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/go-zookeeper/zk"
 	multierror "github.com/hashicorp/go-multierror"
 	v3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
+	"google.golang.org/grpc"
+
+	"github.com/chronos-tachyon/roxy/lib/mainutil"
+	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 )
 
 var (
@@ -29,12 +31,14 @@ var (
 )
 
 type Impl struct {
+	ctx        context.Context
 	configPath string
 	cfg        *Config
 	manager    *autocert.Manager
 	mimeRules  []*MimeRule
 	etcd       *v3.Client
 	zkconn     *zk.Conn
+	atc        *grpc.ClientConn
 	storage    StorageEngine
 	hosts      []*regexp.Regexp
 	pages      map[string]pageData
@@ -50,8 +54,13 @@ type pageData struct {
 	contentEnc  string
 }
 
-func LoadImpl(configPath string) (*Impl, error) {
+func LoadImpl(ctx context.Context, configPath string) (*Impl, error) {
+	if ctx == nil {
+		panic(errors.New("context.Context is nil"))
+	}
+
 	impl := &Impl{
+		ctx:        ctx,
 		configPath: configPath,
 		cfg:        new(Config),
 	}
@@ -84,12 +93,17 @@ func LoadImpl(configPath string) (*Impl, error) {
 		return nil, err
 	}
 
+	err = impl.loadZK()
+	if err != nil {
+		return nil, err
+	}
+
 	err = impl.loadEtcd()
 	if err != nil {
 		return nil, err
 	}
 
-	err = impl.loadZK()
+	err = impl.loadATC()
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +139,7 @@ func LoadImpl(configPath string) (*Impl, error) {
 func (impl *Impl) loadManager() error {
 	acmeDirectoryURL := autocert.DefaultACMEDirectory
 	acmeRegistrationEmail := ""
-	acmeUserAgent := "roxy/" + Version()
+	acmeUserAgent := "roxy/" + mainutil.Version()
 
 	if impl.cfg.Global != nil {
 		if impl.cfg.Global.ACMEDirectoryURL != "" {
@@ -176,7 +190,7 @@ func (impl *Impl) loadMimeRules() error {
 			}
 		}
 	} else {
-		mimeFile, err := processPath(impl.cfg.Global.MimeFile)
+		mimeFile, err := mainutil.ProcessPath(impl.cfg.Global.MimeFile)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
@@ -220,83 +234,15 @@ func (impl *Impl) loadMimeRules() error {
 	return nil
 }
 
-func (impl *Impl) loadEtcd() error {
-	if impl.cfg.Global == nil || impl.cfg.Global.Etcd == nil {
-		return nil
-	}
-
-	cfg := impl.cfg.Global.Etcd
-
-	if len(cfg.Endpoints) == 0 {
-		return ConfigLoadError{
-			Path:    impl.configPath,
-			Section: "global.etcd.endpoints",
-			Err:     errors.New("missing required field"),
-		}
-	}
-
-	dialTimeout := cfg.DialTimeout
-	if dialTimeout == 0 {
-		dialTimeout = 5 * time.Second
-	}
-
-	tlsConfig, err := CompileTLSClientConfig(cfg.TLS)
-	if err != nil {
-		return ConfigLoadError{
-			Path:    impl.configPath,
-			Section: "global.etcd.tls",
-			Err:     err,
-		}
-	}
-
-	impl.etcd, err = v3.New(v3.Config{
-		Endpoints:            cfg.Endpoints,
-		AutoSyncInterval:     1 * time.Minute,
-		DialTimeout:          dialTimeout,
-		DialKeepAliveTime:    cfg.KeepAliveTime,
-		DialKeepAliveTimeout: cfg.KeepAliveTimeout,
-		Username:             cfg.Username,
-		Password:             cfg.Password,
-		TLS:                  tlsConfig,
-		LogConfig:            NewDummyZapConfig(),
-		Context:              gRootContext,
-	})
-	if err != nil {
-		return ConfigLoadError{
-			Path:    impl.configPath,
-			Section: "global.etcd",
-			Err:     err,
-		}
-	}
-
-	return nil
-}
-
 func (impl *Impl) loadZK() error {
-	if impl.cfg.Global == nil || impl.cfg.Global.ZK == nil {
+	if impl.cfg.Global == nil || !impl.cfg.Global.ZK.Enabled {
 		return nil
 	}
 
 	cfg := impl.cfg.Global.ZK
 
-	if len(cfg.Servers) == 0 {
-		return ConfigLoadError{
-			Path:    impl.configPath,
-			Section: "global.zookeeper.servers",
-			Err:     errors.New("missing required field"),
-		}
-	}
-
-	sessTimeout := cfg.SessionTimeout
-	if sessTimeout == 0 {
-		sessTimeout = 30 * time.Second
-	}
-
 	var err error
-	impl.zkconn, _, err = zk.Connect(
-		cfg.Servers,
-		sessTimeout,
-		zk.WithLogger(ZKLoggerBridge{}))
+	impl.zkconn, err = cfg.Connect(impl.ctx)
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
@@ -305,48 +251,51 @@ func (impl *Impl) loadZK() error {
 		}
 	}
 
-	if cfg.Auth != nil {
-		scheme := cfg.Auth.Scheme
-		if scheme == "" {
-			return ConfigLoadError{
-				Path:    impl.configPath,
-				Section: "global.zookeeper.auth.scheme",
-				Err:     errors.New("missing required field"),
-			}
-		}
+	impl.ctx = roxyresolver.WithZKConn(impl.ctx, impl.zkconn)
 
-		var raw []byte
-		switch {
-		case cfg.Auth.Raw != "":
-			raw, err = base64.StdEncoding.DecodeString(cfg.Auth.Raw)
-			if err != nil {
-				return ConfigLoadError{
-					Path:    impl.configPath,
-					Section: "global.zookeeper.auth.raw",
-					Err:     err,
-				}
-			}
+	return nil
+}
 
-		case cfg.Auth.Username != "":
-			raw = []byte(cfg.Auth.Username + ":" + cfg.Auth.Password)
+func (impl *Impl) loadEtcd() error {
+	if impl.cfg.Global == nil || !impl.cfg.Global.Etcd.Enabled {
+		return nil
+	}
 
-		default:
-			return ConfigLoadError{
-				Path:    impl.configPath,
-				Section: "global.zookeeper.auth",
-				Err:     fmt.Errorf("missing required fields \"raw\" or \"username\" + \"password\""),
-			}
-		}
+	cfg := impl.cfg.Global.Etcd
 
-		err = impl.zkconn.AddAuth(scheme, raw)
-		if err != nil {
-			return ConfigLoadError{
-				Path:    impl.configPath,
-				Section: "global.zookeeper.auth",
-				Err:     fmt.Errorf("AddAuth %q, %s: %w", scheme, raw, err),
-			}
+	var err error
+	impl.etcd, err = cfg.Connect(impl.ctx)
+	if err != nil {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "global.etcd",
+			Err:     err,
 		}
 	}
+
+	impl.ctx = roxyresolver.WithEtcdV3Client(impl.ctx, impl.etcd)
+
+	return nil
+}
+
+func (impl *Impl) loadATC() error {
+	if impl.cfg.Global == nil || !impl.cfg.Global.ATC.Enabled {
+		return nil
+	}
+
+	cfg := impl.cfg.Global.ATC
+
+	var err error
+	impl.atc, err = cfg.Dial(impl.ctx)
+	if err != nil {
+		return ConfigLoadError{
+			Path:    impl.configPath,
+			Section: "global.zookeeper",
+			Err:     err,
+		}
+	}
+
+	impl.ctx = roxyresolver.WithATCClient(impl.ctx, impl.atc)
 
 	return nil
 }
@@ -397,7 +346,7 @@ func (impl *Impl) loadPages() error {
 			}
 		}
 
-		abs, err := processPath(rootDir)
+		abs, err := mainutil.ProcessPath(rootDir)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,

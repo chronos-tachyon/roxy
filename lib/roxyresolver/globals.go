@@ -16,6 +16,7 @@ const (
 
 	nullString = "null"
 
+	passthroughScheme  = "passthrough"
 	unixScheme         = "unix"
 	unixAbstractScheme = "unix-abstract"
 	ipScheme           = "ip"
@@ -30,7 +31,7 @@ const (
 	dnsPort   = "53"
 	httpPort  = "80"
 	httpsPort = "443"
-	atcPort   = "2987"
+	atcPort   = "2987" //nolint:varcheck,deadcode
 )
 
 var (
@@ -41,9 +42,8 @@ var (
 
 	reScheme    = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:[+-][0-9A-Za-z]+)*$`)
 	reNamedPort = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:[._+-][0-9A-Za-z]+)*$`)
-	reLBHost    = regexp.MustCompile(`^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*\.?$`)
-	reLBPort    = regexp.MustCompile(`^(?:[0-9]+|[A-Za-z][0-9A-Za-z]*(?:[_-][0-9A-Za-z]+)*)$`)
 	reLBName    = regexp.MustCompile(`^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$`)
+	reLBLoc     = regexp.MustCompile(`^.*$`)
 
 	boolMap = map[string]bool{
 		"0": false,

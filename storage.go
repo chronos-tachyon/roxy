@@ -10,6 +10,8 @@ import (
 	"github.com/go-zookeeper/zk"
 	v3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/crypto/acme/autocert"
+
+	"github.com/chronos-tachyon/roxy/lib/mainutil"
 )
 
 type StorageEngine interface {
@@ -251,7 +253,7 @@ func init() {
 			}
 		}
 
-		abs, err := processPath(cfg.Path)
+		abs, err := mainutil.ProcessPath(cfg.Path)
 		if err != nil {
 			return nil, StorageEngineCreateError{
 				Engine: "fs",

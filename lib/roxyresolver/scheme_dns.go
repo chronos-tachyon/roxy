@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"net/url"
-	"strings"
 	"time"
 
 	grpcresolver "google.golang.org/grpc/resolver"
@@ -15,12 +13,16 @@ import (
 
 func NewDNSBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
 	if ctx == nil {
-		panic(errors.New("ctx is nil"))
+		panic(errors.New("context.Context is nil"))
 	}
 	return dnsBuilder{ctx, rng, serviceConfigJSON}
 }
 
 func NewDNSResolver(opts Options) (Resolver, error) {
+	if opts.Context == nil {
+		panic(errors.New("context.Context is nil"))
+	}
+
 	defaultPort := httpPort
 	if opts.IsTLS {
 		defaultPort = httpsPort
@@ -48,41 +50,16 @@ func NewDNSResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseDNSTarget(target Target, defaultPort string) (res *net.Resolver, host string, port string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
-	res, err = parseNetResolver(target.Authority)
+func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host string, port string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
+	res, err = parseNetResolver(rt.Authority)
 	if err != nil {
-		err = BadAuthorityError{Authority: target.Authority, Err: err}
+		err = BadAuthorityError{Authority: rt.Authority, Err: err}
 		return
 	}
 
-	ep := target.Endpoint
-	if ep == "" {
-		err = BadEndpointError{Endpoint: target.Endpoint, Err: ErrExpectNonEmpty}
-		return
-	}
-
-	var (
-		qs    string
-		hasQS bool
-	)
-	if i := strings.IndexByte(ep, '?'); i >= 0 {
-		ep, qs, hasQS = ep[:i], ep[i+1:], true
-	}
-
-	if ep == "" {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err:      BadPathError{Path: ep, Err: ErrExpectNonEmpty},
-		}
-		return
-	}
-
-	hostPort, err := url.PathUnescape(ep)
-	if err != nil {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err:      BadPathError{Path: ep, Err: err},
-		}
+	hostPort := rt.Endpoint
+	if hostPort == "" {
+		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
 		return
 	}
 
@@ -94,101 +71,53 @@ func ParseDNSTarget(target Target, defaultPort string) (res *net.Resolver, host 
 		}
 		if err != nil {
 			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadPathError{
-					Path: ep,
-					Err:  BadHostPortError{HostPort: hostPort, Err: err},
-				},
+				Endpoint: rt.Endpoint,
+				Err:      BadHostPortError{HostPort: hostPort, Err: err},
 			}
 			return
 		}
 	}
 	if host == "" {
 		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err: BadPathError{
-				Path: ep,
-				Err:  BadHostError{Host: host, Err: err},
-			},
+			Endpoint: rt.Endpoint,
+			Err:      BadHostError{Host: host, Err: err},
 		}
 		return
 	}
 
-	var query url.Values
-	if hasQS {
-		query, err = url.ParseQuery(qs)
-		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err:      BadQueryStringError{QueryString: qs, Err: err},
-			}
-			return
-		}
-	}
-
-	if str := query.Get("balancer"); str != "" {
+	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadQueryStringError{
-					QueryString: qs,
-					Err: BadQueryParamError{
-						Name:  "balancer",
-						Value: str,
-						Err:   err,
-					},
-				},
-			}
+			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
 
-	if str := query.Get("pollInterval"); str != "" {
+	if str := rt.Query.Get("pollInterval"); str != "" {
 		pollInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadQueryStringError{
-					QueryString: qs,
-					Err: BadQueryParamError{
-						Name:  "pollInterval",
-						Value: str,
-						Err:   err,
-					},
-				},
-			}
+			err = BadQueryParamError{Name: "pollInterval", Value: str, Err: err}
 			return
 		}
 	}
 
-	if str := query.Get("cooldownInterval"); str != "" {
+	if str := rt.Query.Get("cooldownInterval"); str != "" {
 		cdInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadQueryStringError{
-					QueryString: qs,
-					Err: BadQueryParamError{
-						Name:  "cooldownInterval",
-						Value: str,
-						Err:   err,
-					},
-				},
-			}
+			err = BadQueryParamError{Name: "cooldownInterval", Value: str, Err: err}
 			return
 		}
 	}
 
-	serverName = query.Get("serverName")
+	serverName = rt.Query.Get("serverName")
+	if serverName == "" {
+		serverName = host
+	}
 
 	return
 }
 
 func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, port string, serverName string) PollingResolveFunc {
-	if serverName == "" {
-		serverName = host
-	}
 	return func() ([]Resolved, error) {
 		// Resolve the port number.
 		portNum, err := res.LookupPort(ctx, "tcp", port)
@@ -241,7 +170,12 @@ func (b dnsBuilder) Scheme() string {
 }
 
 func (b dnsBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	res, host, port, _, pollInterval, cdInterval, serverName, err := ParseDNSTarget(target, httpsPort)
+	rt, err := RoxyTargetFromTarget(target)
+	if err != nil {
+		return nil, err
+	}
+
+	res, host, port, _, pollInterval, cdInterval, serverName, err := ParseDNSTarget(rt, httpsPort)
 	if err != nil {
 		return nil, err
 	}

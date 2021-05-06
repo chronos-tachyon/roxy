@@ -20,7 +20,7 @@ message KeyValue {
 }
 
 service AirTrafficControl {
-  rpc Report (stream ReportRequest) returns (ReportResponse) {}
+  rpc Report (stream ReportRequest) returns (stream ReportResponse) {}
   rpc Balance (stream BalanceRequest) returns (stream BalanceResponse) {}
 }
 

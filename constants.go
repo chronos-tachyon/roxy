@@ -1,6 +1,8 @@
 package main
 
-import _ "embed"
+import (
+	_ "embed"
+)
 
 const (
 	xattrMimeType  = "user.mimetype"
@@ -24,14 +26,14 @@ const (
 	defaultMaxComputeDigestSize = 4 << 20  // 4 MiB
 )
 
-// go:embed "templates/index.html"
+//go:embed templates/index.html
 var defaultIndexPageTemplate string
 
-// go:embed "templates/redir.html"
+//go:embed templates/redir.html
 var defaultRedirPageTemplate string
 
-// go:embed "templates/error.html"
+//go:embed templates/error.html
 var defaultErrorPageTemplate string
 
-// go:embed "mime.json.example"
+//go:embed mime.json.example
 var defaultMimeFileJSON string

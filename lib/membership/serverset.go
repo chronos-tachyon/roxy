@@ -15,6 +15,32 @@ type ServerSet struct {
 	Metadata            map[string]string             `json:"metadata,omitempty"`
 }
 
+func (ss *ServerSet) AsGRPC(namedPort string) *GRPC {
+	out := new(GRPC)
+	if ss.Status != StatusAlive {
+		out.Op = GRPCOpDelete
+		return out
+	}
+
+	tcpAddr := ss.TCPAddrForPort(namedPort)
+	if tcpAddr == nil {
+		panic(fmt.Errorf("unknown named port %q", namedPort))
+	}
+
+	metadata := make(map[string]interface{}, 2+len(ss.Metadata))
+	for key, value := range ss.Metadata {
+		metadata[key] = value
+	}
+	if ss.ShardID != nil {
+		metadata["ShardID"] = *ss.ShardID
+	}
+
+	out.Op = GRPCOpAdd
+	out.Addr = tcpAddr.String()
+	out.Metadata = metadata
+	return out
+}
+
 func (ss *ServerSet) AsJSON() []byte {
 	raw, err := json.Marshal(ss)
 	if err != nil {

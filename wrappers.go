@@ -91,7 +91,7 @@ func WrapWriter(impl *Impl, w http.ResponseWriter, r *http.Request) WrappedWrite
 	type fancyInterface interface {
 		http.ResponseWriter
 		http.Flusher
-		http.CloseNotifier // nolint:staticcheck
+		http.CloseNotifier //nolint:staticcheck
 		http.Hijacker
 		io.ReaderFrom
 	}
@@ -312,7 +312,7 @@ type fancyWrappedWriter struct {
 	basicWrappedWriter
 }
 
-// nolint:staticcheck
+//nolint:staticcheck
 func (fw *fancyWrappedWriter) CloseNotify() <-chan bool {
 	return fw.basicWrappedWriter.next.(http.CloseNotifier).CloseNotify()
 }
@@ -335,7 +335,7 @@ func (fw *fancyWrappedWriter) ReadFrom(r io.Reader) (int64, error) {
 
 var (
 	_ WrappedWriter      = (*fancyWrappedWriter)(nil)
-	_ http.CloseNotifier = (*fancyWrappedWriter)(nil) // nolint:staticcheck
+	_ http.CloseNotifier = (*fancyWrappedWriter)(nil) //nolint:staticcheck
 	_ http.Hijacker      = (*fancyWrappedWriter)(nil)
 	_ http.Flusher       = (*fancyWrappedWriter)(nil)
 	_ io.ReaderFrom      = (*fancyWrappedWriter)(nil)

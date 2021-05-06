@@ -31,11 +31,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/balancedclient"
 	"github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
@@ -296,7 +295,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	idStr := id.String()
 	r.Header.Set("xid", idStr)
 	w.Header().Set("xid", idStr)
-	w.Header().Set("server", "roxy/"+Version())
+	w.Header().Set("server", "roxy/"+mainutil.Version())
 	w.Header().Set("content-security-policy", "default-src 'self';")
 	w.Header().Set("strict-transport-security", "max-age=86400")
 	w.Header().Set("x-content-type-options", "nosniff")
@@ -1585,7 +1584,7 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 		return nil, fmt.Errorf("missing required field \"path\"")
 	}
 
-	abs, err := processPath(cfg.Path)
+	abs, err := mainutil.ProcessPath(cfg.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -1596,19 +1595,21 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 }
 
 func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
-	tlsConfig, err := CompileTLSClientConfig(cfg.TLS)
+	var rt roxyresolver.RoxyTarget
+	err := rt.Parse(cfg.Target)
 	if err != nil {
 		return nil, err
 	}
 
-	parsedTarget := roxyresolver.ParseTargetString(cfg.Target)
+	tlsConfig, err := cfg.TLS.MakeTLS(key)
+	if err != nil {
+		return nil, err
+	}
 
 	res, err := roxyresolver.New(roxyresolver.Options{
-		Target:  parsedTarget,
+		Context: impl.ctx,
+		Target:  rt,
 		IsTLS:   (tlsConfig != nil),
-		Context: gRootContext,
-		Etcd:    impl.etcd,
-		ZK:      impl.zkconn,
 	})
 	if err != nil {
 		return nil, err
@@ -1622,31 +1623,18 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 }
 
 func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
-	tlsConfig, err := CompileTLSClientConfig(cfg.TLS)
+	var rt roxyresolver.RoxyTarget
+	err := rt.Parse(cfg.Target)
 	if err != nil {
 		return nil, err
 	}
 
-	resolvers := make([]resolver.Builder, 3, 5)
-	resolvers[0] = roxyresolver.NewIPBuilder(nil, "")
-	resolvers[1] = roxyresolver.NewDNSBuilder(gRootContext, nil, "")
-	resolvers[2] = roxyresolver.NewATCBuilder(gRootContext, nil)
-	if impl.etcd != nil {
-		resolvers = append(resolvers, roxyresolver.NewEtcdBuilder(gRootContext, nil, impl.etcd, ""))
+	gcc := mainutil.GRPCClientConfig{
+		Enabled: true,
+		Target:  rt,
+		TLS:     cfg.TLS,
 	}
-	if impl.zkconn != nil {
-		resolvers = append(resolvers, roxyresolver.NewZKBuilder(gRootContext, nil, impl.zkconn, ""))
-	}
-
-	dialOpts := make([]grpc.DialOption, 2)
-	if tlsConfig != nil {
-		dialOpts[0] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
-	} else {
-		dialOpts[0] = grpc.WithInsecure()
-	}
-	dialOpts[1] = grpc.WithResolvers(resolvers...)
-
-	cc, err := grpc.DialContext(gRootContext, cfg.Target, dialOpts...)
+	cc, err := gcc.Dial(impl.ctx)
 	if err != nil {
 		return nil, err
 	}

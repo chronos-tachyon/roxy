@@ -32,7 +32,7 @@ DELETE_ON_EXIT=( "$SRCDIR" )
 trap 'sudo rm -rf "${DELETE_ON_EXIT[@]}"' EXIT
 
 cp -a ./* "${SRCDIR}/"
-echo "$FULL_VERSION" > "${SRCDIR}/version.txt"
+echo "$FULL_VERSION" > "${SRCDIR}/lib/mainutil/version.txt"
 cd "$SRCDIR"
 
 build_for_os_arch() {
@@ -47,6 +47,7 @@ build_for_os_arch() {
   DELETE_ON_EXIT=( "${DELETE_ON_EXIT[@]}" "$BUILDDIR" )
 
   export GOPATH="${BUILDDIR}/opt/roxy"
+  export CGO_ENABLED="0"
 
   mkdir -p \
     "${BUILDDIR}/DEBIAN" \
@@ -56,6 +57,7 @@ build_for_os_arch() {
     "${BUILDDIR}/etc/systemd/system" \
     "${BUILDDIR}/opt/roxy/bin" \
     "${BUILDDIR}/opt/roxy/share/misc" \
+    "${BUILDDIR}/opt/roxy/share/templates" \
     "${BUILDDIR}/var/opt/roxy/lib/acme" \
     "${BUILDDIR}/var/opt/roxy/log"
 
@@ -69,6 +71,9 @@ build_for_os_arch() {
   chmod -R u+w "${BUILDDIR}/opt/roxy/pkg"
   rm -rf "${BUILDDIR}/opt/roxy/pkg"
   echo '> cp (additional files) .../etc/opt/roxy/'
+  cp templates/index.html "${BUILDDIR}/opt/roxy/share/templates/index.html"
+  cp templates/redir.html "${BUILDDIR}/opt/roxy/share/templates/redir.html"
+  cp templates/error.html "${BUILDDIR}/opt/roxy/share/templates/error.html"
   cp config.json.example "${BUILDDIR}/opt/roxy/share/misc/config.json.example"
   cp config.json.example "${BUILDDIR}/etc/opt/roxy/config.json.example"
   cp config.json.example "${BUILDDIR}/etc/opt/roxy/config.json"

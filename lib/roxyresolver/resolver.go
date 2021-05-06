@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"strings"
 
-	"github.com/go-zookeeper/zk"
-	v3 "go.etcd.io/etcd/client/v3"
 	grpcresolver "google.golang.org/grpc/resolver"
 )
 
@@ -47,25 +44,20 @@ type Resolver interface {
 }
 
 type Options struct {
-	Target  Target
+	Target  RoxyTarget
 	IsTLS   bool
 	Context context.Context
 	Random  *rand.Rand
-	Etcd    *v3.Client
-	ZK      *zk.Conn
 }
 
 func New(opts Options) (Resolver, error) {
-	scheme := strings.ToLower(opts.Target.Scheme)
-	switch scheme {
+	switch opts.Target.Scheme {
 	case unixScheme:
 		fallthrough
 	case unixAbstractScheme:
 		return NewUnixResolver(opts)
 	case ipScheme:
 		return NewIPResolver(opts)
-	case "":
-		fallthrough
 	case dnsScheme:
 		return NewDNSResolver(opts)
 	case srvScheme:

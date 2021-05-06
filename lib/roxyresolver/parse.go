@@ -8,10 +8,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/membership"
 )
 
-func ParseBool(str string, defaultValue bool) (bool, error) {
-	if str == "" {
-		return defaultValue, nil
-	}
+func ParseBool(str string) (bool, error) {
 	if value, found := boolMap[str]; found {
 		return value, nil
 	}
@@ -50,7 +47,7 @@ func ParseTargetString(str string) Target {
 	return target
 }
 
-func ParseServerSetData(portName string, pathKey string, bytes []byte) Event {
+func ParseServerSetData(portName string, serverName string, pathKey string, bytes []byte) Event {
 	ss := new(membership.ServerSet)
 	if err := ss.Parse(bytes); err != nil {
 		err = fmt.Errorf("%s: %w", pathKey, err)
@@ -104,11 +101,17 @@ func ParseServerSetData(portName string, pathKey string, bytes []byte) Event {
 		}
 	}
 
-	serverName := ss.Metadata["ServerName"]
+	myServerName := ss.Metadata["ServerName"]
+	if myServerName == "" {
+		myServerName = serverName
+	}
+	if myServerName == "" {
+		myServerName = tcpAddr.IP.String()
+	}
 
 	resAddr := Address{
 		Addr:       tcpAddr.String(),
-		ServerName: serverName,
+		ServerName: myServerName,
 	}
 	resAddr = WithServerSet(resAddr, ss)
 
@@ -117,11 +120,21 @@ func ParseServerSetData(portName string, pathKey string, bytes []byte) Event {
 		Key:  pathKey,
 		Data: Resolved{
 			Unique:     pathKey,
-			ServerName: serverName,
+			ServerName: myServerName,
 			ShardID:    shardID,
 			HasShardID: hasShardID,
 			Addr:       tcpAddr,
 			Address:    resAddr,
 		},
 	}
+}
+
+func ValidateServerSetPort(ssPort string) error {
+	if ssPort == "" {
+		return BadPortError{Port: ssPort, Err: ErrExpectNonEmpty}
+	}
+	if !reNamedPort.MatchString(ssPort) {
+		return BadPortError{Port: ssPort, Err: ErrFailedToMatch}
+	}
+	return nil
 }

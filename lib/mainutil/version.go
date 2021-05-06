@@ -1,11 +1,11 @@
-package main
+package mainutil
 
 import (
 	_ "embed"
 	"strings"
 )
 
-//go:embed "version.txt"
+//go:embed version.txt
 var versionString string
 
 func Version() string {

@@ -14,6 +14,8 @@ var (
 	ErrExpectEmptyOrLocalhost = errors.New("expected empty string or \"localhost\"")
 	ErrExpectNonEmpty         = errors.New("expected non-empty string")
 	ErrExpectOneSlash         = errors.New("expected one '/', found 2 or more")
+	ErrExpectLeadingSlash     = errors.New("expected path to start with '/'")
+	ErrExpectTrailingSlash    = errors.New("expected path to end with '/'")
 	ErrExpectNoEndSlash       = errors.New("did not expect path to end with '/'")
 	ErrExpectNoDoubleSlash    = errors.New("did not expect path to contain '//'")
 	ErrExpectNoDot            = errors.New("did not expect path to contain '/./'")
@@ -207,22 +209,41 @@ var _ error = BadPortError{}
 
 // }}}
 
-// type BadNameError {{{
+// type BadServiceNameError {{{
 
-type BadNameError struct {
-	Name string
-	Err  error
+type BadServiceNameError struct {
+	ServiceName string
+	Err         error
 }
 
-func (err BadNameError) Error() string {
-	return fmt.Sprintf("invalid load balancer target name %q: %v", err.Name, err.Err)
+func (err BadServiceNameError) Error() string {
+	return fmt.Sprintf("invalid load balancer target name %q: %v", err.ServiceName, err.Err)
 }
 
-func (err BadNameError) Unwrap() error {
+func (err BadServiceNameError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadNameError{}
+var _ error = BadServiceNameError{}
+
+// }}}
+
+// type BadLocationError {{{
+
+type BadLocationError struct {
+	Location string
+	Err      error
+}
+
+func (err BadLocationError) Error() string {
+	return fmt.Sprintf("invalid load balancer target name %q: %v", err.Location, err.Err)
+}
+
+func (err BadLocationError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = BadLocationError{}
 
 // }}}
 

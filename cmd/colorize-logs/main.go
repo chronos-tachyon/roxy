@@ -53,7 +53,7 @@ func main() {
 		inputFile, err = os.Open(inputFileName)
 		if err != nil {
 			log.Logger.Fatal().
-				Str("input", inputFileName).
+				Str("path", inputFileName).
 				Err(err).
 				Msg("failed to open input file")
 		}
@@ -142,6 +142,7 @@ func main() {
 					counter = 0
 					if e := tryReopen(); e != nil {
 						log.Logger.Warn().
+							Str("path", inputFileName).
 							Err(err).
 							Msg("failed to re-open input file")
 					}

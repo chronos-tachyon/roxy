@@ -11,9 +11,9 @@ RUN set -euo pipefail; \
     umask 022; \
     export GOPATH=/go GOOS=linux GOARCH=amd64 CGO_ENABLED=0; \
     if [ "${version}" = "unset" ]; then \
-      cat .version > version.txt; \
+      cat .version > lib/mainutil/version.txt; \
     else \
-      echo "${version}" > version.txt; \
+      echo "${version}" > lib/mainutil/version.txt; \
     fi; \
     go get -d ./...; \
     go install ./...; \
@@ -22,7 +22,8 @@ RUN set -euo pipefail; \
     setcap cap_net_bind_service=+ep /go/bin/roxy; \
     addgroup -S roxy -g 400; \
     adduser -S roxy -u 400 -G roxy -h /var/opt/roxy/lib -H -D; \
-    mkdir -p /etc/opt/roxy /opt/roxy/share/misc /var/opt/roxy/lib/acme /var/opt/roxy/log /srv/www; \
+    mkdir -p /etc/opt/roxy /opt/roxy/share/misc /opt/roxy/share/templates /var/opt/roxy/lib/acme /var/opt/roxy/log /srv/www; \
+    cp /build/templates/* /opt/roxy/share/templates/; \
     cp /build/config.json.example /opt/roxy/share/misc/config.json.example; \
     cp /build/config.json.example /etc/opt/roxy/config.json.example; \
     cp /build/config.json.example /etc/opt/roxy/config.json; \

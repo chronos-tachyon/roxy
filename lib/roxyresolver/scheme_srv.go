@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"net/url"
 	"strings"
 	"time"
 
@@ -15,12 +14,16 @@ import (
 
 func NewSRVBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
 	if ctx == nil {
-		panic(errors.New("ctx is nil"))
+		panic(errors.New("context.Context is nil"))
 	}
 	return srvBuilder{ctx, rng, serviceConfigJSON}
 }
 
 func NewSRVResolver(opts Options) (Resolver, error) {
+	if opts.Context == nil {
+		panic(errors.New("context.Context is nil"))
+	}
+
 	res, name, service, balancer, pollInterval, cdInterval, serverName, err := ParseSRVTarget(opts.Target)
 	if err != nil {
 		return nil, err
@@ -36,142 +39,63 @@ func NewSRVResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseSRVTarget(target Target) (res *net.Resolver, name string, service string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
-	res, err = parseNetResolver(target.Authority)
+func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
+	res, err = parseNetResolver(rt.Authority)
 	if err != nil {
-		err = BadAuthorityError{Authority: target.Authority, Err: err}
+		err = BadAuthorityError{Authority: rt.Authority, Err: err}
 		return
 	}
 
-	ep := target.Endpoint
-	if ep == "" {
-		err = BadEndpointError{Endpoint: target.Endpoint, Err: ErrExpectNonEmpty}
+	nameAndService := rt.Endpoint
+	if nameAndService == "" {
+		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
 		return
 	}
 
-	var (
-		qs    string
-		hasQS bool
-	)
-	if i := strings.IndexByte(ep, '?'); i >= 0 {
-		ep, qs, hasQS = ep[:i], ep[i+1:], true
-	}
-
-	if ep == "" {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err:      BadPathError{Path: ep, Err: ErrExpectNonEmpty},
-		}
-		return
-	}
-
-	unescaped, err := url.PathUnescape(ep)
-	if err != nil {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err:      BadPathError{Path: ep, Err: err},
-		}
-		return
-	}
-
-	i := strings.IndexByte(unescaped, '/')
+	i := strings.IndexByte(nameAndService, '/')
 	if i >= 0 {
-		name, service = unescaped[:i], unescaped[i+1:]
+		name, service = nameAndService[:i], nameAndService[i+1:]
 	} else {
-		name, service = unescaped, ""
+		name, service = nameAndService, ""
 	}
 	if j := strings.IndexByte(service, '/'); j >= 0 {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err: BadPathError{
-				Path: unescaped,
-				Err:  ErrExpectOneSlash,
-			},
-		}
+		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectOneSlash}
 		return
 	}
 
 	if name == "" {
 		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err: BadPathError{
-				Path: unescaped,
-				Err: BadHostError{
-					Host: name,
-					Err:  ErrExpectNonEmpty,
-				},
-			},
+			Endpoint: rt.Endpoint,
+			Err:      BadHostError{Host: name, Err: ErrExpectNonEmpty},
 		}
 		return
 	}
 
-	var query url.Values
-	if hasQS {
-		query, err = url.ParseQuery(qs)
-		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err:      BadQueryStringError{QueryString: qs, Err: err},
-			}
-			return
-		}
-	}
-
-	if str := query.Get("balancer"); str != "" {
+	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadQueryStringError{
-					QueryString: qs,
-					Err: BadQueryParamError{
-						Name:  "balancer",
-						Value: str,
-						Err:   err,
-					},
-				},
-			}
+			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
 
-	if str := query.Get("pollInterval"); str != "" {
+	if str := rt.Query.Get("pollInterval"); str != "" {
 		pollInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadQueryStringError{
-					QueryString: qs,
-					Err: BadQueryParamError{
-						Name:  "pollInterval",
-						Value: str,
-						Err:   err,
-					},
-				},
-			}
+			err = BadQueryParamError{Name: "pollInterval", Value: str, Err: err}
 			return
 		}
 	}
 
-	if str := query.Get("cooldownInterval"); str != "" {
+	if str := rt.Query.Get("cooldownInterval"); str != "" {
 		cdInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadQueryStringError{
-					QueryString: qs,
-					Err: BadQueryParamError{
-						Name:  "cooldownInterval",
-						Value: str,
-						Err:   err,
-					},
-				},
-			}
+			err = BadQueryParamError{Name: "cooldownInterval", Value: str, Err: err}
 			return
 		}
 	}
 
-	serverName = query.Get("serverName")
+	serverName = rt.Query.Get("serverName")
 
 	return
 }
@@ -252,7 +176,12 @@ func (b srvBuilder) Scheme() string {
 }
 
 func (b srvBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	res, name, service, _, pollInterval, cdInterval, serverName, err := ParseSRVTarget(target)
+	rt, err := RoxyTargetFromTarget(target)
+	if err != nil {
+		return nil, err
+	}
+
+	res, name, service, _, pollInterval, cdInterval, serverName, err := ParseSRVTarget(rt)
 	if err != nil {
 		return nil, err
 	}

@@ -1,10 +1,11 @@
-package main
+package mainutil
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	stdlog "log"
 	"net/url"
 	"os"
 	"sync"
@@ -12,14 +13,117 @@ import (
 
 	"github.com/go-zookeeper/zk"
 	multierror "github.com/hashicorp/go-multierror"
+	getopt "github.com/pborman/getopt/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/journald"
 	"github.com/rs/zerolog/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 var unixZero = time.Unix(0, 0)
+
+var gLogger *RotatingLogWriter
+
+var (
+	flagVersion     bool
+	flagDebug       bool
+	flagTrace       bool
+	flagLogStderr   bool
+	flagLogJournald bool
+	flagLogFile     string
+)
+
+func init() {
+	getopt.FlagLong(&flagVersion, "version", 'V', "print version and exit")
+	getopt.FlagLong(&flagDebug, "verbose", 'v', "enable debug logging")
+	getopt.FlagLong(&flagTrace, "debug", 'd', "enable debug and trace logging")
+	getopt.FlagLong(&flagLogStderr, "log-stderr", 'S', "log JSON to stderr")
+	getopt.FlagLong(&flagLogJournald, "log-journald", 'J', "log to journald")
+	getopt.FlagLong(&flagLogFile, "log-file", 'l', "log JSON to file")
+}
+
+func InitLogging() {
+	if flagVersion {
+		fmt.Println(Version())
+		os.Exit(0)
+	}
+
+	if flagLogStderr && flagLogJournald {
+		fmt.Fprintln(os.Stderr, "fatal: flags '--log-stderr' and '--log-journald' are mutually exclusive")
+		os.Exit(1)
+	}
+	if flagLogStderr && flagLogFile != "" {
+		fmt.Fprintln(os.Stderr, "fatal: flags '--log-stderr' and '--log-file' are mutually exclusive")
+		os.Exit(1)
+	}
+	if flagLogJournald && flagLogFile != "" {
+		fmt.Fprintln(os.Stderr, "fatal: flags '--log-journald' and '--log-file' are mutually exclusive")
+		os.Exit(1)
+	}
+
+	if flagLogFile != "" {
+		abs, err := ProcessPath(flagLogFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+			os.Exit(1)
+		}
+		flagLogFile = abs
+	}
+
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.DurationFieldUnit = time.Second
+	zerolog.DurationFieldInteger = false
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	if flagDebug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
+	if flagTrace {
+		zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	}
+
+	switch {
+	case flagLogStderr:
+		// do nothing
+
+	case flagLogJournald:
+		log.Logger = log.Output(journald.NewJournalDWriter())
+
+	case flagLogFile != "":
+		var err error
+		gLogger, err = NewRotatingLogWriter(flagLogFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: failed to open log file for append: %q: %v\n", flagLogFile, err)
+			os.Exit(1)
+		}
+		log.Logger = log.Output(gLogger)
+
+	default:
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	}
+
+	stdlog.SetFlags(0)
+	stdlog.SetOutput(log.Logger)
+}
+
+func DoneLogging() {
+	if gLogger != nil {
+		gLogger.Close()
+	}
+}
+
+func RotateLogs() error {
+	if gLogger != nil {
+		if err := gLogger.Rotate(); err != nil {
+			log.Logger.Error().
+				Err(err).
+				Msg("failed to rotate logs")
+			return err
+		}
+	}
+	return nil
+}
 
 // type RotatingLogWriter {{{
 
@@ -143,8 +247,7 @@ var _ zk.Logger = ZKLoggerBridge{}
 
 // type ZapLoggerBridge {{{
 
-type ZapLoggerBridge struct {
-}
+type ZapLoggerBridge struct{}
 
 func (ZapLoggerBridge) Write(p []byte) (int, error) {
 	var data map[string]interface{}

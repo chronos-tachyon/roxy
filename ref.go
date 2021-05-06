@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"sync"
 )
 
@@ -9,8 +10,8 @@ type Ref struct {
 	impl *Impl
 }
 
-func (ref *Ref) Load(configPath string) error {
-	next, err := LoadImpl(configPath)
+func (ref *Ref) Load(ctx context.Context, configPath string) error {
+	next, err := LoadImpl(ctx, configPath)
 	if err != nil {
 		return err
 	}

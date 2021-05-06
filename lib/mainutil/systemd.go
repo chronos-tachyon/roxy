@@ -1,4 +1,4 @@
-package main
+package mainutil
 
 import (
 	"io"

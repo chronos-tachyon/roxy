@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	flagAdminTarget string = "unix:/var/opt/roxy/lib/admin.socket"
+	flagAdminTarget string = "unix:/var/opt/roxy/lib/atc.admin.socket"
 )
 
 func init() {

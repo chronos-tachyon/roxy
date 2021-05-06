@@ -57,7 +57,7 @@ func (a *Announcer) Announce(ctx context.Context, ss *membership.ServerSet) erro
 		a.state = stateRunning
 		var errs multierror.Error
 		for _, impl := range a.impls {
-			if err := impl.Announce(ctx, ss); err != nil {
+			if err := impl.Announce(ctx, ss); isRealError(err) {
 				errs.Errors = append(errs.Errors, err)
 			}
 		}
@@ -80,7 +80,7 @@ func (a *Announcer) Withdraw(ctx context.Context) error {
 		a.state = stateInit
 		var errs multierror.Error
 		for _, impl := range a.impls {
-			if err := impl.Withdraw(ctx); err != nil {
+			if err := impl.Withdraw(ctx); isRealError(err) {
 				errs.Errors = append(errs.Errors, err)
 			}
 		}
@@ -104,15 +104,26 @@ func (a *Announcer) Close() error {
 	var errs multierror.Error
 	if needWithdraw {
 		for _, impl := range a.impls {
-			if err := impl.Withdraw(context.Background()); err != nil {
+			if err := impl.Withdraw(context.Background()); isRealError(err) {
 				errs.Errors = append(errs.Errors, err)
 			}
 		}
 	}
 	for _, impl := range a.impls {
-		if err := impl.Close(); err != nil {
+		if err := impl.Close(); isRealError(err) {
 			errs.Errors = append(errs.Errors, err)
 		}
 	}
 	return errs.ErrorOrNil()
+}
+
+func isRealError(err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, fs.ErrClosed):
+		return false
+	default:
+		return true
+	}
 }

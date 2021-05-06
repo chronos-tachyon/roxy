@@ -1,13 +1,8 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"fmt"
-	"io/ioutil"
-	"time"
-
 	"github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/lib/mainutil"
 )
 
 type Config struct {
@@ -18,39 +13,17 @@ type Config struct {
 }
 
 type GlobalConfig struct {
-	MimeFile              string         `json:"mimeFile"`
-	ACMEDirectoryURL      string         `json:"acmeDirectoryURL"`
-	ACMERegistrationEmail string         `json:"acmeRegistrationEmail"`
-	ACMEUserAgent         string         `json:"acmeUserAgent"`
-	MaxCacheSize          int64          `json:"maxCacheSize"`
-	MaxComputeDigestSize  int64          `json:"maxComputeDigestSize"`
-	Etcd                  *EtcdConfig    `json:"etcd"`
-	ZK                    *ZKConfig      `json:"zookeeper"`
-	Storage               *StorageConfig `json:"storage"`
-	Pages                 *PagesConfig   `json:"pages"`
-}
-
-type EtcdConfig struct {
-	Endpoints        []string         `json:"endpoints"`
-	TLS              *TLSClientConfig `json:"tls"`
-	Username         string           `json:"username"`
-	Password         string           `json:"password"`
-	DialTimeout      time.Duration    `json:"dialTimeout"`
-	KeepAliveTime    time.Duration    `json:"keepAliveTime"`
-	KeepAliveTimeout time.Duration    `json:"keepAliveTimeout"`
-}
-
-type ZKConfig struct {
-	Servers        []string      `json:"servers"`
-	SessionTimeout time.Duration `json:"sessionTimeout"`
-	Auth           *ZKAuthConfig `json:"auth"`
-}
-
-type ZKAuthConfig struct {
-	Scheme   string `json:"scheme"`
-	Raw      string `json:"raw"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	MimeFile              string                    `json:"mimeFile"`
+	ACMEDirectoryURL      string                    `json:"acmeDirectoryURL"`
+	ACMERegistrationEmail string                    `json:"acmeRegistrationEmail"`
+	ACMEUserAgent         string                    `json:"acmeUserAgent"`
+	MaxCacheSize          int64                     `json:"maxCacheSize"`
+	MaxComputeDigestSize  int64                     `json:"maxComputeDigestSize"`
+	ZK                    mainutil.ZKConfig         `json:"zookeeper"`
+	Etcd                  mainutil.EtcdConfig       `json:"etcd"`
+	ATC                   mainutil.GRPCClientConfig `json:"atc"`
+	Storage               *StorageConfig            `json:"storage"`
+	Pages                 *PagesConfig              `json:"pages"`
 }
 
 type StorageConfig struct {
@@ -74,10 +47,10 @@ type PageConfig struct {
 }
 
 type TargetConfig struct {
-	Type   enums.TargetType `json:"type"`
-	Path   string           `json:"path,omitempty"`
-	Target string           `json:"target,omitempty"`
-	TLS    *TLSClientConfig `json:"tls,omitempty"`
+	Type   enums.TargetType         `json:"type"`
+	Path   string                   `json:"path,omitempty"`
+	Target string                   `json:"target,omitempty"`
+	TLS    mainutil.TLSClientConfig `json:"tls,omitempty"`
 }
 
 type RuleConfig struct {
@@ -93,16 +66,6 @@ type MutationConfig struct {
 	Replace string             `json:"replace"`
 }
 
-type TLSClientConfig struct {
-	SkipVerify        bool   `json:"skipVerify"`
-	SkipVerifyDNSName bool   `json:"skipVerifyDNSName"`
-	RootCA            string `json:"rootCA"`
-	ExactCN           string `json:"exactCN"`
-	ForceDNSName      string `json:"forceDNSName"`
-	ClientCert        string `json:"clientCert"`
-	ClientKey         string `json:"clientKey"`
-}
-
 type MimeFile []*MimeRuleConfig
 
 type MimeRuleConfig struct {
@@ -110,102 +73,4 @@ type MimeRuleConfig struct {
 	ContentType string   `json:"contentType"`
 	ContentLang string   `json:"contentLanguage"`
 	ContentEnc  string   `json:"contentEncoding"`
-}
-
-func CompileTLSClientConfig(cfg *TLSClientConfig) (*tls.Config, error) {
-	if cfg == nil {
-		return nil, nil
-	}
-
-	var roots *x509.CertPool
-	var err error
-	if cfg.RootCA == "" {
-		roots, err = x509.SystemCertPool()
-		if err != nil {
-			return nil, TLSClientConfigError{
-				Err: fmt.Errorf("failed to load system certificate pool: %w", err),
-			}
-		}
-	} else {
-		roots = x509.NewCertPool()
-
-		var raw []byte
-		raw, err = ioutil.ReadFile(cfg.RootCA)
-		if err != nil {
-			return nil, TLSClientConfigError{
-				Err: fmt.Errorf("failed to read root CAs from PEM file %q: %w", cfg.RootCA, err),
-			}
-		}
-
-		ok := roots.AppendCertsFromPEM(raw)
-		if !ok {
-			return nil, TLSClientConfigError{
-				Err: fmt.Errorf("failed to process certificates from PEM file %q", cfg.RootCA),
-			}
-		}
-	}
-
-	out := new(tls.Config)
-	if cfg.SkipVerify {
-		out.InsecureSkipVerify = true
-		out.VerifyConnection = func(cs tls.ConnectionState) error {
-			return nil
-		}
-	} else if cfg.SkipVerifyDNSName || cfg.ExactCN == "" || cfg.ForceDNSName == "" {
-		out.RootCAs = roots
-		out.InsecureSkipVerify = true
-		out.VerifyConnection = func(cs tls.ConnectionState) error {
-			opts := x509.VerifyOptions{
-				Roots:         roots,
-				Intermediates: x509.NewCertPool(),
-				DNSName:       cs.ServerName,
-			}
-
-			if cfg.ForceDNSName != "" {
-				opts.DNSName = cfg.ForceDNSName
-			}
-			if cfg.SkipVerifyDNSName {
-				opts.DNSName = ""
-			}
-
-			for _, cert := range cs.PeerCertificates[1:] {
-				opts.Intermediates.AddCert(cert)
-			}
-
-			_, err := cs.PeerCertificates[0].Verify(opts)
-			if err != nil {
-				return err
-			}
-
-			if cfg.ExactCN != "" {
-				actualCN := cs.PeerCertificates[0].Subject.CommonName
-				expectCN := cfg.ExactCN
-				if actualCN != expectCN {
-					return fmt.Errorf("certificate subject CN %q does not match expected CN %q", actualCN, expectCN)
-				}
-			}
-
-			return nil
-		}
-	} else {
-		out.RootCAs = roots
-	}
-
-	if cfg.ClientCert != "" {
-		certPath := cfg.ClientCert
-		keyPath := cfg.ClientKey
-		if keyPath == "" {
-			keyPath = certPath
-		}
-
-		out.Certificates = make([]tls.Certificate, 1)
-		out.Certificates[0], err = tls.LoadX509KeyPair(certPath, keyPath)
-		if err != nil {
-			return nil, TLSClientConfigError{
-				Err: fmt.Errorf("failed to load X.509 keypair from PEM files at cert=%q key=%q: %w", certPath, keyPath, err),
-			}
-		}
-	}
-
-	return out, nil
 }

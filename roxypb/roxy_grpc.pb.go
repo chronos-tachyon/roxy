@@ -159,7 +159,7 @@ func (c *airTrafficControlClient) Report(ctx context.Context, opts ...grpc.CallO
 
 type AirTrafficControl_ReportClient interface {
 	Send(*ReportRequest) error
-	CloseAndRecv() (*ReportResponse, error)
+	Recv() (*ReportResponse, error)
 	grpc.ClientStream
 }
 
@@ -171,10 +171,7 @@ func (x *airTrafficControlReportClient) Send(m *ReportRequest) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *airTrafficControlReportClient) CloseAndRecv() (*ReportResponse, error) {
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
+func (x *airTrafficControlReportClient) Recv() (*ReportResponse, error) {
 	m := new(ReportResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -250,7 +247,7 @@ func _AirTrafficControl_Report_Handler(srv interface{}, stream grpc.ServerStream
 }
 
 type AirTrafficControl_ReportServer interface {
-	SendAndClose(*ReportResponse) error
+	Send(*ReportResponse) error
 	Recv() (*ReportRequest, error)
 	grpc.ServerStream
 }
@@ -259,7 +256,7 @@ type airTrafficControlReportServer struct {
 	grpc.ServerStream
 }
 
-func (x *airTrafficControlReportServer) SendAndClose(m *ReportResponse) error {
+func (x *airTrafficControlReportServer) Send(m *ReportResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -308,6 +305,7 @@ var AirTrafficControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Report",
 			Handler:       _AirTrafficControl_Report_Handler,
+			ServerStreams: true,
 			ClientStreams: true,
 		},
 		{

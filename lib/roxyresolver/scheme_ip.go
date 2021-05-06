@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"net/url"
 	"strings"
 
 	grpcresolver "google.golang.org/grpc/resolver"
@@ -33,57 +32,19 @@ func NewIPResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseIPTarget(target Target, defaultPort string) (tcpAddrs []*net.TCPAddr, balancer BalancerType, serverName string, err error) {
-	if target.Authority != "" {
-		err = BadAuthorityError{
-			Authority: target.Authority,
-			Err:       ErrExpectEmpty,
-		}
+func ParseIPTarget(rt RoxyTarget, defaultPort string) (tcpAddrs []*net.TCPAddr, balancer BalancerType, serverName string, err error) {
+	if rt.Authority != "" {
+		err = BadAuthorityError{Authority: rt.Authority, Err: ErrExpectEmpty}
 		return
 	}
 
-	ep := target.Endpoint
-	if ep == "" {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err:      ErrExpectNonEmpty,
-		}
+	ipPortListStr := rt.Endpoint
+	if ipPortListStr == "" {
+		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
 		return
 	}
 
-	var (
-		qs    string
-		hasQS bool
-	)
-	if i := strings.IndexByte(ep, '?'); i >= 0 {
-		ep, qs, hasQS = ep[:i], ep[i+1:], true
-	}
-
-	if ep == "" {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err: BadPathError{
-				Path: ep,
-				Err:  ErrExpectNonEmpty,
-			},
-		}
-		return
-	}
-
-	var unescaped string
-	unescaped, err = url.PathUnescape(ep)
-	if err != nil {
-		err = BadEndpointError{
-			Endpoint: target.Endpoint,
-			Err: BadPathError{
-				Path: ep,
-				Err:  err,
-			},
-		}
-		return
-	}
-
-	ipPortList := strings.Split(unescaped, ",")
+	ipPortList := strings.Split(ipPortListStr, ",")
 	tcpAddrs = make([]*net.TCPAddr, 0, len(ipPortList))
 	for _, ipPort := range ipPortList {
 		if ipPort == "" {
@@ -101,14 +62,8 @@ func ParseIPTarget(target Target, defaultPort string) (tcpAddrs []*net.TCPAddr, 
 			}
 			if err != nil {
 				err = BadEndpointError{
-					Endpoint: target.Endpoint,
-					Err: BadPathError{
-						Path: unescaped,
-						Err: BadHostPortError{
-							HostPort: ipPort,
-							Err:      err,
-						},
-					},
+					Endpoint: rt.Endpoint,
+					Err:      BadHostPortError{HostPort: ipPort, Err: err},
 				}
 				return
 			}
@@ -117,51 +72,28 @@ func ParseIPTarget(target Target, defaultPort string) (tcpAddrs []*net.TCPAddr, 
 		tcpAddr, err = parseIPAndPort(host, port)
 		if err != nil {
 			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadPathError{
-					Path: unescaped,
-					Err: BadHostPortError{
-						HostPort: ipPort,
-						Err:      err,
-					},
-				},
+				Endpoint: rt.Endpoint,
+				Err:      BadHostPortError{HostPort: ipPort, Err: err},
 			}
 			return
 		}
 		tcpAddrs = append(tcpAddrs, tcpAddr)
 	}
 
-	var query url.Values
-	if hasQS {
-		query, err = url.ParseQuery(qs)
-		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err:      BadQueryStringError{QueryString: qs, Err: err},
-			}
-			return
-		}
+	if len(tcpAddrs) == 0 {
+		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		return
 	}
 
-	if str := query.Get("balancer"); str != "" {
+	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadEndpointError{
-				Endpoint: target.Endpoint,
-				Err: BadQueryStringError{
-					QueryString: qs,
-					Err: BadQueryParamError{
-						Name:  "balancer",
-						Value: str,
-						Err:   err,
-					},
-				},
-			}
+			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
 
-	serverName = query.Get("serverName")
+	serverName = rt.Query.Get("serverName")
 
 	return
 }
@@ -178,7 +110,12 @@ func (b ipBuilder) Scheme() string {
 }
 
 func (b ipBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	tcpAddrs, _, serverName, err := ParseIPTarget(target, httpsPort)
+	rt, err := RoxyTargetFromTarget(target)
+	if err != nil {
+		return nil, err
+	}
+
+	tcpAddrs, _, serverName, err := ParseIPTarget(rt, httpsPort)
 	if err != nil {
 		return nil, err
 	}
