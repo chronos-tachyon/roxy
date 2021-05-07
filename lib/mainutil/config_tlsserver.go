@@ -86,7 +86,7 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := json.Unmarshal([]byte(str), tsc)
+	err := strictUnmarshalJSON([]byte(str), tsc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -158,7 +158,7 @@ func (tsc *TLSServerConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt tscJSON
-	err := json.Unmarshal(raw, &alt)
+	err := strictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,7 @@
   "hosts": [
     "*.example.com"
   ],
-  "targets": {
+  "frontends": {
     "srv-www": {
       "type": "fs",
       "path": "/srv/www"
@@ -17,7 +17,7 @@
   },
   "rules": [
     {
-      "target": "srv-www"
+      "frontend": "srv-www"
     }
   ]
 }

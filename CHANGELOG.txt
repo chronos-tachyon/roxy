@@ -1,3 +1,11 @@
+v0.4.0
+  * Implement a stub for the AirTrafficControl companion server
+  * Unify logging flags across binaries
+  * Unify flag syntax for listening, connecting, and announcing; reduces the
+    number of flags needed to specify things like ZooKeeper announcements
+  * Config file syntax changes to support the above
+  * Major refactors to support the above
+
 v0.3.0
   * Implement WeightedRandomBalancer and WeightedRoundRobinBalancer balancers
   * Change ATC protocol to be event-oriented

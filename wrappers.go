@@ -159,9 +159,9 @@ func (bw *basicWrappedWriter) Write(buf []byte) (int, error) {
 	return n, err
 }
 
-func (bw *basicWrappedWriter) Push(target string, opts *http.PushOptions) error {
+func (bw *basicWrappedWriter) Push(url string, opts *http.PushOptions) error {
 	if x, ok := bw.next.(http.Pusher); ok {
-		return x.Push(target, opts)
+		return x.Push(url, opts)
 	}
 	return http.ErrNotSupported
 }

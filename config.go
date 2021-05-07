@@ -6,10 +6,10 @@ import (
 )
 
 type Config struct {
-	Global  *GlobalConfig            `json:"global"`
-	Hosts   []string                 `json:"hosts"`
-	Targets map[string]*TargetConfig `json:"targets"`
-	Rules   []*RuleConfig            `json:"rules"`
+	Global    *GlobalConfig              `json:"global"`
+	Hosts     []string                   `json:"hosts"`
+	Frontends map[string]*FrontendConfig `json:"frontends"`
+	Rules     []*RuleConfig              `json:"rules"`
 }
 
 type GlobalConfig struct {
@@ -46,17 +46,16 @@ type PageConfig struct {
 	ContentEnc  string `json:"contentEncoding"`
 }
 
-type TargetConfig struct {
-	Type   enums.TargetType         `json:"type"`
-	Path   string                   `json:"path,omitempty"`
-	Target string                   `json:"target,omitempty"`
-	TLS    mainutil.TLSClientConfig `json:"tls,omitempty"`
+type FrontendConfig struct {
+	Type   enums.FrontendType        `json:"type"`
+	Path   string                    `json:"path,omitempty"`
+	Client mainutil.GRPCClientConfig `json:"client,omitempty"`
 }
 
 type RuleConfig struct {
 	Match     map[string]string `json:"match"`
 	Mutations []*MutationConfig `json:"mutations"`
-	Target    string            `json:"target"`
+	Frontend  string            `json:"frontend"`
 }
 
 type MutationConfig struct {

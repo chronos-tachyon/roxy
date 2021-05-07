@@ -8,11 +8,11 @@ import (
 )
 
 type Rule struct {
-	Match         map[string]*regexp.Regexp
-	Mutations     []Mutation
-	TargetKey     string
-	TargetConfig  *TargetConfig
-	TargetHandler http.Handler
+	Match           map[string]*regexp.Regexp
+	Mutations       []Mutation
+	FrontendKey     string
+	FrontendConfig  *FrontendConfig
+	FrontendHandler http.Handler
 }
 
 func (rule *Rule) Check(r *http.Request) bool {
@@ -43,7 +43,7 @@ func (rule *Rule) Check(r *http.Request) bool {
 }
 
 func (rule *Rule) IsTerminal() bool {
-	return rule.TargetKey != ""
+	return rule.FrontendKey != ""
 }
 
 func (rule *Rule) ApplyFirst(w http.ResponseWriter, r *http.Request) {
@@ -87,28 +87,28 @@ func CompileRule(impl *Impl, cfg *RuleConfig) (*Rule, error) {
 		}
 	}
 
-	out.TargetKey = cfg.Target
+	out.FrontendKey = cfg.Frontend
 	switch {
-	case out.TargetKey == "":
+	case out.FrontendKey == "":
 		// pass
 
-	case strings.HasPrefix(out.TargetKey, "ERROR:"):
-		out.TargetHandler, err = CompileErrorHandler(impl, out.TargetKey)
+	case strings.HasPrefix(out.FrontendKey, "ERROR:"):
+		out.FrontendHandler, err = CompileErrorHandler(impl, out.FrontendKey)
 		if err != nil {
 			return nil, err
 		}
 
-	case strings.HasPrefix(out.TargetKey, "REDIR:"):
-		out.TargetHandler, err = CompileRedirHandler(impl, out.TargetKey)
+	case strings.HasPrefix(out.FrontendKey, "REDIR:"):
+		out.FrontendHandler, err = CompileRedirHandler(impl, out.FrontendKey)
 		if err != nil {
 			return nil, err
 		}
 
 	default:
-		out.TargetConfig = impl.cfg.Targets[out.TargetKey]
-		out.TargetHandler = impl.targets[out.TargetKey]
-		if out.TargetHandler == nil {
-			return nil, fmt.Errorf("unknown target %q", out.TargetKey)
+		out.FrontendConfig = impl.cfg.Frontends[out.FrontendKey]
+		out.FrontendHandler = impl.frontends[out.FrontendKey]
+		if out.FrontendHandler == nil {
+			return nil, fmt.Errorf("unknown frontend %q", out.FrontendKey)
 		}
 	}
 

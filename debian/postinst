@@ -51,3 +51,7 @@ fi
 if ! systemctl is-enabled roxy >/dev/null 2>&1 ; then
   echo '* Please run "sudo systemctl enable roxy" to start Roxy after every reboot.'
 fi
+if systemctl is-active atc >/dev/null 2>&1 ; then
+  echo '* Running "systemctl restart atc"...'
+  systemctl restart atc || true
+fi

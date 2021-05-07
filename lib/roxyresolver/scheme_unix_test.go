@@ -177,7 +177,7 @@ func TestNewUnixResolver(t *testing.T) {
 		},
 		{
 			name:   "err-endpoint-is-empty-2",
-			target: "unix:///",
+			target: "unix://localhost",
 			errfn: func(err error) bool {
 				var xerr BadEndpointError
 				if errors.As(err, &xerr) {

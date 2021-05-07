@@ -1,0 +1,20 @@
+[Unit]
+Description=Roxy AirTrafficController
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+EnvironmentFile=/etc/default/atc
+ExecStart=/opt/roxy/bin/atc $ATC_FLAGS
+ExecReload=/opt/roxy/bin/atcctl $ATCCTL_FLAGS reload
+ExecStop=/opt/roxy/bin/atcctl $ATCCTL_FLAGS shutdown
+Restart=always
+User=roxy
+Group=roxy
+UMask=022
+
+[Install]
+WantedBy=multi-user.target
+
+; vim:set filetype=systemd:

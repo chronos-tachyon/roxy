@@ -101,7 +101,7 @@ func (ec *EtcdConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := json.Unmarshal([]byte(str), ec)
+	err := strictUnmarshalJSON([]byte(str), ec)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -204,7 +204,7 @@ func (ec *EtcdConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt ecJSON
-	err := json.Unmarshal(raw, &alt)
+	err := strictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

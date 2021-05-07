@@ -108,7 +108,7 @@ func (zc *ZKConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := json.Unmarshal([]byte(str), zc)
+	err := strictUnmarshalJSON([]byte(str), zc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -194,7 +194,7 @@ func (zc *ZKConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt zcJSON
-	err := json.Unmarshal(raw, &alt)
+	err := strictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

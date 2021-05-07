@@ -2,7 +2,6 @@ package roxyresolver
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -55,9 +54,16 @@ func (rt *RoxyTarget) UnmarshalJSON(raw []byte) error {
 	var str string
 	err := json.Unmarshal(raw, &str)
 	if err != nil {
+		*rt = RoxyTarget{}
 		return err
 	}
-	return rt.Parse(str)
+
+	err = rt.Parse(str)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (rt *RoxyTarget) Parse(str string) error {
@@ -68,6 +74,14 @@ func (rt *RoxyTarget) Parse(str string) error {
 		}
 	}()
 
+	if str == "" {
+		return BadEndpointError{Endpoint: str, Err: ErrExpectNonEmpty}
+	}
+
+	if str == nullString {
+		return BadEndpointError{Endpoint: str, Err: ErrFailedToMatch}
+	}
+
 	match := regexp.MustCompile(`^([0-9A-Za-z+-]+):`).FindStringSubmatch(str)
 	if match != nil {
 		rt.Scheme = match[1]
@@ -75,12 +89,14 @@ func (rt *RoxyTarget) Parse(str string) error {
 		str = str[n:]
 	}
 
+	hasSlash := false
 	if strings.HasPrefix(str, "//") {
 		str = str[2:]
 		i := strings.IndexByte(str, '/')
 		var authority string
 		if i >= 0 {
 			authority, str = str[:i], str[i+1:]
+			hasSlash = true
 		} else {
 			authority, str = str, ""
 		}
@@ -97,7 +113,7 @@ func (rt *RoxyTarget) Parse(str string) error {
 		}
 	}
 
-	tmp, err := rt.postprocess()
+	tmp, err := rt.postprocess(hasSlash)
 	if err != nil {
 		return err
 	}
@@ -124,7 +140,7 @@ func RoxyTargetFromTarget(target Target) (RoxyTarget, error) {
 		}
 	}
 
-	tmp, err := rt.postprocess()
+	tmp, err := rt.postprocess(false)
 	if err != nil {
 		return zero, err
 	}
@@ -132,7 +148,7 @@ func RoxyTargetFromTarget(target Target) (RoxyTarget, error) {
 	return tmp, nil
 }
 
-func (rt RoxyTarget) postprocess() (RoxyTarget, error) {
+func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
 	var zero RoxyTarget
 
 	if rt.Scheme == "" {
@@ -154,6 +170,9 @@ func (rt RoxyTarget) postprocess() (RoxyTarget, error) {
 		rt.ServerName = host
 
 	case unixScheme:
+		if hasSlash && (rt.Endpoint == "" || (rt.Endpoint[0] != '/' && rt.Endpoint[0] != '@' && rt.Endpoint[0] != '\x00')) {
+			rt.Endpoint = "/" + rt.Endpoint
+		}
 		unixAddr, _, serverName, err := ParseUnixTarget(rt)
 		if err != nil {
 			return zero, err
@@ -195,6 +214,9 @@ func (rt RoxyTarget) postprocess() (RoxyTarget, error) {
 		rt.ServerName = serverName
 
 	case zkScheme:
+		if rt.Endpoint == "" || rt.Endpoint[0] != '/' {
+			rt.Endpoint = "/" + rt.Endpoint
+		}
 		_, _, _, serverName, err := ParseZKTarget(rt)
 		if err != nil {
 			return zero, err
@@ -209,7 +231,11 @@ func (rt RoxyTarget) postprocess() (RoxyTarget, error) {
 		rt.ServerName = serverName
 
 	case atcScheme:
-		panic(errors.New("not implemented"))
+		_, _, _, _, serverName, err := ParseATCTarget(rt)
+		if err != nil {
+			return zero, err
+		}
+		rt.ServerName = serverName
 
 	default:
 		return zero, fmt.Errorf("scheme %q is not supported", rt.Scheme)

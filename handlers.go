@@ -107,16 +107,16 @@ func init() {
 // type Metrics {{{
 
 type Metrics struct {
-	PanicCount                   prometheus.Counter
-	RequestCountByMethod         *prometheus.CounterVec
-	ResponseCountByCode          *prometheus.CounterVec
-	RequestSize                  prometheus.Histogram
-	ResponseSize                 prometheus.Histogram
-	ResponseDuration             prometheus.Histogram
-	ResponseCountByCodeAndTarget *prometheus.CounterVec
-	ProblemCountByTypeAndTarget  *prometheus.CounterVec
-	ResponseSizeByTarget         *prometheus.HistogramVec
-	ResponseDurationByTarget     *prometheus.HistogramVec
+	PanicCount                     prometheus.Counter
+	RequestCountByMethod           *prometheus.CounterVec
+	ResponseCountByCode            *prometheus.CounterVec
+	RequestSize                    prometheus.Histogram
+	ResponseSize                   prometheus.Histogram
+	ResponseDuration               prometheus.Histogram
+	ResponseCountByCodeAndFrontend *prometheus.CounterVec
+	ProblemCountByTypeAndFrontend  *prometheus.CounterVec
+	ResponseSizeByFrontend         *prometheus.HistogramVec
+	ResponseDurationByFrontend     *prometheus.HistogramVec
 }
 
 func NewMetrics(proto string) *Metrics {
@@ -182,46 +182,46 @@ func NewMetrics(proto string) *Metrics {
 	)
 
 	if proto == "https" {
-		m.ResponseCountByCodeAndTarget = prometheus.NewCounterVec(
+		m.ResponseCountByCodeAndFrontend = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "response_by_code_and_target_count",
+				Name:      "response_by_code_and_frontend_count",
 				Help:      "the number of outgoing HTTP responses",
 			},
-			[]string{"code", "target"},
+			[]string{"code", "frontend"},
 		)
 
-		m.ProblemCountByTypeAndTarget = prometheus.NewCounterVec(
+		m.ProblemCountByTypeAndFrontend = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "problem_by_type_and_target_count",
+				Name:      "problem_by_type_and_frontend_count",
 				Help:      "the number of failed HTTP responses",
 			},
-			[]string{"type", "target"},
+			[]string{"type", "frontend"},
 		)
 
-		m.ResponseSizeByTarget = prometheus.NewHistogramVec(
+		m.ResponseSizeByFrontend = prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "response_size_by_target_bytes",
+				Name:      "response_size_by_frontend_bytes",
 				Help:      "the size of the outgoing HTTP response",
 				Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
 			},
-			[]string{"target"},
+			[]string{"frontend"},
 		)
 
-		m.ResponseDurationByTarget = prometheus.NewHistogramVec(
+		m.ResponseDurationByFrontend = prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "response_duration_by_target_secs",
+				Name:      "response_duration_by_frontend_secs",
 				Help:      "the duration of the HTTP request lifetime",
 				Buckets:   prometheus.ExponentialBuckets(0.001, 10, 7),
 			},
-			[]string{"target"},
+			[]string{"frontend"},
 		)
 	}
 
@@ -265,13 +265,13 @@ func (m *Metrics) All() []prometheus.Collector {
 		m.ResponseSize,
 		m.ResponseDuration,
 	)
-	if m.ResponseCountByCodeAndTarget != nil {
+	if m.ResponseCountByCodeAndFrontend != nil {
 		out = append(
 			out,
-			m.ResponseCountByCodeAndTarget,
-			m.ProblemCountByTypeAndTarget,
-			m.ResponseSizeByTarget,
-			m.ResponseDurationByTarget,
+			m.ResponseCountByCodeAndFrontend,
+			m.ProblemCountByTypeAndFrontend,
+			m.ResponseSizeByFrontend,
+			m.ResponseDurationByFrontend,
 		)
 	}
 	return out
@@ -378,11 +378,11 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.Metrics.ResponseSize.Observe(bytesWritten)
 		rc.Metrics.ResponseDuration.Observe(duration)
 
-		if rc.Metrics.ResponseCountByCodeAndTarget != nil {
-			rc.Metrics.ResponseCountByCodeAndTarget.WithLabelValues(code, rc.TargetKey).Inc()
-			rc.Metrics.ProblemCountByTypeAndTarget.WithLabelValues(problemType, rc.TargetKey).Inc()
-			rc.Metrics.ResponseSizeByTarget.WithLabelValues(rc.TargetKey).Observe(bytesWritten)
-			rc.Metrics.ResponseDurationByTarget.WithLabelValues(rc.TargetKey).Observe(duration)
+		if rc.Metrics.ResponseCountByCodeAndFrontend != nil {
+			rc.Metrics.ResponseCountByCodeAndFrontend.WithLabelValues(code, rc.FrontendKey).Inc()
+			rc.Metrics.ProblemCountByTypeAndFrontend.WithLabelValues(problemType, rc.FrontendKey).Inc()
+			rc.Metrics.ResponseSizeByFrontend.WithLabelValues(rc.FrontendKey).Observe(bytesWritten)
+			rc.Metrics.ResponseDurationByFrontend.WithLabelValues(rc.FrontendKey).Observe(duration)
 		}
 
 		var event *zerolog.Event
@@ -432,7 +432,7 @@ type InsecureHandler struct {
 func (h *InsecureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var next http.Handler
 	rc := GetRequestContext(r.Context())
-	rc.TargetKey = "!HTTP"
+	rc.FrontendKey = "!HTTP"
 
 	h.mu.Lock()
 	if rc.Impl == h.savedImpl {
@@ -483,27 +483,27 @@ func (SecureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lastIndex := len(applicableRules) - 1
 		lastRule := applicableRules[lastIndex]
 		if lastRule.IsTerminal() {
-			rc.TargetKey = lastRule.TargetKey
-			rc.TargetConfig = lastRule.TargetConfig
+			rc.FrontendKey = lastRule.FrontendKey
+			rc.FrontendConfig = lastRule.FrontendConfig
 			rc.Logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-				c = c.Str("key", simplifyTargetKey(lastRule.TargetKey))
-				if lastRule.TargetConfig != nil {
-					c = c.Interface("target", lastRule.TargetConfig)
+				c = c.Str("key", simplifyFrontendKey(lastRule.FrontendKey))
+				if lastRule.FrontendConfig != nil {
+					c = c.Interface("frontend", lastRule.FrontendConfig)
 				}
 				return c
 			})
-			lastRule.TargetHandler.ServeHTTP(w, r)
+			lastRule.FrontendHandler.ServeHTTP(w, r)
 			return
 		}
 	}
 
-	rc.TargetKey = "!EOF"
+	rc.FrontendKey = "!EOF"
 	rc.Writer.WriteError(http.StatusNotFound)
 	rc.Request.URL.Scheme = "https"
 	rc.Request.URL.Host = rc.Request.Host
 	rc.Logger.Warn().
 		Str("mutatedURL", rc.Request.URL.String()).
-		Msg("no matching target")
+		Msg("no matching frontend")
 }
 
 var _ http.Handler = SecureHandler{}
@@ -1207,7 +1207,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	rc.Request.Header.Set("roxy-target", rc.RoxyTarget())
+	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
 	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
 	rc.Request.Header.Set("x-forwarded-proto", "https")
 	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
@@ -1316,7 +1316,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rc := GetRequestContext(ctx)
 
-	rc.Request.Header.Set("roxy-target", rc.RoxyTarget())
+	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
 	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
 	rc.Request.Header.Set("x-forwarded-proto", "https")
 	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
@@ -1560,26 +1560,26 @@ func CompileRedirHandler(impl *Impl, arg string) (http.Handler, error) {
 	return RedirHandler{Template: t, Status: statusCode}, nil
 }
 
-func CompileTarget(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
+func CompileFrontend(impl *Impl, key string, cfg *FrontendConfig) (http.Handler, error) {
 	switch cfg.Type {
-	case enums.UndefinedTargetType:
+	case enums.UndefinedFrontendType:
 		return nil, fmt.Errorf("missing required field \"type\"")
 
-	case enums.FileSystemTargetType:
+	case enums.FileSystemFrontendType:
 		return CompileFileSystemHandler(impl, key, cfg)
 
-	case enums.HTTPBackendTargetType:
+	case enums.HTTPBackendFrontendType:
 		return CompileHTTPBackendHandler(impl, key, cfg)
 
-	case enums.GRPCBackendTargetType:
+	case enums.GRPCBackendFrontendType:
 		return CompileGRPCBackendHandler(impl, key, cfg)
 
 	default:
-		panic(fmt.Errorf("unknown target type %#v", cfg.Type))
+		panic(fmt.Errorf("unknown frontend type %#v", cfg.Type))
 	}
 }
 
-func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
+func CompileFileSystemHandler(impl *Impl, key string, cfg *FrontendConfig) (http.Handler, error) {
 	if cfg.Path == "" {
 		return nil, fmt.Errorf("missing required field \"path\"")
 	}
@@ -1594,21 +1594,17 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *TargetConfig) (http.H
 	return &FileSystemHandler{fs}, nil
 }
 
-func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
-	var rt roxyresolver.RoxyTarget
-	err := rt.Parse(cfg.Target)
-	if err != nil {
-		return nil, err
-	}
+func CompileHTTPBackendHandler(impl *Impl, key string, cfg *FrontendConfig) (http.Handler, error) {
+	gcc := cfg.Client
 
-	tlsConfig, err := cfg.TLS.MakeTLS(key)
+	tlsConfig, err := gcc.TLS.MakeTLS(key)
 	if err != nil {
 		return nil, err
 	}
 
 	res, err := roxyresolver.New(roxyresolver.Options{
 		Context: impl.ctx,
-		Target:  rt,
+		Target:  gcc.Target,
 		IsTLS:   (tlsConfig != nil),
 	})
 	if err != nil {
@@ -1622,18 +1618,9 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.
 	return &HTTPBackendHandler{bc}, nil
 }
 
-func CompileGRPCBackendHandler(impl *Impl, key string, cfg *TargetConfig) (http.Handler, error) {
-	var rt roxyresolver.RoxyTarget
-	err := rt.Parse(cfg.Target)
-	if err != nil {
-		return nil, err
-	}
+func CompileGRPCBackendHandler(impl *Impl, key string, cfg *FrontendConfig) (http.Handler, error) {
+	gcc := cfg.Client
 
-	gcc := mainutil.GRPCClientConfig{
-		Enabled: true,
-		Target:  rt,
-		TLS:     cfg.TLS,
-	}
 	cc, err := gcc.Dial(impl.ctx)
 	if err != nil {
 		return nil, err

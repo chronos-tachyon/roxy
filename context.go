@@ -42,25 +42,25 @@ func WithConnContext(ctx context.Context, cc *ConnContext) context.Context {
 }
 
 type RequestContext struct {
-	Context      context.Context
-	Logger       zerolog.Logger
-	Proto        string
-	LocalAddr    net.Addr
-	RemoteAddr   net.Addr
-	XID          xid.ID
-	Impl         *Impl
-	Metrics      *Metrics
-	Request      *http.Request
-	Body         WrappedReader
-	Writer       WrappedWriter
-	StartTime    time.Time
-	EndTime      time.Time
-	TargetKey    string
-	TargetConfig *TargetConfig
+	Context        context.Context
+	Logger         zerolog.Logger
+	Proto          string
+	LocalAddr      net.Addr
+	RemoteAddr     net.Addr
+	XID            xid.ID
+	Impl           *Impl
+	Metrics        *Metrics
+	Request        *http.Request
+	Body           WrappedReader
+	Writer         WrappedWriter
+	StartTime      time.Time
+	EndTime        time.Time
+	FrontendKey    string
+	FrontendConfig *FrontendConfig
 }
 
-func (rc *RequestContext) RoxyTarget() string {
-	return fmt.Sprintf("%s; %s", rc.TargetKey, rc.TargetConfig.Target)
+func (rc *RequestContext) RoxyFrontend() string {
+	return fmt.Sprintf("%s; %v", rc.FrontendKey, rc.FrontendConfig.Client.Target)
 }
 
 func GetRequestContext(ctx context.Context) *RequestContext {

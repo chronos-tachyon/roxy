@@ -128,7 +128,7 @@ func simplifyHTTPStatusCode(statusCode int) string {
 	}
 }
 
-func simplifyTargetKey(key string) string {
+func simplifyFrontendKey(key string) string {
 	switch {
 	case strings.HasPrefix(key, "ERROR:"):
 		return "!ERROR"

@@ -66,7 +66,7 @@ func (aac *ATCAnnounceConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := json.Unmarshal([]byte(str), aac)
+	err := strictUnmarshalJSON([]byte(str), aac)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -123,7 +123,7 @@ func (aac *ATCAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt aacJSON
-	err := json.Unmarshal(raw, &alt)
+	err := strictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

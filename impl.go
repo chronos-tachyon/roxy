@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	reTargetKey = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:[._+-][0-9A-Za-z]+)*$`)
+	reFrontendKey = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:[._+-][0-9A-Za-z]+)*$`)
 )
 
 type Impl struct {
@@ -42,7 +42,7 @@ type Impl struct {
 	storage    StorageEngine
 	hosts      []*regexp.Regexp
 	pages      map[string]pageData
-	targets    map[string]http.Handler
+	frontends  map[string]http.Handler
 	rules      []*Rule
 }
 
@@ -123,7 +123,7 @@ func LoadImpl(ctx context.Context, configPath string) (*Impl, error) {
 		return nil, err
 	}
 
-	err = impl.loadTargets()
+	err = impl.loadFrontends()
 	if err != nil {
 		return nil, err
 	}
@@ -507,23 +507,23 @@ func (impl *Impl) loadHosts() error {
 	return nil
 }
 
-func (impl *Impl) loadTargets() error {
+func (impl *Impl) loadFrontends() error {
 	var err error
-	impl.targets = make(map[string]http.Handler, len(impl.cfg.Targets))
-	for key, cfg := range impl.cfg.Targets {
-		if !reTargetKey.MatchString(key) {
+	impl.frontends = make(map[string]http.Handler, len(impl.cfg.Frontends))
+	for key, cfg := range impl.cfg.Frontends {
+		if !reFrontendKey.MatchString(key) {
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: fmt.Sprintf("targets[%q]", key),
+				Section: fmt.Sprintf("frontends[%q]", key),
 				Err:     errors.New("invalid backend name"),
 			}
 		}
 
-		impl.targets[key], err = CompileTarget(impl, key, cfg)
+		impl.frontends[key], err = CompileFrontend(impl, key, cfg)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
-				Section: fmt.Sprintf("targets[%q]", key),
+				Section: fmt.Sprintf("frontends[%q]", key),
 				Err:     err,
 			}
 		}
@@ -550,7 +550,7 @@ func (impl *Impl) loadRules() error {
 func (impl *Impl) Close() error {
 	var errs multierror.Error
 
-	for _, handler := range impl.targets {
+	for _, handler := range impl.frontends {
 		if closer, ok := handler.(io.Closer); ok {
 			if err := closer.Close(); err != nil {
 				errs.Errors = append(errs.Errors, err)

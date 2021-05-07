@@ -84,6 +84,8 @@ build_for_os_arch() {
   cp logrotate.conf "${BUILDDIR}/etc/logrotate.d/roxy"
   cp roxy.default "${BUILDDIR}/etc/default/roxy"
   cp roxy.service "${BUILDDIR}/etc/systemd/system/roxy.service"
+  cp atc.default "${BUILDDIR}/etc/default/atc"
+  cp atc.service "${BUILDDIR}/etc/systemd/system/atc.service"
 
   echo '> tar -cf .../data.tar'
   tar \

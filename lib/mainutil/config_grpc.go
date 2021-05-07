@@ -66,7 +66,7 @@ func (gcc *GRPCClientConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := json.Unmarshal([]byte(str), gcc)
+	err := strictUnmarshalJSON([]byte(str), gcc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -116,7 +116,7 @@ func (gcc *GRPCClientConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt gccJSON
-	err := json.Unmarshal(raw, &alt)
+	err := strictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
@@ -216,6 +216,12 @@ func (gcc GRPCClientConfig) postprocess() (out GRPCClientConfig, err error) {
 	if !gcc.Enabled {
 		return zero, nil
 	}
+
+	tmp, err := gcc.TLS.postprocess()
+	if err != nil {
+		return zero, err
+	}
+	gcc.TLS = tmp
 
 	return gcc, nil
 }

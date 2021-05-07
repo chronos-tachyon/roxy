@@ -1,6 +1,8 @@
 package mainutil
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/user"
@@ -89,4 +91,11 @@ func ProcessPath(in string) (string, error) {
 	}
 
 	return expanded, nil
+}
+
+func strictUnmarshalJSON(raw []byte, v interface{}) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	d.UseNumber()
+	return d.Decode(v)
 }

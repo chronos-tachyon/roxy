@@ -70,7 +70,7 @@ func (lc *ListenConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := json.Unmarshal([]byte(str), lc)
+	err := strictUnmarshalJSON([]byte(str), lc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -120,7 +120,7 @@ func (lc *ListenConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt lcJSON
-	err := json.Unmarshal(raw, &alt)
+	err := strictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

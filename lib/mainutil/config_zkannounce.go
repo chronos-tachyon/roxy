@@ -68,7 +68,7 @@ func (zannc *ZKAnnounceConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := json.Unmarshal([]byte(str), zannc)
+	err := strictUnmarshalJSON([]byte(str), zannc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -128,7 +128,7 @@ func (zannc *ZKAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt zanncJSON
-	err := json.Unmarshal(raw, &alt)
+	err := strictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
