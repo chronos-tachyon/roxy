@@ -252,8 +252,12 @@ func (bw *basicWrappedWriter) WriteError(statusCode int) {
 		panic(fmt.Errorf("HTTP status code %03d out of range [400..599]", statusCode))
 	}
 
-	bw.sawError = true
+	if statusCode >= 500 {
+		bw.sawError = true
+	}
+
 	if bw.wroteHeader {
+		bw.sawError = true
 		return
 	}
 
