@@ -1,7 +1,10 @@
 # vim:set ft=dockerfile:
+ARG ARCH=amd64
 
 FROM golang:1.16-alpine3.13 AS builder
-ARG version=unset
+ARG VERSION=unset
+ARG GOOS=linux
+ARG GOARCH=amd64
 RUN ["apk", "add", "--no-cache", "libcap", "ca-certificates"]
 RUN ["/bin/sh", "-c", "update-ca-certificates 2>/dev/null || true"]
 RUN ["/bin/sh", "-c", "echo 'hosts: files dns' > /etc/nsswitch.conf"]
@@ -9,16 +12,20 @@ WORKDIR /build
 COPY ./ ./
 RUN set -euo pipefail; \
     umask 022; \
-    export GOPATH=/go GOOS=linux GOARCH=amd64 CGO_ENABLED=0; \
-    if [ "${version}" = "unset" ]; then \
+    export GOPATH=/go GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0; \
+    if [ "${VERSION}" = "unset" ]; then \
       cat .version > lib/mainutil/version.txt; \
     else \
-      echo "${version}" > lib/mainutil/version.txt; \
+      echo "${VERSION}" > lib/mainutil/version.txt; \
     fi; \
     go get -d ./...; \
     go install ./...; \
     mv /go/pkg /junk; \
     chmod -R a+rX,u+w,go-w /build /go/bin; \
+    if [ -d /go/bin/${GOOS}_${GOARCH} ]; then \
+      mv /go/bin/${GOOS}_${GOARCH}/* /go/bin; \
+      rmdir /go/bin/${GOOS}_${GOARCH}; \
+    fi; \
     setcap cap_net_bind_service=+ep /go/bin/roxy; \
     addgroup -S roxy -g 400; \
     adduser -S roxy -u 400 -G roxy -h /var/opt/roxy/lib -H -D; \
@@ -38,16 +45,16 @@ RUN set -euo pipefail; \
     chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme; \
     chmod 2750 /var/opt/roxy/log
 
-FROM alpine:3.13 AS final
-COPY --from=builder /opt/roxy/ /opt/roxy/
-COPY --from=builder /go/bin/ /opt/roxy/bin/
-COPY --from=builder /var/opt/roxy/ /var/opt/roxy/
-COPY --from=builder /etc/opt/roxy/ /etc/opt/roxy/
+FROM ${ARCH}/alpine:3.13 AS final
+COPY --from=builder /srv/ /srv/
 COPY --from=builder /etc/passwd /etc/group /etc/nsswitch.conf /etc/
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /srv/ /srv/
+COPY --from=builder /etc/opt/roxy/ /etc/opt/roxy/
+COPY --from=builder /var/opt/roxy/ /var/opt/roxy/
+COPY --from=builder /opt/roxy/ /opt/roxy/
+COPY --from=builder /go/bin/ /opt/roxy/bin/
 ENV PATH /opt/roxy/bin:$PATH
 USER roxy:roxy
 WORKDIR /var/opt/roxy/lib
 EXPOSE 80/tcp 443/tcp
-CMD ["roxy", "-S", "-c", "/etc/opt/roxy/config.json"]
+CMD ["roxy", "-S"]

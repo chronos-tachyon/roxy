@@ -30,47 +30,68 @@ else
   TAGS=( "$FULL_VERSION" "devel" )
 fi
 
-build_for_arch() {
-  declare DOCKERFILE
-  declare ARCH
-  declare -a FLAGS
-  declare tag
+OS_ARCH_LIST=( linux/amd64 linux/arm64 )
 
-  case "$1" in
-    (amd64)
-      DOCKERFILE="Dockerfile"
-      ARCH="amd64"
+arch_from_goos_goarch() {
+  local GOOS="$1"
+  local GOARCH="$2"
+  case "${GOOS}/${GOARCH}" in
+    (linux/arm64)
+      echo arm64v8
       ;;
-    (arm64v8)
-      DOCKERFILE="Dockerfile.arm64v8"
-      ARCH="arm64v8"
+    (linux/*)
+      echo "$GOARCH"
       ;;
     (*)
-      echo "ERROR: unknown arch: ${1}" >&2
+      echo "error: ${GOOS}/${GOARCH} not implemented" >&2
       exit 1
       ;;
   esac
+}
 
-  FLAGS=( --file="$DOCKERFILE" --build-arg=version="$FULL_VERSION" )
+build_for_os_arch() {
+  local goos="$1"
+  local goarch="$2"
+
+  local dockerfile="Dockerfile"
+  local arch="$(arch_from_goos_goarch "$goos" "$goarch")"
+
+  declare -a flags
+  flags=(
+    --file="$dockerfile"
+    --build-arg=GOOS="$goos"
+    --build-arg=GOARCH="$goarch"
+    --build-arg=ARCH="$arch"
+    --build-arg=VERSION="$FULL_VERSION"
+  )
   for tag in "${TAGS[@]}"; do
-    FLAGS=( "${FLAGS[@]}" --tag="${PACKAGE}:${ARCH}-${tag}" )
+    flags=( "${flags[@]}" --tag="${PACKAGE}:${arch}-${tag}" )
   done
 
-  echo "> docker build ${FLAGS[*]} ."
-  docker build "${FLAGS[@]}" .
+  echo "> docker build ${flags[*]} ."
+  docker build "${flags[@]}" .
 
+  local tag
   for tag in "${TAGS[@]}"; do
-    echo "> docker push ${PACKAGE}:${ARCH}-${tag}"
-    docker push "${PACKAGE}:${ARCH}-${tag}"
+    echo "> docker push ${PACKAGE}:${arch}-${tag}"
+    docker push "${PACKAGE}:${arch}-${tag}"
   done
 }
 
-build_for_arch amd64
-build_for_arch arm64v8
+for OS_ARCH in linux/amd64 linux/arm64; do
+  GOOS="${OS_ARCH%/*}"
+  GOARCH="${OS_ARCH#*/}"
+  build_for_os_arch "$GOOS" "$GOARCH"
+done
 
 for tag in "${TAGS[@]}"; do
-  docker manifest create "${PACKAGE}:${tag}" \
-    --amend "${PACKAGE}:amd64-${tag}" \
-    --amend "${PACKAGE}:arm64v8-${tag}"
+  ARGS=( "${PACKAGE}:${tag}" )
+  for OS_ARCH in linux/amd64 linux/arm64; do
+    GOOS="${OS_ARCH%/*}"
+    GOARCH="${OS_ARCH#*/}"
+    ARCH="$(arch_from_goos_goarch "$GOOS" "$GOARCH")"
+    ARGS=( "${ARGS[@]}" --amend "${PACKAGE}:${ARCH}-${tag}" )
+  done
+  docker manifest create "${ARGS[@]}"
   docker manifest push "${PACKAGE}:${tag}"
 done
