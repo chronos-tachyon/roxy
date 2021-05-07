@@ -26,12 +26,12 @@ RUN set -euo pipefail; \
     adduser -S roxy -u 400 -G roxy -h /var/opt/roxy/lib -H -D; \
     mkdir -p /etc/opt/roxy /opt/roxy/share/misc /opt/roxy/share/templates /var/opt/roxy/lib/acme /var/opt/roxy/log /srv/www; \
     cp /build/templates/* /opt/roxy/share/templates/; \
-    cp /build/config.json.example /opt/roxy/share/misc/config.json.example; \
-    cp /build/config.json.example /etc/opt/roxy/config.json.example; \
-    cp /build/config.json.example /etc/opt/roxy/config.json; \
-    cp /build/mime.json.example /opt/roxy/share/misc/mime.json.example; \
-    cp /build/mime.json.example /etc/opt/roxy/mime.json.example; \
-    cp /build/mime.json.example /etc/opt/roxy/mime.json; \
+    cp /build/dist/config.json /opt/roxy/share/misc/config.json.example; \
+    cp /build/dist/config.json /etc/opt/roxy/config.json.example; \
+    cp /build/dist/config.json /etc/opt/roxy/config.json; \
+    cp /build/dist/mime.json /opt/roxy/share/misc/mime.json.example; \
+    cp /build/dist/mime.json /etc/opt/roxy/mime.json.example; \
+    cp /build/dist/mime.json /etc/opt/roxy/mime.json; \
     chown root:roxy /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example; \
     chown root:roxy /var/opt/roxy; \
     chown roxy:roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme; \
