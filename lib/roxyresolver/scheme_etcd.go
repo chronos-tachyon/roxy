@@ -12,6 +12,7 @@ import (
 	grpcresolver "google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func NewEtcdBuilder(ctx context.Context, rng *rand.Rand, etcd *v3.Client, serviceConfigJSON string) grpcresolver.Builder {
@@ -49,13 +50,13 @@ func NewEtcdResolver(opts Options) (Resolver, error) {
 
 func ParseEtcdTarget(rt RoxyTarget) (etcdPath string, etcdPort string, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
-		err = BadAuthorityError{Authority: rt.Authority, Err: ErrExpectEmpty}
+		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
 	pathAndPort := rt.Endpoint
 	if pathAndPort == "" {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
@@ -69,15 +70,15 @@ func ParseEtcdTarget(rt RoxyTarget) (etcdPath string, etcdPort string, balancer 
 	if !strings.HasSuffix(etcdPath, "/") {
 		etcdPath += "/"
 	}
-	err = ValidateEtcdPath(etcdPath)
+	err = roxyutil.ValidateEtcdPath(etcdPath)
 	if err != nil {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 	if hasPort {
-		err = ValidateServerSetPort(etcdPort)
+		err = roxyutil.ValidateNamedPort(etcdPort)
 		if err != nil {
-			err = BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+			err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
 			return
 		}
 	}
@@ -85,7 +86,7 @@ func ParseEtcdTarget(rt RoxyTarget) (etcdPath string, etcdPort string, balancer 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
@@ -93,22 +94,6 @@ func ParseEtcdTarget(rt RoxyTarget) (etcdPath string, etcdPort string, balancer 
 	serverName = rt.Query.Get("serverName")
 
 	return
-}
-
-func ValidateEtcdPath(etcdPath string) error {
-	if !strings.HasSuffix(etcdPath, "/") {
-		return BadPathError{Path: etcdPath, Err: ErrExpectTrailingSlash}
-	}
-	if strings.Contains(etcdPath, "//") {
-		return BadPathError{Path: etcdPath, Err: ErrExpectNoDoubleSlash}
-	}
-	if strings.Contains("/"+etcdPath, "/./") {
-		return BadPathError{Path: etcdPath, Err: ErrExpectNoDot}
-	}
-	if strings.Contains("/"+etcdPath, "/../") {
-		return BadPathError{Path: etcdPath, Err: ErrExpectNoDotDot}
-	}
-	return nil
 }
 
 func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPath string, etcdPort string, serverName string) WatchingResolveFunc {
@@ -224,11 +209,11 @@ func (b etcdBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcr
 
 // }}}
 
-func etcdMapEvent(portName string, serverName string, t mvccpb.Event_EventType, kv *mvccpb.KeyValue) Event {
+func etcdMapEvent(namedPort string, serverName string, t mvccpb.Event_EventType, kv *mvccpb.KeyValue) Event {
 	key := string(kv.Key)
 	switch t {
 	case v3.EventTypePut:
-		return ParseServerSetData(portName, serverName, key, kv.Value)
+		return parseMembershipData(namedPort, serverName, key, kv.Value)
 
 	case v3.EventTypeDelete:
 		return Event{

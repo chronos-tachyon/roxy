@@ -12,6 +12,9 @@ import (
 
 	"github.com/rs/zerolog/log"
 	v3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type EtcdConfig struct {
@@ -101,7 +104,7 @@ func (ec *EtcdConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), ec)
+	err := misc.StrictUnmarshalJSON([]byte(str), ec)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -122,10 +125,16 @@ func (ec *EtcdConfig) Parse(str string) error {
 			}
 
 		case strings.HasPrefix(item, "username="):
-			ec.Username = item[9:]
+			ec.Username, err = roxyutil.ExpandString(item[9:])
+			if err != nil {
+				return err
+			}
 
 		case strings.HasPrefix(item, "password="):
-			ec.Password = item[9:]
+			ec.Password, err = roxyutil.ExpandPassword(item[9:])
+			if err != nil {
+				return err
+			}
 
 		case strings.HasPrefix(item, "dialTimeout="):
 			ec.DialTimeout, err = time.ParseDuration(item[12:])
@@ -155,7 +164,12 @@ func (ec *EtcdConfig) Parse(str string) error {
 		expectScheme = "https"
 	}
 
-	endpointList := strings.Split(pieces[0], ",")
+	endpointListString, err := roxyutil.ExpandString(pieces[0])
+	if err != nil {
+		return err
+	}
+
+	endpointList := strings.Split(endpointListString, ",")
 	ec.Endpoints = make([]string, 0, len(endpointList))
 	for _, endpoint := range endpointList {
 		if endpoint == "" {
@@ -204,7 +218,7 @@ func (ec *EtcdConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt ecJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

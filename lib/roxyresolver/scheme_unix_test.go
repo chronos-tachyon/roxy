@@ -6,6 +6,8 @@ import (
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func TestNewUnixResolver(t *testing.T) {
@@ -157,9 +159,9 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-authority-is-not-empty",
 			target: "unix://example.com/path/to/socket",
 			errfn: func(err error) bool {
-				var xerr BadAuthorityError
+				var xerr roxyutil.BadAuthorityError
 				if errors.As(err, &xerr) {
-					return xerr.Err == ErrExpectEmptyOrLocalhost
+					return xerr.Err == roxyutil.ErrExpectEmptyOrLocalhost
 				}
 				return false
 			},
@@ -168,9 +170,9 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-endpoint-is-empty-1",
 			target: "unix:",
 			errfn: func(err error) bool {
-				var xerr BadEndpointError
+				var xerr roxyutil.BadEndpointError
 				if errors.As(err, &xerr) {
-					return xerr.Err == ErrExpectNonEmpty
+					return xerr.Err == roxyutil.ErrExpectNonEmpty
 				}
 				return false
 			},
@@ -179,9 +181,9 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-endpoint-is-empty-2",
 			target: "unix://localhost",
 			errfn: func(err error) bool {
-				var xerr BadEndpointError
+				var xerr roxyutil.BadEndpointError
 				if errors.As(err, &xerr) {
-					return xerr.Err == ErrExpectNonEmpty
+					return xerr.Err == roxyutil.ErrExpectNonEmpty
 				}
 				return false
 			},
@@ -190,9 +192,9 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-path-is-empty",
 			target: "unix:?foo=bar",
 			errfn: func(err error) bool {
-				var xerr BadEndpointError
+				var xerr roxyutil.BadEndpointError
 				if errors.As(err, &xerr) {
-					return xerr.Err == ErrExpectNonEmpty
+					return xerr.Err == roxyutil.ErrExpectNonEmpty
 				}
 				return false
 			},
@@ -201,7 +203,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-bad-query",
 			target: "unix:/path/to/socket?foo=%",
 			errfn: func(err error) bool {
-				var xerr BadQueryStringError
+				var xerr roxyutil.BadQueryStringError
 				return errors.As(err, &xerr)
 			},
 		},
@@ -209,7 +211,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-bad-balancer",
 			target: "unix:/path/to/socket?balancer=bogus",
 			errfn: func(err error) bool {
-				var xerr BadQueryParamError
+				var xerr roxyutil.BadQueryParamError
 				if errors.As(err, &xerr) {
 					return xerr.Name == "balancer" && xerr.Value == "bogus"
 				}

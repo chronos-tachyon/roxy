@@ -2,8 +2,9 @@ package roxyresolver
 
 import (
 	"net"
-	"path/filepath"
 	"strings"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func NewUnixResolver(opts Options) (Resolver, error) {
@@ -47,29 +48,53 @@ func NewUnixResolver(opts Options) (Resolver, error) {
 
 func ParseUnixTarget(rt RoxyTarget) (unixAddr *net.UnixAddr, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" && !strings.EqualFold(rt.Authority, "localhost") {
-		err = BadAuthorityError{Authority: rt.Authority, Err: ErrExpectEmptyOrLocalhost}
+		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmptyOrLocalhost}
 		return
 	}
 
 	rawUnixPath := rt.Endpoint
 	if rawUnixPath == "" {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		return
+	}
+
+	isUnixAbstract := strings.EqualFold(rt.Scheme, "unix-abstract")
+	fn := roxyutil.ExpandString
+	if rawUnixPath != "" && !isUnixAbstract {
+		ch := rawUnixPath[0]
+		if ch == '\x00' || ch == '@' {
+			// pass
+		} else if ch == '/' || ch == '$' {
+			fn = roxyutil.ExpandPath
+		} else {
+			rawUnixPath = "/" + rawUnixPath
+			fn = roxyutil.ExpandPath
+		}
+	}
+
+	rawUnixPath, err = fn(rawUnixPath)
+	if err != nil {
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		return
+	}
+	if rawUnixPath == "" {
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
 	var unixPath string
-	if strings.EqualFold(rt.Scheme, "unix-abstract") {
+	if isUnixAbstract {
 		unixPath = "\x00" + rawUnixPath
 	} else if rawUnixPath[0] == '\x00' || rawUnixPath[0] == '@' {
 		unixPath = "\x00" + rawUnixPath[1:]
 	} else {
-		unixPath = filepath.Clean(filepath.FromSlash("/" + rawUnixPath))
+		unixPath = rawUnixPath
 	}
 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}

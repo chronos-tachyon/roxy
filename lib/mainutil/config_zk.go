@@ -13,6 +13,9 @@ import (
 
 	"github.com/go-zookeeper/zk"
 	"github.com/rs/zerolog/log"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type ZKConfig struct {
@@ -108,7 +111,7 @@ func (zc *ZKConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), zc)
+	err := misc.StrictUnmarshalJSON([]byte(str), zc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -120,16 +123,22 @@ func (zc *ZKConfig) Parse(str string) error {
 		return nil
 	}
 
-	serverList := strings.Split(pieces[0], ",")
+	serverListString, err := roxyutil.ExpandString(pieces[0])
+	if err != nil {
+		return err
+	}
+
+	serverList := strings.Split(serverListString, ",")
 	zc.Servers = make([]string, 0, len(serverList))
 	for _, server := range serverList {
 		if server == "" {
 			continue
 		}
-		if _, _, err := net.SplitHostPort(server); err != nil {
-			server = net.JoinHostPort(server, "2181")
+		host, port, err := misc.SplitHostPort(server, "2181")
+		if err != nil {
+			return err
 		}
-		zc.Servers = append(zc.Servers, server)
+		zc.Servers = append(zc.Servers, net.JoinHostPort(host, port))
 	}
 	if len(zc.Servers) == 0 {
 		return nil
@@ -155,15 +164,23 @@ func (zc *ZKConfig) Parse(str string) error {
 			}
 
 		case strings.HasPrefix(item, "username="):
+			expanded, err := roxyutil.ExpandString(item[9:])
+			if err != nil {
+				return err
+			}
 			zc.Auth.Enabled = true
 			if zc.Auth.Scheme == "" {
 				zc.Auth.Scheme = "digest"
 			}
-			zc.Auth.Username = item[9:]
+			zc.Auth.Username = expanded
 
 		case strings.HasPrefix(item, "password="):
+			expanded, err := roxyutil.ExpandPassword(item[9:])
+			if err != nil {
+				return err
+			}
 			zc.Auth.Enabled = true
-			zc.Auth.Password = item[9:]
+			zc.Auth.Password = expanded
 
 		default:
 			return fmt.Errorf("unknown option %q", item)
@@ -194,7 +211,7 @@ func (zc *ZKConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt zcJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

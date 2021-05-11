@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
@@ -62,6 +63,11 @@ func (s *HealthServer) Stop() {
 }
 
 func (s *HealthServer) Check(ctx context.Context, req *healthCheckRequest) (*healthCheckResponse, error) {
+	log.Logger.Debug().
+		Str("rpcService", "grpc.health.v1.Health").
+		Str("rpcMethod", "Check").
+		Msg("RPC")
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -77,6 +83,11 @@ func (s *HealthServer) Check(ctx context.Context, req *healthCheckRequest) (*hea
 }
 
 func (s *HealthServer) Watch(req *healthCheckRequest, ws grpc_health_v1.Health_WatchServer) error {
+	log.Logger.Debug().
+		Str("rpcService", "grpc.health.v1.Health").
+		Str("rpcMethod", "Watch").
+		Msg("RPC")
+
 	s.mu.Lock()
 	h := s.byService[req.Service]
 	if h == nil {

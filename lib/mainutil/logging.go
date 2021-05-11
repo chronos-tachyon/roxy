@@ -20,6 +20,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 var unixZero = time.Unix(0, 0)
@@ -64,7 +66,7 @@ func InitLogging() {
 	}
 
 	if flagLogFile != "" {
-		abs, err := ProcessPath(flagLogFile)
+		abs, err := roxyutil.ExpandPath(flagLogFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 			os.Exit(1)

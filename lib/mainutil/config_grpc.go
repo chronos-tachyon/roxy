@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 )
 
@@ -66,7 +67,7 @@ func (gcc *GRPCClientConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), gcc)
+	err := misc.StrictUnmarshalJSON([]byte(str), gcc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -116,7 +117,7 @@ func (gcc *GRPCClientConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt gccJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}

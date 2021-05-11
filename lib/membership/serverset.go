@@ -2,9 +2,12 @@ package membership
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
 type ServerSet struct {
@@ -56,32 +59,31 @@ func (ss *ServerSet) IsAlive() bool {
 	return ss.Status == StatusAlive
 }
 
-func (ss *ServerSet) TCPAddrForPort(portName string) *net.TCPAddr {
+func (ss *ServerSet) TCPAddrForPort(namedPort string) *net.TCPAddr {
 	if ss == nil {
 		return nil
 	}
-	if portName == "" {
-		return ss.ServiceEndpoint.TCPAddr()
+	ep := ss.ServiceEndpoint
+	if namedPort != "" {
+		ep = ss.AdditionalEndpoints[namedPort]
 	}
-	return ss.AdditionalEndpoints[portName].TCPAddr()
+	return ep.TCPAddr()
 }
 
 type ServerSetEndpoint struct {
 	Host string `json:"host"`
 	Port uint16 `json:"port"`
-	IP   net.IP `json:"-"`
-	Zone string `json:"-"`
 }
 
 func (ep *ServerSetEndpoint) TCPAddr() *net.TCPAddr {
 	if ep == nil {
 		return nil
 	}
-	return &net.TCPAddr{
-		IP:   ep.IP,
-		Port: int(ep.Port),
-		Zone: ep.Zone,
+	tcpAddr, err := TCPAddrFromServerSetEndpoint(ep)
+	if err != nil {
+		panic(err)
 	}
+	return tcpAddr
 }
 
 type ServerSetStatus uint8
@@ -180,6 +182,38 @@ var _ fmt.Stringer = ServerSetStatus(0)
 var _ fmt.GoStringer = ServerSetStatus(0)
 var _ json.Marshaler = ServerSetStatus(0)
 var _ json.Unmarshaler = (*ServerSetStatus)(nil)
+
+func ServerSetEndpointFromTCPAddr(addr *net.TCPAddr) *ServerSetEndpoint {
+	if addr == nil {
+		return nil
+	}
+	ipAndZone := addr.IP.String()
+	if addr.Zone != "" {
+		ipAndZone += "%" + addr.Zone
+	}
+	return &ServerSetEndpoint{
+		Host: ipAndZone,
+		Port: uint16(addr.Port),
+	}
+}
+
+func TCPAddrFromServerSetEndpoint(ep *ServerSetEndpoint) (*net.TCPAddr, error) {
+	if ep == nil {
+		panic(errors.New("*ServerSetEndpoint is nil"))
+	}
+
+	ip, zone, err := misc.ParseIPAndZone(ep.Host)
+	if err != nil {
+		return nil, err
+	}
+
+	tcpAddr := &net.TCPAddr{
+		IP:   ip,
+		Port: int(ep.Port),
+		Zone: zone,
+	}
+	return tcpAddr, nil
+}
 
 type enumData struct {
 	GoName string

@@ -3,11 +3,13 @@ package roxyresolver
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type RoxyTarget struct {
@@ -75,11 +77,11 @@ func (rt *RoxyTarget) Parse(str string) error {
 	}()
 
 	if str == "" {
-		return BadEndpointError{Endpoint: str, Err: ErrExpectNonEmpty}
+		return roxyutil.BadEndpointError{Endpoint: str, Err: roxyutil.ErrExpectNonEmpty}
 	}
 
 	if str == nullString {
-		return BadEndpointError{Endpoint: str, Err: ErrFailedToMatch}
+		return roxyutil.BadEndpointError{Endpoint: str, Err: roxyutil.ErrFailedToMatch}
 	}
 
 	match := regexp.MustCompile(`^([0-9A-Za-z+-]+):`).FindStringSubmatch(str)
@@ -109,7 +111,7 @@ func (rt *RoxyTarget) Parse(str string) error {
 		var err error
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
-			return BadQueryStringError{QueryString: qs, Err: err}
+			return roxyutil.BadQueryStringError{QueryString: qs, Err: err}
 		}
 	}
 
@@ -136,7 +138,7 @@ func RoxyTargetFromTarget(target Target) (RoxyTarget, error) {
 		var err error
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
-			return zero, BadQueryStringError{QueryString: qs, Err: err}
+			return zero, roxyutil.BadQueryStringError{QueryString: qs, Err: err}
 		}
 	}
 
@@ -157,15 +159,9 @@ func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
 
 	switch rt.Scheme {
 	case passthroughScheme:
-		host, _, err := net.SplitHostPort(rt.Endpoint)
+		host, _, err := misc.SplitHostPort(rt.Endpoint, httpsPort)
 		if err != nil {
-			h, _, err2 := net.SplitHostPort(rt.Endpoint + ":" + httpsPort)
-			if err2 == nil {
-				host, err = h, nil
-			}
-			if err != nil {
-				return zero, err
-			}
+			return zero, err
 		}
 		rt.ServerName = host
 
@@ -231,7 +227,7 @@ func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
 		rt.ServerName = serverName
 
 	case atcScheme:
-		_, _, _, _, serverName, err := ParseATCTarget(rt)
+		_, _, _, _, _, serverName, err := ParseATCTarget(rt)
 		if err != nil {
 			return zero, err
 		}

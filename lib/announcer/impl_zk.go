@@ -2,6 +2,7 @@ package announcer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func (a *Announcer) AddZK(zkconn *zk.Conn, zkPath string, unique string, format Format, namedPort string) error {
@@ -26,11 +28,11 @@ func NewZK(zkconn *zk.Conn, zkPath string, unique string, format Format, namedPo
 	if zkconn == nil {
 		panic(errors.New("*zk.Conn is nil"))
 	}
-	if err := roxyresolver.ValidateZKPath(zkPath); err != nil {
+	if err := roxyutil.ValidateZKPath(zkPath); err != nil {
 		return nil, fmt.Errorf("invalid ZooKeeper path %q: %w", zkPath, err)
 	}
 	if namedPort != "" {
-		if err := roxyresolver.ValidateServerSetPort(namedPort); err != nil {
+		if err := roxyutil.ValidateNamedPort(namedPort); err != nil {
 			return nil, fmt.Errorf("invalid named port %q: %w", namedPort, err)
 		}
 	}
@@ -58,15 +60,27 @@ type zkImpl struct {
 	actual string
 }
 
-func (impl *zkImpl) Announce(ctx context.Context, ss *membership.ServerSet) error {
+func (impl *zkImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	var payload []byte
-	if impl.format == GRPCFormat {
-		payload = ss.AsGRPC(impl.namedPort).AsJSON()
-	} else {
-		payload = ss.AsJSON()
+	var v interface{}
+	var err error
+	switch impl.format {
+	case FinagleFormat:
+		v, err = r.AsServerSet()
+	case GRPCFormat:
+		v, err = r.AsGRPC(impl.namedPort)
+	default:
+		v, err = r.AsRoxyJSON()
+	}
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return err
 	}
 
 	file := path.Join(impl.zkPath, impl.unique)

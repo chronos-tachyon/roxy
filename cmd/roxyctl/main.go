@@ -3,6 +3,7 @@ package main
 import (
 	getopt "github.com/pborman/getopt/v2"
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
@@ -13,7 +14,7 @@ var (
 )
 
 func init() {
-	getopt.SetParameters("")
+	getopt.SetParameters("<cmd> [<arg>...]")
 	getopt.FlagLong(&flagAdminTarget, "server", 's', "address for Admin gRPC interface")
 }
 
@@ -30,11 +31,19 @@ func main() {
 	var cmd string
 	if getopt.NArgs() == 0 {
 		cmd = "ping"
-	} else if getopt.NArgs() == 1 {
-		cmd = getopt.Arg(0)
 	} else {
+		cmd = getopt.Arg(0)
+	}
+
+	expectedNArgs := 1
+	switch cmd {
+	case "healthcheck":
+		expectedNArgs = 2
+	}
+
+	if getopt.NArgs() != expectedNArgs {
 		log.Logger.Fatal().
-			Int("expect", 1).
+			Int("expect", expectedNArgs).
 			Int("actual", getopt.NArgs()).
 			Msg("wrong number of arguments")
 	}
@@ -57,8 +66,25 @@ func main() {
 	}
 	defer cc.Close()
 
+	health := grpc_health_v1.NewHealthClient(cc)
 	admin := roxypb.NewAdminClient(cc)
+
+	event := log.Logger.Info()
+
 	switch cmd {
+	case "healthcheck":
+		service := getopt.Arg(1)
+		req := &grpc_health_v1.HealthCheckRequest{
+			Service: service,
+		}
+		resp, err := health.Check(ctx, req)
+		if err != nil {
+			log.Logger.Fatal().
+				Err(err).
+				Msg("call to /grpc.health.v1.Health/Check failed")
+		}
+		event = event.Str("status", resp.Status.String())
+
 	case "ping":
 		_, err := admin.Ping(ctx, &roxypb.PingRequest{})
 		if err != nil {
@@ -89,6 +115,5 @@ func main() {
 			Msg("unknown command")
 	}
 
-	log.Logger.Info().
-		Msg("OK")
+	event.Msg("OK")
 }

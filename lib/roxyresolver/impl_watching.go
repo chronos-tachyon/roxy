@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/serviceconfig"
 
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/lib/syncrand"
 )
 
@@ -360,7 +361,7 @@ func (res *WatchingResolver) sendEvents(events []Event) {
 		if err := newErrors.ErrorOrNil(); err != nil {
 			res.cc.ReportError(err)
 		} else if len(res.resolved) == 0 {
-			res.cc.ReportError(ErrNoHealthyBackends)
+			res.cc.ReportError(roxyutil.ErrNoHealthyBackends)
 		} else {
 			var state grpcresolver.State
 			state.Addresses = makeAddressList(res.resolved)

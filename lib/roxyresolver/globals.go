@@ -1,7 +1,6 @@
 package roxyresolver
 
 import (
-	"regexp"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -39,29 +38,6 @@ var (
 
 	gMu     sync.Mutex
 	gLogger *zerolog.Logger = newNop()
-
-	reScheme    = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:[+-][0-9A-Za-z]+)*$`)
-	reNamedPort = regexp.MustCompile(`^[A-Za-z][0-9A-Za-z]*(?:[._+-][0-9A-Za-z]+)*$`)
-	reLBName    = regexp.MustCompile(`^[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*$`)
-	reLBLoc     = regexp.MustCompile(`^.*$`)
-
-	boolMap = map[string]bool{
-		"0": false,
-		"1": true,
-
-		"off": false,
-		"on":  true,
-
-		"n":   false,
-		"no":  false,
-		"y":   true,
-		"yes": true,
-
-		"f":     false,
-		"false": false,
-		"t":     true,
-		"true":  true,
-	}
 )
 
 func newNop() *zerolog.Logger {

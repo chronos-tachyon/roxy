@@ -9,6 +9,9 @@ import (
 	"time"
 
 	grpcresolver "google.golang.org/grpc/resolver"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func NewDNSBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
@@ -53,34 +56,21 @@ func NewDNSResolver(opts Options) (Resolver, error) {
 func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host string, port string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
 	res, err = parseNetResolver(rt.Authority)
 	if err != nil {
-		err = BadAuthorityError{Authority: rt.Authority, Err: err}
+		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: err}
 		return
 	}
 
 	hostPort := rt.Endpoint
 	if hostPort == "" {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
-	host, port, err = net.SplitHostPort(hostPort)
+	host, port, err = misc.SplitHostPort(hostPort, defaultPort)
 	if err != nil {
-		h, p, err2 := net.SplitHostPort(hostPort + ":" + defaultPort)
-		if err2 == nil {
-			host, port, err = h, p, nil
-		}
-		if err != nil {
-			err = BadEndpointError{
-				Endpoint: rt.Endpoint,
-				Err:      BadHostPortError{HostPort: hostPort, Err: err},
-			}
-			return
-		}
-	}
-	if host == "" {
-		err = BadEndpointError{
+		err = roxyutil.BadEndpointError{
 			Endpoint: rt.Endpoint,
-			Err:      BadHostError{Host: host, Err: err},
+			Err:      roxyutil.BadHostPortError{HostPort: hostPort, Err: err},
 		}
 		return
 	}
@@ -88,7 +78,7 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
@@ -96,7 +86,7 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 	if str := rt.Query.Get("pollInterval"); str != "" {
 		pollInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "pollInterval", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "pollInterval", Value: str, Err: err}
 			return
 		}
 	}
@@ -104,7 +94,7 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 	if str := rt.Query.Get("cooldownInterval"); str != "" {
 		cdInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "cooldownInterval", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "cooldownInterval", Value: str, Err: err}
 			return
 		}
 	}

@@ -12,13 +12,16 @@ WORKDIR /build
 COPY ./ ./
 RUN set -euo pipefail; \
     umask 022; \
+    export LC_ALL=C TZ=Etc/UTC; \
     export GOPATH=/go GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0; \
     if [ "${VERSION}" = "unset" ]; then \
       cat .version > lib/mainutil/version.txt; \
     else \
       echo "${VERSION}" > lib/mainutil/version.txt; \
     fi; \
+    echo '::group::go get'; \
     go get -d ./...; \
+    echo '::endgroup::'; \
     go install ./...; \
     mv /go/pkg /junk; \
     chmod -R a+rX,u+w,go-w /build /go/bin; \
@@ -29,14 +32,24 @@ RUN set -euo pipefail; \
     setcap cap_net_bind_service=+ep /go/bin/roxy; \
     addgroup -S roxy -g 400; \
     adduser -S roxy -u 400 -G roxy -h /var/opt/roxy/lib -H -D; \
-    mkdir -p /etc/opt/roxy /opt/roxy/share/misc /opt/roxy/share/templates /var/opt/roxy/lib/acme /var/opt/roxy/log /srv/www; \
+    mkdir -p /etc/opt/roxy /etc/opt/atc /opt/roxy/share/misc /opt/roxy/share/templates /var/opt/roxy/lib/acme /var/opt/roxy/log /srv/www; \
     cp /build/templates/* /opt/roxy/share/templates/; \
-    cp /build/dist/config.json /opt/roxy/share/misc/config.json.example; \
-    cp /build/dist/config.json /etc/opt/roxy/config.json.example; \
-    cp /build/dist/config.json /etc/opt/roxy/config.json; \
-    cp /build/dist/mime.json /opt/roxy/share/misc/mime.json.example; \
-    cp /build/dist/mime.json /etc/opt/roxy/mime.json.example; \
-    cp /build/dist/mime.json /etc/opt/roxy/mime.json; \
+    cp /build/dist/roxy.config.json /opt/roxy/share/misc/roxy.config.json.example; \
+    cp /build/dist/roxy.config.json /etc/opt/roxy/config.json.example; \
+    cp /build/dist/roxy.config.json /etc/opt/roxy/config.json; \
+    cp /build/dist/roxy.mime.json /opt/roxy/share/misc/roxy.mime.json.example; \
+    cp /build/dist/roxy.mime.json /etc/opt/roxy/mime.json.example; \
+    cp /build/dist/roxy.mime.json /etc/opt/roxy/mime.json; \
+    cp /build/dist/atc.config.json /opt/roxy/share/misc/atc.config.json.example; \
+    cp /build/dist/atc.config.json /etc/opt/atc/config.json.example; \
+    cp /build/dist/atc.config.json /etc/opt/atc/config.json; \
+    cp /build/dist/atc.main.json /opt/roxy/share/misc/atc.main.json.example; \
+    cp /build/dist/atc.main.json /etc/opt/atc/main.json.example; \
+    cp /build/dist/atc.main.json /etc/opt/atc/main.json; \
+    cp /build/dist/atc.cost.json /opt/roxy/share/misc/atc.cost.json.example; \
+    cp /build/dist/atc.cost.json /etc/opt/atc/cost.json.example; \
+    cp /build/dist/atc.cost.json /etc/opt/atc/cost.json; \
+    find /etc/opt/roxy /etc/opt/atc /opt/roxy /var/opt/roxy /srv/www -print0 | xargs -0 touch -d '2000-01-01 00:00:00' --; \
     chown root:roxy /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example; \
     chown root:roxy /var/opt/roxy; \
     chown roxy:roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme; \

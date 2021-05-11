@@ -2,6 +2,7 @@ package announcer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func (a *Announcer) AddEtcd(etcd *v3.Client, etcdPath string, unique string, format Format, namedPort string) error {
@@ -25,11 +27,11 @@ func NewEtcd(etcd *v3.Client, etcdPath string, unique string, format Format, nam
 	if etcd == nil {
 		panic(errors.New("*v3.Client is nil"))
 	}
-	if err := roxyresolver.ValidateEtcdPath(etcdPath); err != nil {
+	if err := roxyutil.ValidateEtcdPath(etcdPath); err != nil {
 		return nil, fmt.Errorf("invalid etcd path %q: %w", etcdPath, err)
 	}
 	if namedPort != "" {
-		if err := roxyresolver.ValidateServerSetPort(namedPort); err != nil {
+		if err := roxyutil.ValidateNamedPort(namedPort); err != nil {
 			return nil, fmt.Errorf("invalid named port %q: %w", namedPort, err)
 		}
 	}
@@ -58,15 +60,27 @@ type etcdImpl struct {
 	leaseID v3.LeaseID
 }
 
-func (impl *etcdImpl) Announce(ctx context.Context, ss *membership.ServerSet) error {
+func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	var payload []byte
-	if impl.format == GRPCFormat {
-		payload = ss.AsGRPC(impl.namedPort).AsJSON()
-	} else {
-		payload = ss.AsJSON()
+	var v interface{}
+	var err error
+	switch impl.format {
+	case FinagleFormat:
+		v, err = r.AsServerSet()
+	case GRPCFormat:
+		v, err = r.AsGRPC(impl.namedPort)
+	default:
+		v, err = r.AsRoxyJSON()
+	}
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return err
 	}
 
 	lease, err := impl.etcd.Lease.Grant(ctx, 30)

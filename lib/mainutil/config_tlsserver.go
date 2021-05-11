@@ -11,7 +11,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type TLSServerConfig struct {
@@ -86,7 +87,7 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), tsc)
+	err := misc.StrictUnmarshalJSON([]byte(str), tsc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -94,7 +95,7 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 
 	pieces := strings.Split(str, ",")
 
-	value, err := roxyresolver.ParseBool(pieces[0])
+	value, err := misc.ParseBool(pieces[0])
 	if err != nil {
 		return err
 	}
@@ -111,7 +112,7 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 			tsc.Key = item[4:]
 
 		case strings.HasPrefix(item, "mTLS=") || strings.HasPrefix(item, "mtls="):
-			value, err = roxyresolver.ParseBool(item[5:])
+			value, err = misc.ParseBool(item[5:])
 			if err != nil {
 				return err
 			}
@@ -158,7 +159,7 @@ func (tsc *TLSServerConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt tscJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
@@ -278,14 +279,14 @@ func (tsc TLSServerConfig) postprocess() (out TLSServerConfig, err error) {
 		return zero, nil
 	}
 
-	expanded, err := ProcessPath(tsc.Cert)
+	expanded, err := roxyutil.ExpandPath(tsc.Cert)
 	if err != nil {
 		return zero, err
 	}
 	tsc.Cert = expanded
 
 	if tsc.Key != "" {
-		expanded, err = ProcessPath(tsc.Key)
+		expanded, err = roxyutil.ExpandPath(tsc.Key)
 		if err != nil {
 			return zero, err
 		}
@@ -302,7 +303,7 @@ func (tsc TLSServerConfig) postprocess() (out TLSServerConfig, err error) {
 	}
 
 	if tsc.ClientCA != "" {
-		expanded, err = ProcessPath(tsc.ClientCA)
+		expanded, err = roxyutil.ExpandPath(tsc.ClientCA)
 		if err != nil {
 			return zero, err
 		}

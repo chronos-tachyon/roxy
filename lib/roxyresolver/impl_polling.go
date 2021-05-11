@@ -12,6 +12,7 @@ import (
 	grpcresolver "google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/serviceconfig"
 
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/lib/syncrand"
 )
 
@@ -397,7 +398,7 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 		if newErr != nil {
 			res.cc.ReportError(newErr)
 		} else if len(newList) == 0 {
-			res.cc.ReportError(ErrNoHealthyBackends)
+			res.cc.ReportError(roxyutil.ErrNoHealthyBackends)
 		} else {
 			var state grpcresolver.State
 			state.Addresses = makeAddressList(newList)

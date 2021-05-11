@@ -3,8 +3,8 @@ package roxyresolver
 import (
 	"context"
 	"net"
-	"strconv"
-	"strings"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
 func makeAddressList(resolved []Resolved) []Address {
@@ -17,40 +17,10 @@ func makeAddressList(resolved []Resolved) []Address {
 	return list
 }
 
-func parseIPAndPort(host, port string) (*net.TCPAddr, error) {
-	var (
-		ipStr string
-		zone  string
-	)
-	i := strings.IndexByte(host, '%')
-	if i >= 0 {
-		ipStr, zone = host[:i], host[i+1:]
-	} else {
-		ipStr = host
-	}
-
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return nil, BadIPError{IP: ipStr}
-	}
-
-	u64, err := strconv.ParseUint(port, 10, 16)
-	if err != nil {
-		return nil, BadPortError{Port: port, Err: err}
-	}
-
-	tcpAddr := &net.TCPAddr{
-		IP:   ip,
-		Port: int(u64),
-		Zone: zone,
-	}
-	return tcpAddr, nil
-}
-
 func makeStaticRecordsForIP(host string, port string, serverName string) []Resolved {
-	tcpAddr, err := parseIPAndPort(host, port)
+	tcpAddr, err := misc.ParseTCPAddr(net.JoinHostPort(host, port), "")
 	if err != nil {
-		return nil
+		panic(err)
 	}
 	if serverName == "" {
 		serverName = tcpAddr.IP.String()
@@ -74,34 +44,15 @@ func parseNetResolver(str string) (*net.Resolver, error) {
 		return &net.Resolver{}, nil
 	}
 
-	host, port, err := net.SplitHostPort(str)
+	tcpAddr, err := misc.ParseTCPAddr(str, dnsPort)
 	if err != nil {
-		h, p, err2 := net.SplitHostPort(str + ":" + dnsPort)
-		if err2 == nil {
-			host, port, err = h, p, nil
-		}
-		if err != nil {
-			return nil, BadHostPortError{HostPort: str, Err: err}
-		}
+		return nil, err
 	}
 
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, BadIPError{IP: host}
-	}
-
-	portNum, err := strconv.ParseUint(port, 10, 16)
-	if err != nil {
-		return nil, BadPortError{Port: port, Err: err}
-	}
-
-	host = ip.String()
-	port = strconv.FormatUint(portNum, 10)
-	hostPort := net.JoinHostPort(host, port)
-
-	dialFunc := func(ctx context.Context, network string, address string) (net.Conn, error) {
+	address := tcpAddr.String()
+	dialFunc := func(ctx context.Context, network string, _ string) (net.Conn, error) {
 		var defaultDialer net.Dialer
-		return defaultDialer.DialContext(ctx, network, hostPort)
+		return defaultDialer.DialContext(ctx, network, address)
 	}
 
 	return &net.Resolver{PreferGo: true, Dial: dialFunc}, nil

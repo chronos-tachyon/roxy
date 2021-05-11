@@ -3,53 +3,13 @@ package roxyresolver
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/chronos-tachyon/roxy/lib/membership"
 )
 
-func ParseBool(str string) (bool, error) {
-	if value, found := boolMap[str]; found {
-		return value, nil
-	}
-	for name, value := range boolMap {
-		if strings.EqualFold(str, name) {
-			return value, nil
-		}
-	}
-	return false, fmt.Errorf("failed to parse %q as boolean value", str)
-}
-
-func ParseTargetString(str string) Target {
-	var target Target
-
-	i := strings.IndexByte(str, ':')
-	j := strings.IndexByte(str, '/')
-	if i >= 0 && (j < 0 || j > i) && reScheme.MatchString(str[:i]) {
-		target.Scheme = str[:i]
-		str = str[i+1:]
-		if len(str) >= 2 && str[0] == '/' && str[1] == '/' {
-			str = str[2:]
-			j = strings.IndexByte(str, '/')
-			if j >= 0 {
-				target.Authority = str[:j]
-				target.Endpoint = str[j+1:]
-			} else {
-				target.Authority = str
-			}
-		} else {
-			target.Endpoint = str
-		}
-	} else {
-		target.Endpoint = str
-	}
-
-	return target
-}
-
-func ParseServerSetData(portName string, serverName string, pathKey string, bytes []byte) Event {
-	ss := new(membership.ServerSet)
-	if err := ss.Parse(bytes); err != nil {
+func parseMembershipData(namedPort string, serverName string, pathKey string, bytes []byte) Event {
+	r := new(membership.Roxy)
+	if err := r.Parse(bytes); err != nil {
 		err = fmt.Errorf("%s: %w", pathKey, err)
 		return Event{
 			Type: BadDataEvent,
@@ -61,8 +21,8 @@ func ParseServerSetData(portName string, serverName string, pathKey string, byte
 		}
 	}
 
-	if !ss.IsAlive() {
-		var err error = BadStatusError{ss.Status}
+	if !r.Ready {
+		var err error = BadStatusError{membership.StatusDead}
 		err = fmt.Errorf("%s: %w", pathKey, err)
 		return Event{
 			Type: BadDataEvent,
@@ -75,20 +35,20 @@ func ParseServerSetData(portName string, serverName string, pathKey string, byte
 	}
 
 	var (
-		shardID    int32
+		shardID    uint32
 		hasShardID bool
 	)
-	if ss.ShardID != nil {
-		shardID, hasShardID = *ss.ShardID, true
+	if r.ShardID != nil {
+		shardID, hasShardID = *r.ShardID, true
 	}
 
-	tcpAddr := ss.TCPAddrForPort(portName)
+	tcpAddr := r.NamedAddr(namedPort)
 	if tcpAddr == nil {
 		var err error
-		if portName == "" {
+		if namedPort == "" {
 			err = errors.New("missing host:port data")
 		} else {
-			err = fmt.Errorf("no such named port %q", portName)
+			err = fmt.Errorf("no such named port %q", namedPort)
 		}
 		err = fmt.Errorf("%s: %w", pathKey, err)
 		return Event{
@@ -101,7 +61,7 @@ func ParseServerSetData(portName string, serverName string, pathKey string, byte
 		}
 	}
 
-	myServerName := ss.Metadata["ServerName"]
+	myServerName := r.ServerName
 	if myServerName == "" {
 		myServerName = serverName
 	}
@@ -113,7 +73,7 @@ func ParseServerSetData(portName string, serverName string, pathKey string, byte
 		Addr:       tcpAddr.String(),
 		ServerName: myServerName,
 	}
-	resAddr = WithServerSet(resAddr, ss)
+	resAddr = WithMembership(resAddr, r)
 
 	return Event{
 		Type: UpdateEvent,
@@ -127,14 +87,4 @@ func ParseServerSetData(portName string, serverName string, pathKey string, byte
 			Address:    resAddr,
 		},
 	}
-}
-
-func ValidateServerSetPort(ssPort string) error {
-	if ssPort == "" {
-		return BadPortError{Port: ssPort, Err: ErrExpectNonEmpty}
-	}
-	if !reNamedPort.MatchString(ssPort) {
-		return BadPortError{Port: ssPort, Err: ErrFailedToMatch}
-	}
-	return nil
 }

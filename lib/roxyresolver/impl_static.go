@@ -7,6 +7,7 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/lib/syncrand"
 )
 
@@ -45,7 +46,7 @@ func NewStaticResolver(opts StaticResolverOptions) (*StaticResolver, error) {
 
 	if opts.ClientConn != nil {
 		if len(resolved) == 0 {
-			opts.ClientConn.ReportError(ErrNoHealthyBackends)
+			opts.ClientConn.ReportError(roxyutil.ErrNoHealthyBackends)
 		} else {
 			var state grpcresolver.State
 			state.Addresses = makeAddressList(resolved)
@@ -85,7 +86,7 @@ func (res *StaticResolver) ResolveAll() ([]Resolved, error) {
 
 func (res *StaticResolver) Resolve() (Resolved, error) {
 	if len(res.resolved) == 0 {
-		return Resolved{}, ErrNoHealthyBackends
+		return Resolved{}, roxyutil.ErrNoHealthyBackends
 	}
 
 	return balanceImpl(res.balancer, multierror.Error{}, res.resolved, res.rng, res.perm, &res.nextRR)

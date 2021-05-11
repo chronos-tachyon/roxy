@@ -11,7 +11,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type TLSClientConfig struct {
@@ -99,7 +100,7 @@ func (tcc *TLSClientConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), tcc)
+	err := misc.StrictUnmarshalJSON([]byte(str), tcc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -107,7 +108,7 @@ func (tcc *TLSClientConfig) Parse(str string) error {
 
 	pieces := strings.Split(str, ",")
 
-	value, err := roxyresolver.ParseBool(pieces[0])
+	value, err := misc.ParseBool(pieces[0])
 	if err != nil {
 		return err
 	}
@@ -118,14 +119,14 @@ func (tcc *TLSClientConfig) Parse(str string) error {
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "verify="):
-			value, err = roxyresolver.ParseBool(item[7:])
+			value, err = misc.ParseBool(item[7:])
 			if err != nil {
 				return err
 			}
 			tcc.SkipVerify = !value
 
 		case strings.HasPrefix(item, "verifyServerName="):
-			value, err = roxyresolver.ParseBool(item[17:])
+			value, err = misc.ParseBool(item[17:])
 			if err != nil {
 				return err
 			}
@@ -178,7 +179,7 @@ func (tcc *TLSClientConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt tccJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
@@ -342,7 +343,7 @@ func (tcc TLSClientConfig) postprocess() (out TLSClientConfig, err error) {
 	}
 
 	if tcc.RootCA != "" {
-		expanded, err := ProcessPath(tcc.RootCA)
+		expanded, err := roxyutil.ExpandPath(tcc.RootCA)
 		if err != nil {
 			return zero, err
 		}
@@ -350,7 +351,7 @@ func (tcc TLSClientConfig) postprocess() (out TLSClientConfig, err error) {
 	}
 
 	if tcc.ClientCert != "" {
-		expanded, err := ProcessPath(tcc.ClientCert)
+		expanded, err := roxyutil.ExpandPath(tcc.ClientCert)
 		if err != nil {
 			return zero, err
 		}
@@ -358,7 +359,7 @@ func (tcc TLSClientConfig) postprocess() (out TLSClientConfig, err error) {
 	}
 
 	if tcc.ClientKey != "" {
-		expanded, err := ProcessPath(tcc.ClientKey)
+		expanded, err := roxyutil.ExpandPath(tcc.ClientKey)
 		if err != nil {
 			return zero, err
 		}

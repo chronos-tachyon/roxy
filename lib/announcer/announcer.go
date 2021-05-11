@@ -17,7 +17,7 @@ const (
 )
 
 type Impl interface {
-	Announce(ctx context.Context, ss *membership.ServerSet) error
+	Announce(ctx context.Context, r *membership.Roxy) error
 	Withdraw(ctx context.Context) error
 	Close() error
 }
@@ -45,19 +45,19 @@ func (a *Announcer) Add(impl Impl) {
 	}
 }
 
-func (a *Announcer) Announce(ctx context.Context, ss *membership.ServerSet) error {
+func (a *Announcer) Announce(ctx context.Context, r *membership.Roxy) error {
 	if ctx == nil {
 		panic(errors.New("context.Context is nil"))
 	}
-	if ss == nil {
-		panic(errors.New("*membership.ServerSet is nil"))
+	if r == nil {
+		panic(errors.New("*membership.Roxy is nil"))
 	}
 	switch a.state {
 	case stateInit:
 		a.state = stateRunning
 		var errs multierror.Error
 		for _, impl := range a.impls {
-			if err := impl.Announce(ctx, ss); isRealError(err) {
+			if err := impl.Announce(ctx, r); isRealError(err) {
 				errs.Errors = append(errs.Errors, err)
 			}
 		}

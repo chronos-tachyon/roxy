@@ -54,6 +54,7 @@ build_for_os_arch() {
     "${BUILDDIR}/etc/default" \
     "${BUILDDIR}/etc/logrotate.d" \
     "${BUILDDIR}/etc/opt/roxy" \
+    "${BUILDDIR}/etc/opt/atc" \
     "${BUILDDIR}/etc/systemd/system" \
     "${BUILDDIR}/opt/roxy/bin" \
     "${BUILDDIR}/opt/roxy/share/misc" \
@@ -64,22 +65,36 @@ build_for_os_arch() {
   TOPLEVELDIRS=( etc opt var )
 
   echo '> go get -d ./...'
+  echo '::group::go get'
   go get -d ./...
+  echo '::endgroup::'
+
   echo '> go install ./...'
   go install ./...
+
   echo '> rm -rf .../opt/roxy/pkg'
   chmod -R u+w "${BUILDDIR}/opt/roxy/pkg"
   rm -rf "${BUILDDIR}/opt/roxy/pkg"
+
   echo '> cp (additional files) .../etc/opt/roxy/'
   cp templates/index.html "${BUILDDIR}/opt/roxy/share/templates/index.html"
   cp templates/redir.html "${BUILDDIR}/opt/roxy/share/templates/redir.html"
   cp templates/error.html "${BUILDDIR}/opt/roxy/share/templates/error.html"
-  cp dist/config.json "${BUILDDIR}/opt/roxy/share/misc/config.json.example"
-  cp dist/config.json "${BUILDDIR}/etc/opt/roxy/config.json.example"
-  cp dist/config.json "${BUILDDIR}/etc/opt/roxy/config.json"
-  cp dist/mime.json "${BUILDDIR}/opt/roxy/share/misc/mime.json.example"
-  cp dist/mime.json "${BUILDDIR}/etc/opt/roxy/mime.json.example"
-  cp dist/mime.json "${BUILDDIR}/etc/opt/roxy/mime.json"
+  cp dist/roxy.config.json "${BUILDDIR}/opt/roxy/share/misc/roxy.config.json.example"
+  cp dist/roxy.config.json "${BUILDDIR}/etc/opt/roxy/config.json.example"
+  cp dist/roxy.config.json "${BUILDDIR}/etc/opt/roxy/config.json"
+  cp dist/roxy.mime.json "${BUILDDIR}/opt/roxy/share/misc/roxy.mime.json.example"
+  cp dist/roxy.mime.json "${BUILDDIR}/etc/opt/roxy/mime.json.example"
+  cp dist/roxy.mime.json "${BUILDDIR}/etc/opt/roxy/mime.json"
+  cp dist/atc.config.json "${BUILDDIR}/opt/roxy/share/misc/atc.config.json.example"
+  cp dist/atc.config.json "${BUILDDIR}/etc/opt/atc/config.json.example"
+  cp dist/atc.config.json "${BUILDDIR}/etc/opt/atc/config.json"
+  cp dist/atc.main.json "${BUILDDIR}/opt/roxy/share/misc/atc.main.json.example"
+  cp dist/atc.main.json "${BUILDDIR}/etc/opt/atc/main.json.example"
+  cp dist/atc.main.json "${BUILDDIR}/etc/opt/atc/main.json"
+  cp dist/atc.cost.json "${BUILDDIR}/opt/roxy/share/misc/atc.cost.json.example"
+  cp dist/atc.cost.json "${BUILDDIR}/etc/opt/atc/cost.json.example"
+  cp dist/atc.cost.json "${BUILDDIR}/etc/opt/atc/cost.json"
   cp dist/logrotate.conf "${BUILDDIR}/opt/roxy/share/misc/logrotate.conf"
   cp dist/logrotate.conf "${BUILDDIR}/etc/logrotate.d/roxy"
   cp dist/roxy.default "${BUILDDIR}/etc/default/roxy"
@@ -92,7 +107,7 @@ build_for_os_arch() {
     --create \
     --file="${BUILDDIR}/data.tar" \
     --xattrs \
-    --mtime='1970-01-01 00:00:00' \
+    --mtime='2000-01-01 00:00:00' \
     --mode='a+rX,u+w,go-w' \
     --owner=root \
     --group=root \
@@ -124,6 +139,8 @@ build_for_os_arch() {
   chmod -R a+rX,u+w,go-w "$BUILDDIR"
   echo '> sudo chown -Rh root:root ...'
   sudo chown -Rh root:root "$BUILDDIR"
+  echo '> find ... | xargs touch -d 2000-01-01'
+  find "$BUILDDIR" -print0 | sudo xargs -0 touch -d '2000-01-01 00:00:00' --
 
   DEBFILE="roxy_${FULL_VERSION}_${DEBARCH}.deb"
   echo "> dpkg-deb -b ... ${DEBFILE}"

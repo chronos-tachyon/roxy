@@ -7,7 +7,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type ATCAnnounceConfig struct {
@@ -66,7 +67,7 @@ func (aac *ATCAnnounceConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), aac)
+	err := misc.StrictUnmarshalJSON([]byte(str), aac)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -123,7 +124,7 @@ func (aac *ATCAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt aacJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
@@ -187,18 +188,18 @@ func (aac ATCAnnounceConfig) postprocess() (out ATCAnnounceConfig, err error) {
 	aac.GRPCClientConfig = tmp
 
 	if aac.NamedPort != "" {
-		err = roxyresolver.ValidateServerSetPort(aac.NamedPort)
+		err = roxyutil.ValidateNamedPort(aac.NamedPort)
 		if err != nil {
 			return zero, err
 		}
 	}
 
-	err = roxyresolver.ValidateATCServiceName(aac.ServiceName)
+	err = roxyutil.ValidateATCServiceName(aac.ServiceName)
 	if err != nil {
 		return zero, err
 	}
 
-	err = roxyresolver.ValidateATCLocation(aac.Location)
+	err = roxyutil.ValidateATCLocation(aac.Location)
 	if err != nil {
 		return zero, err
 	}

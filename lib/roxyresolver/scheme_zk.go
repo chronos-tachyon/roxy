@@ -15,6 +15,7 @@ import (
 	grpcresolver "google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func NewZKBuilder(ctx context.Context, rng *rand.Rand, zkconn *zk.Conn, serviceConfigJSON string) grpcresolver.Builder {
@@ -52,13 +53,13 @@ func NewZKResolver(opts Options) (Resolver, error) {
 
 func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
-		err = BadAuthorityError{Authority: rt.Authority, Err: ErrExpectEmpty}
+		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
 	pathAndPort := rt.Endpoint
 	if pathAndPort == "" {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
@@ -72,15 +73,15 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	if !strings.HasPrefix(zkPath, "/") {
 		zkPath = "/" + zkPath
 	}
-	err = ValidateZKPath(zkPath)
+	err = roxyutil.ValidateZKPath(zkPath)
 	if err != nil {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 	if hasPort {
-		err = ValidateServerSetPort(zkPort)
+		err = roxyutil.ValidateNamedPort(zkPort)
 		if err != nil {
-			err = BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+			err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
 			return
 		}
 	}
@@ -88,7 +89,7 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
@@ -96,25 +97,6 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	serverName = rt.Query.Get("serverName")
 
 	return
-}
-
-func ValidateZKPath(zkPath string) error {
-	if zkPath == "" || zkPath[0] != '/' {
-		return BadPathError{Path: zkPath, Err: ErrExpectLeadingSlash}
-	}
-	if zkPath != "/" && strings.HasSuffix(zkPath, "/") {
-		return BadPathError{Path: zkPath, Err: ErrExpectNoEndSlash}
-	}
-	if strings.Contains(zkPath, "//") {
-		return BadPathError{Path: zkPath, Err: ErrExpectNoDoubleSlash}
-	}
-	if strings.Contains(zkPath+"/", "/./") {
-		return BadPathError{Path: zkPath, Err: ErrExpectNoDot}
-	}
-	if strings.Contains(zkPath+"/", "/../") {
-		return BadPathError{Path: zkPath, Err: ErrExpectNoDotDot}
-	}
-	return nil
 }
 
 func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName string) WatchingResolveFunc {
@@ -193,7 +175,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName
 				}
 
 				retries = 0
-				childEventCh <- ParseServerSetData(zkPort, serverName, myPath, raw)
+				childEventCh <- parseMembershipData(zkPort, serverName, myPath, raw)
 
 				select {
 				case <-ctx.Done():

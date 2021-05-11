@@ -25,6 +25,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -86,7 +87,7 @@ func main() {
 	}
 
 	var expanded string
-	expanded, err = mainutil.ProcessPath(flagShakespeareFile)
+	expanded, err = roxyutil.ExpandPath(flagShakespeareFile)
 	if err != nil {
 		log.Logger.Fatal().
 			Str("input", flagShakespeareFile).
@@ -259,24 +260,22 @@ func main() {
 	gMultiServer.AddGRPCServer("grpc", grpcServer, grpcListener)
 
 	gMultiServer.OnRun(func() {
-		var mainEndpoint *membership.ServerSetEndpoint
-		additional := make(map[string]*membership.ServerSetEndpoint, 2)
+		var r membership.Roxy
+		r.Ready = true
+		r.AdditionalPorts = make(map[string]uint16, 2)
 		if tcpAddr, ok := httpListener.Addr().(*net.TCPAddr); ok {
-			httpEndpoint := membership.ServerSetEndpointFromTCPAddr(tcpAddr)
-			mainEndpoint = httpEndpoint
-			additional["http"] = httpEndpoint
+			r.IP = tcpAddr.IP
+			r.Zone = tcpAddr.Zone
+			r.PrimaryPort = uint16(tcpAddr.Port)
+			r.AdditionalPorts["http"] = uint16(tcpAddr.Port)
 		}
 		if tcpAddr, ok := grpcListener.Addr().(*net.TCPAddr); ok {
-			grpcEndpoint := membership.ServerSetEndpointFromTCPAddr(tcpAddr)
-			mainEndpoint = grpcEndpoint
-			additional["grpc"] = grpcEndpoint
+			r.IP = tcpAddr.IP
+			r.Zone = tcpAddr.Zone
+			r.PrimaryPort = uint16(tcpAddr.Port)
+			r.AdditionalPorts["grpc"] = uint16(tcpAddr.Port)
 		}
-		ss := &membership.ServerSet{
-			ServiceEndpoint:     mainEndpoint,
-			AdditionalEndpoints: additional,
-			Status:              membership.StatusAlive,
-		}
-		if err := ann.Announce(ctx, ss); err != nil {
+		if err := ann.Announce(ctx, &r); err != nil {
 			log.Logger.Fatal().
 				Err(err).
 				Msg("failed to Announce")
@@ -357,6 +356,12 @@ type webServerServer struct {
 }
 
 func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
+	log.Logger.Debug().
+		Str("rpcService", "roxy.WebServer").
+		Str("rpcMethod", "Serve").
+		Str("rpcInterface", "primary").
+		Msg("RPC")
+
 	hIn := make([]*roxypb.KeyValue, 0, 32)
 	bIn := []byte(nil)
 	schemeIn := ""

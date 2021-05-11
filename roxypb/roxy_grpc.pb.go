@@ -136,8 +136,10 @@ var WebServer_ServiceDesc = grpc.ServiceDesc{
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AirTrafficControlClient interface {
-	Report(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ReportClient, error)
-	Balance(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_BalanceClient, error)
+	Lookup(ctx context.Context, in *LookupRequest, opts ...grpc.CallOption) (*LookupResponse, error)
+	Find(ctx context.Context, in *FindRequest, opts ...grpc.CallOption) (*FindResponse, error)
+	ServerAnnounce(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ServerAnnounceClient, error)
+	ClientAssign(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ClientAssignClient, error)
 }
 
 type airTrafficControlClient struct {
@@ -148,62 +150,80 @@ func NewAirTrafficControlClient(cc grpc.ClientConnInterface) AirTrafficControlCl
 	return &airTrafficControlClient{cc}
 }
 
-func (c *airTrafficControlClient) Report(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ReportClient, error) {
-	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[0], "/roxy.AirTrafficControl/Report", opts...)
+func (c *airTrafficControlClient) Lookup(ctx context.Context, in *LookupRequest, opts ...grpc.CallOption) (*LookupResponse, error) {
+	out := new(LookupResponse)
+	err := c.cc.Invoke(ctx, "/roxy.AirTrafficControl/Lookup", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &airTrafficControlReportClient{stream}
+	return out, nil
+}
+
+func (c *airTrafficControlClient) Find(ctx context.Context, in *FindRequest, opts ...grpc.CallOption) (*FindResponse, error) {
+	out := new(FindResponse)
+	err := c.cc.Invoke(ctx, "/roxy.AirTrafficControl/Find", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *airTrafficControlClient) ServerAnnounce(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ServerAnnounceClient, error) {
+	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[0], "/roxy.AirTrafficControl/ServerAnnounce", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &airTrafficControlServerAnnounceClient{stream}
 	return x, nil
 }
 
-type AirTrafficControl_ReportClient interface {
-	Send(*ReportRequest) error
-	Recv() (*ReportResponse, error)
+type AirTrafficControl_ServerAnnounceClient interface {
+	Send(*ServerAnnounceRequest) error
+	Recv() (*ServerAnnounceResponse, error)
 	grpc.ClientStream
 }
 
-type airTrafficControlReportClient struct {
+type airTrafficControlServerAnnounceClient struct {
 	grpc.ClientStream
 }
 
-func (x *airTrafficControlReportClient) Send(m *ReportRequest) error {
+func (x *airTrafficControlServerAnnounceClient) Send(m *ServerAnnounceRequest) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *airTrafficControlReportClient) Recv() (*ReportResponse, error) {
-	m := new(ReportResponse)
+func (x *airTrafficControlServerAnnounceClient) Recv() (*ServerAnnounceResponse, error) {
+	m := new(ServerAnnounceResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-func (c *airTrafficControlClient) Balance(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_BalanceClient, error) {
-	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[1], "/roxy.AirTrafficControl/Balance", opts...)
+func (c *airTrafficControlClient) ClientAssign(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ClientAssignClient, error) {
+	stream, err := c.cc.NewStream(ctx, &AirTrafficControl_ServiceDesc.Streams[1], "/roxy.AirTrafficControl/ClientAssign", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &airTrafficControlBalanceClient{stream}
+	x := &airTrafficControlClientAssignClient{stream}
 	return x, nil
 }
 
-type AirTrafficControl_BalanceClient interface {
-	Send(*BalanceRequest) error
-	Recv() (*BalanceResponse, error)
+type AirTrafficControl_ClientAssignClient interface {
+	Send(*ClientAssignRequest) error
+	Recv() (*ClientAssignResponse, error)
 	grpc.ClientStream
 }
 
-type airTrafficControlBalanceClient struct {
+type airTrafficControlClientAssignClient struct {
 	grpc.ClientStream
 }
 
-func (x *airTrafficControlBalanceClient) Send(m *BalanceRequest) error {
+func (x *airTrafficControlClientAssignClient) Send(m *ClientAssignRequest) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *airTrafficControlBalanceClient) Recv() (*BalanceResponse, error) {
-	m := new(BalanceResponse)
+func (x *airTrafficControlClientAssignClient) Recv() (*ClientAssignResponse, error) {
+	m := new(ClientAssignResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -214,8 +234,10 @@ func (x *airTrafficControlBalanceClient) Recv() (*BalanceResponse, error) {
 // All implementations must embed UnimplementedAirTrafficControlServer
 // for forward compatibility
 type AirTrafficControlServer interface {
-	Report(AirTrafficControl_ReportServer) error
-	Balance(AirTrafficControl_BalanceServer) error
+	Lookup(context.Context, *LookupRequest) (*LookupResponse, error)
+	Find(context.Context, *FindRequest) (*FindResponse, error)
+	ServerAnnounce(AirTrafficControl_ServerAnnounceServer) error
+	ClientAssign(AirTrafficControl_ClientAssignServer) error
 	mustEmbedUnimplementedAirTrafficControlServer()
 }
 
@@ -223,11 +245,17 @@ type AirTrafficControlServer interface {
 type UnimplementedAirTrafficControlServer struct {
 }
 
-func (UnimplementedAirTrafficControlServer) Report(AirTrafficControl_ReportServer) error {
-	return status.Errorf(codes.Unimplemented, "method Report not implemented")
+func (UnimplementedAirTrafficControlServer) Lookup(context.Context, *LookupRequest) (*LookupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Lookup not implemented")
 }
-func (UnimplementedAirTrafficControlServer) Balance(AirTrafficControl_BalanceServer) error {
-	return status.Errorf(codes.Unimplemented, "method Balance not implemented")
+func (UnimplementedAirTrafficControlServer) Find(context.Context, *FindRequest) (*FindResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Find not implemented")
+}
+func (UnimplementedAirTrafficControlServer) ServerAnnounce(AirTrafficControl_ServerAnnounceServer) error {
+	return status.Errorf(codes.Unimplemented, "method ServerAnnounce not implemented")
+}
+func (UnimplementedAirTrafficControlServer) ClientAssign(AirTrafficControl_ClientAssignServer) error {
+	return status.Errorf(codes.Unimplemented, "method ClientAssign not implemented")
 }
 func (UnimplementedAirTrafficControlServer) mustEmbedUnimplementedAirTrafficControlServer() {}
 
@@ -242,52 +270,88 @@ func RegisterAirTrafficControlServer(s grpc.ServiceRegistrar, srv AirTrafficCont
 	s.RegisterService(&AirTrafficControl_ServiceDesc, srv)
 }
 
-func _AirTrafficControl_Report_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(AirTrafficControlServer).Report(&airTrafficControlReportServer{stream})
+func _AirTrafficControl_Lookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LookupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AirTrafficControlServer).Lookup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.AirTrafficControl/Lookup",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AirTrafficControlServer).Lookup(ctx, req.(*LookupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
-type AirTrafficControl_ReportServer interface {
-	Send(*ReportResponse) error
-	Recv() (*ReportRequest, error)
+func _AirTrafficControl_Find_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FindRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AirTrafficControlServer).Find(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.AirTrafficControl/Find",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AirTrafficControlServer).Find(ctx, req.(*FindRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AirTrafficControl_ServerAnnounce_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AirTrafficControlServer).ServerAnnounce(&airTrafficControlServerAnnounceServer{stream})
+}
+
+type AirTrafficControl_ServerAnnounceServer interface {
+	Send(*ServerAnnounceResponse) error
+	Recv() (*ServerAnnounceRequest, error)
 	grpc.ServerStream
 }
 
-type airTrafficControlReportServer struct {
+type airTrafficControlServerAnnounceServer struct {
 	grpc.ServerStream
 }
 
-func (x *airTrafficControlReportServer) Send(m *ReportResponse) error {
+func (x *airTrafficControlServerAnnounceServer) Send(m *ServerAnnounceResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *airTrafficControlReportServer) Recv() (*ReportRequest, error) {
-	m := new(ReportRequest)
+func (x *airTrafficControlServerAnnounceServer) Recv() (*ServerAnnounceRequest, error) {
+	m := new(ServerAnnounceRequest)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-func _AirTrafficControl_Balance_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(AirTrafficControlServer).Balance(&airTrafficControlBalanceServer{stream})
+func _AirTrafficControl_ClientAssign_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AirTrafficControlServer).ClientAssign(&airTrafficControlClientAssignServer{stream})
 }
 
-type AirTrafficControl_BalanceServer interface {
-	Send(*BalanceResponse) error
-	Recv() (*BalanceRequest, error)
+type AirTrafficControl_ClientAssignServer interface {
+	Send(*ClientAssignResponse) error
+	Recv() (*ClientAssignRequest, error)
 	grpc.ServerStream
 }
 
-type airTrafficControlBalanceServer struct {
+type airTrafficControlClientAssignServer struct {
 	grpc.ServerStream
 }
 
-func (x *airTrafficControlBalanceServer) Send(m *BalanceResponse) error {
+func (x *airTrafficControlClientAssignServer) Send(m *ClientAssignResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *airTrafficControlBalanceServer) Recv() (*BalanceRequest, error) {
-	m := new(BalanceRequest)
+func (x *airTrafficControlClientAssignServer) Recv() (*ClientAssignRequest, error) {
+	m := new(ClientAssignRequest)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -300,17 +364,26 @@ func (x *airTrafficControlBalanceServer) Recv() (*BalanceRequest, error) {
 var AirTrafficControl_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "roxy.AirTrafficControl",
 	HandlerType: (*AirTrafficControlServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Lookup",
+			Handler:    _AirTrafficControl_Lookup_Handler,
+		},
+		{
+			MethodName: "Find",
+			Handler:    _AirTrafficControl_Find_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "Report",
-			Handler:       _AirTrafficControl_Report_Handler,
+			StreamName:    "ServerAnnounce",
+			Handler:       _AirTrafficControl_ServerAnnounce_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "Balance",
-			Handler:       _AirTrafficControl_Balance_Handler,
+			StreamName:    "ClientAssign",
+			Handler:       _AirTrafficControl_ClientAssign_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

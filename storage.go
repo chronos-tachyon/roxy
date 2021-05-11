@@ -11,7 +11,7 @@ import (
 	v3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/crypto/acme/autocert"
 
-	"github.com/chronos-tachyon/roxy/lib/mainutil"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type StorageEngine interface {
@@ -253,7 +253,7 @@ func init() {
 			}
 		}
 
-		abs, err := mainutil.ProcessPath(cfg.Path)
+		abs, err := roxyutil.ExpandPath(cfg.Path)
 		if err != nil {
 			return nil, StorageEngineCreateError{
 				Engine: "fs",

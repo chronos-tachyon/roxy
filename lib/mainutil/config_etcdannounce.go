@@ -8,8 +8,9 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
-	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type EtcdAnnounceConfig struct {
@@ -68,7 +69,7 @@ func (eac *EtcdAnnounceConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), eac)
+	err := misc.StrictUnmarshalJSON([]byte(str), eac)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -128,7 +129,7 @@ func (eac *EtcdAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt eacJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
@@ -185,13 +186,13 @@ func (eac EtcdAnnounceConfig) postprocess() (out EtcdAnnounceConfig, err error) 
 	if !strings.HasSuffix(eac.Path, "/") {
 		eac.Path += "/"
 	}
-	err = roxyresolver.ValidateEtcdPath(eac.Path)
+	err = roxyutil.ValidateEtcdPath(eac.Path)
 	if err != nil {
 		return zero, err
 	}
 
 	if eac.NamedPort != "" {
-		err = roxyresolver.ValidateServerSetPort(eac.NamedPort)
+		err = roxyutil.ValidateNamedPort(eac.NamedPort)
 		if err != nil {
 			return zero, err
 		}

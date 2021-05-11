@@ -12,7 +12,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type ListenConfig struct {
@@ -70,7 +71,7 @@ func (lc *ListenConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), lc)
+	err := misc.StrictUnmarshalJSON([]byte(str), lc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -120,7 +121,7 @@ func (lc *ListenConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt lcJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
@@ -201,7 +202,7 @@ func (lc ListenConfig) postprocess() (out ListenConfig, err error) {
 	}
 
 	if lc.Address == "" {
-		return zero, fmt.Errorf("invalid address %q: %w", lc.Address, roxyresolver.ErrExpectNonEmpty)
+		return zero, fmt.Errorf("invalid address %q: %w", lc.Address, roxyutil.ErrExpectNonEmpty)
 	}
 
 	maybeUnix := (lc.Network == "") || strings.HasPrefix(lc.Network, "unix")

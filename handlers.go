@@ -36,6 +36,7 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/enums"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -1584,7 +1585,7 @@ func CompileFileSystemHandler(impl *Impl, key string, cfg *FrontendConfig) (http
 		return nil, fmt.Errorf("missing required field \"path\"")
 	}
 
-	abs, err := mainutil.ProcessPath(cfg.Path)
+	abs, err := roxyutil.ExpandPath(cfg.Path)
 	if err != nil {
 		return nil, err
 	}

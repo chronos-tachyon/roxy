@@ -10,16 +10,19 @@ var nullBytes = []byte("null")
 type Format uint8
 
 const (
-	FinagleFormat Format = iota
+	RoxyFormat Format = iota
+	FinagleFormat
 	GRPCFormat
 )
 
 var announceFormatNames = []string{
+	"roxy",
 	"finagle",
 	"grpc",
 }
 
 var announceFormatJSON = [][]byte{
+	[]byte(`"roxy"`),
 	[]byte(`"finagle"`),
 	[]byte(`"grpc"`),
 }
@@ -48,7 +51,7 @@ func (f *Format) Parse(str string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("expected \"\", \"finagle\", or \"grpc\"; got %q", str)
+	return fmt.Errorf("expected \"roxy\", \"finagle\", or \"grpc\"; got %q", str)
 }
 
 func (f *Format) UnmarshalJSON(raw []byte) error {
@@ -61,5 +64,5 @@ func (f *Format) UnmarshalJSON(raw []byte) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("expected null, \"finagle\", or \"grpc\"; got %s", string(raw))
+	return fmt.Errorf("expected \"roxy\", \"finagle\", or \"grpc\"; got %s", string(raw))
 }

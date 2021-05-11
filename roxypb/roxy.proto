@@ -20,38 +20,73 @@ message KeyValue {
 }
 
 service AirTrafficControl {
-  rpc Report (stream ReportRequest) returns (stream ReportResponse) {}
-  rpc Balance (stream BalanceRequest) returns (stream BalanceResponse) {}
+  rpc Lookup (LookupRequest) returns (LookupResponse) {}
+  rpc Find (FindRequest) returns (FindResponse) {}
+  rpc ServerAnnounce (stream ServerAnnounceRequest) returns (stream ServerAnnounceResponse) {}
+  rpc ClientAssign (stream ClientAssignRequest) returns (stream ClientAssignResponse) {}
 }
 
-message ReportRequest {
-  message FirstReport {
-    string name = 1;
-    string unique = 2;
-    string location = 3;
-    string server_name = 4;
-    int32 shard_id = 5;
-    bytes ip = 6;
-    string zone = 7;
-    uint32 port = 8;
-    bool has_shard_id = 16;
-  }
-  float load = 1;
-  FirstReport first_report = 2;
+message LookupRequest {
+  string service_name = 1;
 }
 
-message ReportResponse {
+message LookupResponse {
+  bool is_sharded = 1;
+  uint32 num_shards = 2;
+  uint32 expected_num_clients_per_shard = 3;
+  uint32 expected_num_servers_per_shard = 4;
+  float max_load_per_server = 5;
+  CommonNameList allowed_client_common_names = 6;
+  CommonNameList allowed_server_common_names = 7;
 }
 
-message BalanceRequest {
-  string name = 1;
-  string location = 2;
+message FindRequest {
+  string service_name = 1;
+  uint32 shard_id = 2;
 }
 
-message BalanceResponse {
-  repeated Event events = 1;
-  string name = 2;
-  bool is_sharded = 3;
+message FindResponse {
+  GoAway go_away = 1;
+}
+
+message ServerAnnounceRequest {
+  string service_name = 1;
+  uint32 shard_id = 2;
+  string location = 3;
+  string unique = 4;
+  string server_name = 5;
+  bytes ip = 6;
+  string zone = 7;
+  uint32 port = 8;
+  bool has_shard_id = 15;
+  float load = 16;
+}
+
+message ServerAnnounceResponse {
+  GoAway go_away = 1;
+}
+
+message ClientAssignRequest {
+  string service_name = 1;
+  uint32 shard_id = 2;
+  string location = 3;
+  string unique = 4;
+  bool has_shard_id = 15;
+}
+
+message ClientAssignResponse {
+  GoAway go_away = 1;
+  repeated Event events = 2;
+}
+
+message CommonNameList {
+  repeated string common_name = 1;
+}
+
+message GoAway {
+  bytes ip = 1;
+  string zone = 2;
+  uint32 port = 3;
 }
 
 message Event {
@@ -63,14 +98,13 @@ message Event {
     NEW_SERVICE_CONFIG = 4;
   }
   Type event_type = 1;
-  string unique = 2;
-  string location = 3;
+  string location = 2;
+  string unique = 3;
   string server_name = 4;
-  int32 shard_id = 5;
-  bytes ip = 6;
-  string zone = 7;
-  uint32 port = 8;
-  float weight = 9;
+  bytes ip = 5;
+  string zone = 6;
+  uint32 port = 7;
+  float weight = 8;
   string service_config_json = 64;
 }
 
@@ -80,20 +114,11 @@ service Admin {
   rpc Shutdown (ShutdownRequest) returns (ShutdownResponse) {}
 }
 
-message PingRequest {
-}
+message PingRequest {}
+message PingResponse {}
 
-message PingResponse {
-}
+message ReloadRequest {}
+message ReloadResponse {}
 
-message ReloadRequest {
-}
-
-message ReloadResponse {
-}
-
-message ShutdownRequest {
-}
-
-message ShutdownResponse {
-}
+message ShutdownRequest {}
+message ShutdownResponse {}

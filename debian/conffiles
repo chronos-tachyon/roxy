@@ -5,3 +5,9 @@
 /etc/opt/roxy/config.json.example
 /etc/opt/roxy/mime.json
 /etc/opt/roxy/mime.json.example
+/etc/opt/atc/config.json
+/etc/opt/atc/config.json.example
+/etc/opt/atc/main.json
+/etc/opt/atc/main.json.example
+/etc/opt/atc/cost.json
+/etc/opt/atc/cost.json.example

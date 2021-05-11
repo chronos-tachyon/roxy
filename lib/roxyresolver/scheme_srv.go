@@ -10,6 +10,8 @@ import (
 	"time"
 
 	grpcresolver "google.golang.org/grpc/resolver"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func NewSRVBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
@@ -42,13 +44,13 @@ func NewSRVResolver(opts Options) (Resolver, error) {
 func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
 	res, err = parseNetResolver(rt.Authority)
 	if err != nil {
-		err = BadAuthorityError{Authority: rt.Authority, Err: err}
+		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: err}
 		return
 	}
 
 	nameAndService := rt.Endpoint
 	if nameAndService == "" {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
@@ -59,14 +61,14 @@ func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service stri
 		name, service = nameAndService, ""
 	}
 	if j := strings.IndexByte(service, '/'); j >= 0 {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectOneSlash}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectOneSlash}
 		return
 	}
 
 	if name == "" {
-		err = BadEndpointError{
+		err = roxyutil.BadEndpointError{
 			Endpoint: rt.Endpoint,
-			Err:      BadHostError{Host: name, Err: ErrExpectNonEmpty},
+			Err:      roxyutil.BadHostError{Host: name, Err: roxyutil.ErrExpectNonEmpty},
 		}
 		return
 	}
@@ -74,7 +76,7 @@ func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service stri
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
@@ -82,7 +84,7 @@ func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service stri
 	if str := rt.Query.Get("pollInterval"); str != "" {
 		pollInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "pollInterval", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "pollInterval", Value: str, Err: err}
 			return
 		}
 	}
@@ -90,7 +92,7 @@ func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service stri
 	if str := rt.Query.Get("cooldownInterval"); str != "" {
 		cdInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "cooldownInterval", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "cooldownInterval", Value: str, Err: err}
 			return
 		}
 	}

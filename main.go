@@ -16,15 +16,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
 var (
-	gRef         Ref
-	gMultiServer mainutil.MultiServer
+	gRef          Ref
+	gMultiServer  mainutil.MultiServer
+	gHealthServer mainutil.HealthServer
 
 	gDialer = net.Dialer{Timeout: 5 * time.Second}
 )
@@ -64,7 +67,7 @@ func main() {
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
-	abs, err := mainutil.ProcessPath(flagConfig)
+	abs, err := roxyutil.ExpandPath(flagConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
@@ -72,7 +75,7 @@ func main() {
 	flagConfig = abs
 
 	if strings.HasPrefix(flagPromNet, "unix") && flagPromAddr != "" && flagPromAddr[0] != '@' {
-		abs, err = mainutil.ProcessPath(flagPromAddr)
+		abs, err = roxyutil.ExpandPath(flagPromAddr)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 			os.Exit(1)
@@ -81,7 +84,7 @@ func main() {
 	}
 
 	if strings.HasPrefix(flagAdminNet, "unix") && flagAdminAddr != "" && flagAdminAddr[0] != '@' {
-		abs, err = mainutil.ProcessPath(flagAdminAddr)
+		abs, err = roxyutil.ExpandPath(flagAdminAddr)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 			os.Exit(1)
@@ -109,6 +112,7 @@ func main() {
 	})
 
 	adminServer := grpc.NewServer()
+	grpc_health_v1.RegisterHealthServer(adminServer, &gHealthServer)
 	roxypb.RegisterAdminServer(adminServer, AdminServer{})
 
 	var promHandler http.Handler
@@ -213,6 +217,12 @@ func main() {
 	gMultiServer.OnRun(func() {
 		log.Logger.Info().
 			Msg("Running")
+	})
+
+	gHealthServer.Set("", true)
+	gMultiServer.OnShutdown(func(alreadyTermed bool) error {
+		gHealthServer.Stop()
+		return nil
 	})
 
 	gMultiServer.Run()

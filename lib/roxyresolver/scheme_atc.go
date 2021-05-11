@@ -12,7 +12,9 @@ import (
 	"google.golang.org/grpc"
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -36,7 +38,7 @@ func NewATCResolver(opts Options) (Resolver, error) {
 		panic(errors.New("*grpc.ClientConn is nil"))
 	}
 
-	lbName, lbLocation, balancer, isDSC, serverName, err := ParseATCTarget(opts.Target)
+	lbName, lbLocation, lbUnique, balancer, isDSC, serverName, err := ParseATCTarget(opts.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -45,51 +47,58 @@ func NewATCResolver(opts Options) (Resolver, error) {
 		Context:     opts.Context,
 		Random:      opts.Random,
 		Balancer:    balancer,
-		ResolveFunc: MakeATCResolveFunc(lbcc, lbName, lbLocation, isDSC, serverName),
+		ResolveFunc: MakeATCResolveFunc(lbcc, lbName, lbLocation, lbUnique, isDSC, serverName),
 	})
 }
 
-func ParseATCTarget(rt RoxyTarget) (lbName string, lbLocation string, balancer BalancerType, isDSC bool, serverName string, err error) {
+func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balancer BalancerType, isDSC bool, serverName string, err error) {
 	if rt.Authority != "" {
-		err = BadAuthorityError{Authority: rt.Authority, Err: ErrExpectEmpty}
+		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
 	lbName = rt.Endpoint
 	if lbName == "" {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
-	err = ValidateATCServiceName(lbName)
+	err = roxyutil.ValidateATCServiceName(lbName)
 	if err != nil {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
-	}
-
-	if str := rt.Query.Get("balancer"); str != "" {
-		err = balancer.Parse(str)
-		if err != nil {
-			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
-			return
-		}
-	}
-
-	if str := rt.Query.Get("disableServiceConfig"); str != "" {
-		isDSC, err = ParseBool(str)
-		if err != nil {
-			err = BadQueryParamError{Name: "disableServiceConfig", Value: str, Err: err}
-			return
-		}
 	}
 
 	lbLocation = rt.Query.Get("location")
 	if lbLocation == "" {
 		lbLocation = rt.Query.Get("loc")
 	}
-	err = ValidateATCLocation(lbLocation)
+	err = roxyutil.ValidateATCLocation(lbLocation)
 	if err != nil {
-		err = BadQueryParamError{Name: "location", Value: lbLocation, Err: err}
+		err = roxyutil.BadQueryParamError{Name: "location", Value: lbLocation, Err: err}
 		return
+	}
+
+	lbUnique = rt.Query.Get("unique")
+	err = roxyutil.ValidateATCUnique(lbUnique)
+	if err != nil {
+		err = roxyutil.BadQueryParamError{Name: "unique", Value: lbUnique, Err: err}
+		return
+	}
+
+	if str := rt.Query.Get("balancer"); str != "" {
+		err = balancer.Parse(str)
+		if err != nil {
+			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			return
+		}
+	}
+
+	if str := rt.Query.Get("disableServiceConfig"); str != "" {
+		isDSC, err = misc.ParseBool(str)
+		if err != nil {
+			err = roxyutil.BadQueryParamError{Name: "disableServiceConfig", Value: str, Err: err}
+			return
+		}
 	}
 
 	serverName = rt.Query.Get("serverName")
@@ -97,39 +106,20 @@ func ParseATCTarget(rt RoxyTarget) (lbName string, lbLocation string, balancer B
 	return
 }
 
-func ValidateATCServiceName(lbName string) error {
-	if lbName == "" {
-		return BadServiceNameError{ServiceName: lbName, Err: ErrExpectNonEmpty}
-	}
-	if !reLBName.MatchString(lbName) {
-		return BadServiceNameError{ServiceName: lbName, Err: ErrFailedToMatch}
-	}
-	return nil
-}
-
-func ValidateATCLocation(lbLocation string) error {
-	if lbLocation == "" {
-		return nil
-	}
-	if !reLBLoc.MatchString(lbLocation) {
-		return BadLocationError{Location: lbLocation, Err: ErrFailedToMatch}
-	}
-	return nil
-}
-
-func MakeATCResolveFunc(lbcc *grpc.ClientConn, lbName string, lbLocation string, dsc bool, serverName string) WatchingResolveFunc {
+func MakeATCResolveFunc(lbcc *grpc.ClientConn, lbName, lbLocation, lbUnique string, dsc bool, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
 		lbclient := roxypb.NewAirTrafficControlClient(lbcc)
 
-		bc, err := lbclient.Balance(ctx)
+		bc, err := lbclient.ClientAssign(ctx)
 		if err != nil {
 			lbcc.Close()
 			return nil, err
 		}
 
-		err = bc.Send(&roxypb.BalanceRequest{
-			Name:     lbName,
-			Location: lbLocation,
+		err = bc.Send(&roxypb.ClientAssignRequest{
+			ServiceName: lbName,
+			Location:    lbLocation,
+			Unique:      lbUnique,
 		})
 		if err != nil {
 			var errs multierror.Error
@@ -231,9 +221,7 @@ func MakeATCResolveFunc(lbcc *grpc.ClientConn, lbName string, lbLocation string,
 							Unique:     e.Unique,
 							Location:   e.Location,
 							ServerName: myServerName,
-							ShardID:    e.ShardId,
 							Weight:     e.Weight,
-							HasShardID: resp.IsSharded,
 							HasWeight:  true,
 							Addr:       tcpAddr,
 							Address:    resAddr,
@@ -311,7 +299,7 @@ func (b atcBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 		return nil, err
 	}
 
-	lbName, lbLocation, _, _, serverName, err := ParseATCTarget(rt)
+	lbName, lbLocation, lbUnique, _, _, serverName, err := ParseATCTarget(rt)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +307,7 @@ func (b atcBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:     b.ctx,
 		Random:      b.rng,
-		ResolveFunc: MakeATCResolveFunc(b.lbcc, lbName, lbLocation, opts.DisableServiceConfig, serverName),
+		ResolveFunc: MakeATCResolveFunc(b.lbcc, lbName, lbLocation, lbUnique, opts.DisableServiceConfig, serverName),
 		ClientConn:  cc,
 	})
 }

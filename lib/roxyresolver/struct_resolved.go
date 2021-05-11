@@ -12,7 +12,7 @@ type Resolved struct {
 	ServerName  string
 	SRVPriority uint16
 	SRVWeight   uint16
-	ShardID     int32
+	ShardID     uint32
 	Weight      float32
 	HasSRV      bool
 	HasShardID  bool

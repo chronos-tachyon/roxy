@@ -34,6 +34,3 @@ var defaultRedirPageTemplate string
 
 //go:embed templates/error.html
 var defaultErrorPageTemplate string
-
-//go:embed dist/mime.json
-var defaultMimeFileJSON string

@@ -7,18 +7,18 @@ import (
 type attrKey string
 
 const (
-	ServerSetAttrKey = attrKey("roxy.ServerSet")
-	ResolvedAttrKey  = attrKey("roxy.Resolved")
+	MembershipAttrKey = attrKey("roxy.Membership")
+	ResolvedAttrKey   = attrKey("roxy.Resolved")
 )
 
-func WithServerSet(addr Address, ss *membership.ServerSet) Address {
-	addr.Attributes = addr.Attributes.WithValues(ServerSetAttrKey, ss)
+func WithMembership(addr Address, r *membership.Roxy) Address {
+	addr.Attributes = addr.Attributes.WithValues(MembershipAttrKey, r)
 	return addr
 }
 
-func GetServerSet(addr Address) *membership.ServerSet {
-	ss, _ := addr.Attributes.Value(ServerSetAttrKey).(*membership.ServerSet)
-	return ss
+func GetMembership(addr Address) *membership.Roxy {
+	r, _ := addr.Attributes.Value(MembershipAttrKey).(*membership.Roxy)
+	return r
 }
 
 func WithResolved(addr Address, data Resolved) Address {

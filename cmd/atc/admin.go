@@ -16,13 +16,21 @@ type AdminServer struct {
 
 func (AdminServer) Ping(ctx context.Context, req *roxypb.PingRequest) (*roxypb.PingResponse, error) {
 	log.Logger.Info().
-		Msg("got Ping RPC")
+		Str("rpcService", "roxy.Admin").
+		Str("rpcMethod", "Ping").
+		Str("rpcInterface", "admin").
+		Msg("RPC")
+
 	return &roxypb.PingResponse{}, nil
 }
 
 func (AdminServer) Reload(ctx context.Context, req *roxypb.ReloadRequest) (*roxypb.ReloadResponse, error) {
 	log.Logger.Info().
-		Msg("got Reload RPC")
+		Str("rpcService", "roxy.Admin").
+		Str("rpcMethod", "Reload").
+		Str("rpcInterface", "admin").
+		Msg("RPC")
+
 	if err := gMultiServer.Reload(); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -31,7 +39,11 @@ func (AdminServer) Reload(ctx context.Context, req *roxypb.ReloadRequest) (*roxy
 
 func (AdminServer) Shutdown(ctx context.Context, req *roxypb.ShutdownRequest) (*roxypb.ShutdownResponse, error) {
 	log.Logger.Info().
-		Msg("got Shutdown RPC")
+		Str("rpcService", "roxy.Admin").
+		Str("rpcMethod", "Shutdown").
+		Str("rpcInterface", "admin").
+		Msg("RPC")
+
 	if err := gMultiServer.Shutdown(true); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}

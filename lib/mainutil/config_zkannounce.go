@@ -8,8 +8,9 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
-	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type ZKAnnounceConfig struct {
@@ -68,7 +69,7 @@ func (zannc *ZKAnnounceConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := strictUnmarshalJSON([]byte(str), zannc)
+	err := misc.StrictUnmarshalJSON([]byte(str), zannc)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -128,7 +129,7 @@ func (zannc *ZKAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	}
 
 	var alt zanncJSON
-	err := strictUnmarshalJSON(raw, &alt)
+	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
@@ -194,13 +195,13 @@ func (zannc ZKAnnounceConfig) postprocess() (out ZKAnnounceConfig, err error) {
 	if !strings.HasSuffix(zannc.Path, "/") {
 		zannc.Path += "/"
 	}
-	err = roxyresolver.ValidateZKPath(zannc.Path)
+	err = roxyutil.ValidateZKPath(zannc.Path)
 	if err != nil {
 		return zero, err
 	}
 
 	if zannc.NamedPort != "" {
-		err = roxyresolver.ValidateServerSetPort(zannc.NamedPort)
+		err = roxyutil.ValidateNamedPort(zannc.NamedPort)
 		if err != nil {
 			return zero, err
 		}

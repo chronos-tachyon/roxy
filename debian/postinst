@@ -14,16 +14,34 @@ if ! getent passwd roxy >/dev/null 2>&1 ; then
 fi
 
 if ! [ -e /etc/opt/roxy/config.json ]; then
-  cp /opt/roxy/share/misc/config.json.example /etc/opt/roxy/config.json
+  cp /opt/roxy/share/misc/roxy.config.json.example /etc/opt/roxy/config.json
 fi
 if ! [ -e /etc/opt/roxy/config.json.example ]; then
-  cp /opt/roxy/share/misc/config.json.example /etc/opt/roxy/config.json.example
+  cp /opt/roxy/share/misc/roxy.config.json.example /etc/opt/roxy/config.json.example
 fi
 if ! [ -e /etc/opt/roxy/mime.json ]; then
-  cp /opt/roxy/share/misc/mime.json.example /etc/opt/roxy/mime.json
+  cp /opt/roxy/share/misc/roxy.mime.json.example /etc/opt/roxy/mime.json
 fi
 if ! [ -e /etc/opt/roxy/mime.json.example ]; then
-  cp /opt/roxy/share/misc/mime.json.example /etc/opt/roxy/mime.json.example
+  cp /opt/roxy/share/misc/roxy.mime.json.example /etc/opt/roxy/mime.json.example
+fi
+if ! [ -e /etc/opt/atc/config.json ]; then
+  cp /opt/roxy/share/misc/atc.config.json.example /etc/opt/atc/config.json
+fi
+if ! [ -e /etc/opt/atc/config.json.example ]; then
+  cp /opt/roxy/share/misc/atc.config.json.example /etc/opt/atc/config.json.example
+fi
+if ! [ -e /etc/opt/atc/main.json ]; then
+  cp /opt/roxy/share/misc/atc.main.json.example /etc/opt/atc/main.json
+fi
+if ! [ -e /etc/opt/atc/main.json.example ]; then
+  cp /opt/roxy/share/misc/atc.main.json.example /etc/opt/atc/main.json.example
+fi
+if ! [ -e /etc/opt/atc/cost.json ]; then
+  cp /opt/roxy/share/misc/atc.cost.json.example /etc/opt/atc/cost.json
+fi
+if ! [ -e /etc/opt/atc/cost.json.example ]; then
+  cp /opt/roxy/share/misc/atc.cost.json.example /etc/opt/atc/cost.json.example
 fi
 if ! [ -e /etc/logrotate.d/roxy ]; then
   cp /opt/roxy/share/misc/logrotate.conf /etc/logrotate.d/roxy

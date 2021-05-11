@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"strings"
 
 	grpcresolver "google.golang.org/grpc/resolver"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 func NewIPBuilder(rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
@@ -34,61 +36,34 @@ func NewIPResolver(opts Options) (Resolver, error) {
 
 func ParseIPTarget(rt RoxyTarget, defaultPort string) (tcpAddrs []*net.TCPAddr, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
-		err = BadAuthorityError{Authority: rt.Authority, Err: ErrExpectEmpty}
+		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
-	ipPortListStr := rt.Endpoint
+	ipPortListStr, err := roxyutil.ExpandString(rt.Endpoint)
+	if err != nil {
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		return
+	}
 	if ipPortListStr == "" {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
-	ipPortList := strings.Split(ipPortListStr, ",")
-	tcpAddrs = make([]*net.TCPAddr, 0, len(ipPortList))
-	for _, ipPort := range ipPortList {
-		if ipPort == "" {
-			continue
-		}
-		var (
-			host string
-			port string
-		)
-		host, port, err = net.SplitHostPort(ipPort)
-		if err != nil {
-			h, p, err2 := net.SplitHostPort(ipPort + ":" + defaultPort)
-			if err2 == nil {
-				host, port, err = h, p, nil
-			}
-			if err != nil {
-				err = BadEndpointError{
-					Endpoint: rt.Endpoint,
-					Err:      BadHostPortError{HostPort: ipPort, Err: err},
-				}
-				return
-			}
-		}
-		var tcpAddr *net.TCPAddr
-		tcpAddr, err = parseIPAndPort(host, port)
-		if err != nil {
-			err = BadEndpointError{
-				Endpoint: rt.Endpoint,
-				Err:      BadHostPortError{HostPort: ipPort, Err: err},
-			}
-			return
-		}
-		tcpAddrs = append(tcpAddrs, tcpAddr)
+	tcpAddrs, err = misc.ParseTCPAddrList(ipPortListStr, defaultPort)
+	if err != nil {
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		return
 	}
-
 	if len(tcpAddrs) == 0 {
-		err = BadEndpointError{Endpoint: rt.Endpoint, Err: ErrExpectNonEmpty}
+		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}

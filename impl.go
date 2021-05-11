@@ -22,8 +22,10 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 	"google.golang.org/grpc"
 
+	"github.com/chronos-tachyon/roxy/dist"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 var (
@@ -179,7 +181,7 @@ func (impl *Impl) loadMimeRules() error {
 		mimeFileJSON, err = ioutil.ReadFile(mimeFile)
 		if errors.Is(err, fs.ErrNotExist) {
 			mimeFile = "<internal>"
-			mimeFileJSON = []byte(defaultMimeFileJSON)
+			mimeFileJSON = []byte(dist.DefaultMimeJSON)
 			err = nil
 		}
 		if err != nil {
@@ -190,7 +192,7 @@ func (impl *Impl) loadMimeRules() error {
 			}
 		}
 	} else {
-		mimeFile, err := mainutil.ProcessPath(impl.cfg.Global.MimeFile)
+		mimeFile, err := roxyutil.ExpandPath(impl.cfg.Global.MimeFile)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,
@@ -346,7 +348,7 @@ func (impl *Impl) loadPages() error {
 			}
 		}
 
-		abs, err := mainutil.ProcessPath(rootDir)
+		abs, err := roxyutil.ExpandPath(rootDir)
 		if err != nil {
 			return ConfigLoadError{
 				Path:    impl.configPath,

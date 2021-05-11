@@ -5,6 +5,8 @@ import (
 	"net"
 	"sort"
 	"strings"
+
+	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
 // type ResolvedList {{{
@@ -44,38 +46,8 @@ func resolvedCompare(a Resolved, b Resolved) int {
 			return int(b.SRVWeight) - int(a.SRVWeight)
 		}
 	}
-	if cmp := tcpAddrCompare(*a.Addr.(*net.TCPAddr), *b.Addr.(*net.TCPAddr)); cmp != 0 {
+	if cmp := misc.CompareTCPAddr(a.Addr.(*net.TCPAddr), b.Addr.(*net.TCPAddr)); cmp != 0 {
 		return cmp
 	}
 	return strings.Compare(a.Unique, b.Unique)
-}
-
-func tcpAddrCompare(a net.TCPAddr, b net.TCPAddr) int {
-	if cmp := strings.Compare(a.Zone, b.Zone); cmp != 0 {
-		return cmp
-	}
-	if cmp := ipCompare(a.IP, b.IP); cmp != 0 {
-		return cmp
-	}
-	return a.Port - b.Port
-}
-
-func ipCompare(a net.IP, b net.IP) int {
-	a, b = a.To16(), b.To16()
-	switch {
-	case a == nil && b == nil:
-		return 0
-	case a == nil:
-		return -1
-	case b == nil:
-		return 1
-	default:
-		for i := 0; i < 16; i++ {
-			ax, bx := a[i], b[i]
-			if ax != bx {
-				return int(ax) - int(bx)
-			}
-		}
-		return 0
-	}
 }

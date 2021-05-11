@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/chronos-tachyon/roxy/lib/membership"
-	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -20,8 +20,8 @@ type LoadFunc func() float32
 
 var DefaultLoadFunc LoadFunc = func() float32 { return 0.0 }
 
-func (a *Announcer) AddATC(lbcc *grpc.ClientConn, lbName, lbLoc, unique, namedPort string, loadFn LoadFunc) error {
-	impl, err := NewATC(lbcc, lbName, lbLoc, unique, namedPort, loadFn)
+func (a *Announcer) AddATC(lbcc *grpc.ClientConn, serviceName, location, unique, namedPort string, loadFn LoadFunc) error {
+	impl, err := NewATC(lbcc, serviceName, location, unique, namedPort, loadFn)
 	if err != nil {
 		return err
 	}
@@ -29,59 +29,59 @@ func (a *Announcer) AddATC(lbcc *grpc.ClientConn, lbName, lbLoc, unique, namedPo
 	return nil
 }
 
-func NewATC(lbcc *grpc.ClientConn, lbName, lbLoc, unique, namedPort string, loadFn LoadFunc) (Impl, error) {
+func NewATC(lbcc *grpc.ClientConn, serviceName, location, unique, namedPort string, loadFn LoadFunc) (Impl, error) {
 	if lbcc == nil {
 		panic(errors.New("*grpc.ClientConn is nil"))
 	}
-	if err := roxyresolver.ValidateATCServiceName(lbName); err != nil {
-		return nil, fmt.Errorf("invalid ATC service name %q: %w", lbName, err)
+	if err := roxyutil.ValidateATCServiceName(serviceName); err != nil {
+		return nil, err
 	}
-	if err := roxyresolver.ValidateATCLocation(lbLoc); err != nil {
-		return nil, fmt.Errorf("invalid ATC location %q: %w", lbLoc, err)
+	if err := roxyutil.ValidateATCLocation(location); err != nil {
+		return nil, err
+	}
+	if err := roxyutil.ValidateATCUnique(unique); err != nil {
+		return nil, err
 	}
 	if namedPort != "" {
-		if err := roxyresolver.ValidateServerSetPort(namedPort); err != nil {
+		if err := roxyutil.ValidateNamedPort(namedPort); err != nil {
 			return nil, fmt.Errorf("invalid named port %q: %w", namedPort, err)
 		}
-	}
-	if unique == "" {
-		return nil, fmt.Errorf("invalid unique string %q", unique)
 	}
 	if loadFn == nil {
 		loadFn = DefaultLoadFunc
 	}
 	impl := &atcImpl{
-		lbcc:      lbcc,
-		atc:       roxypb.NewAirTrafficControlClient(lbcc),
-		lbName:    lbName,
-		lbLoc:     lbLoc,
-		unique:    unique,
-		namedPort: namedPort,
-		loadFn:    loadFn,
+		lbcc:        lbcc,
+		atc:         roxypb.NewAirTrafficControlClient(lbcc),
+		serviceName: serviceName,
+		location:    location,
+		unique:      unique,
+		namedPort:   namedPort,
+		loadFn:      loadFn,
 	}
 	impl.cv = sync.NewCond(&impl.mu)
 	return impl, nil
 }
 
 type atcImpl struct {
-	wg        sync.WaitGroup
-	lbcc      *grpc.ClientConn
-	atc       roxypb.AirTrafficControlClient
-	lbName    string
-	lbLoc     string
-	unique    string
-	namedPort string
-	loadFn    LoadFunc
+	wg          sync.WaitGroup
+	lbcc        *grpc.ClientConn
+	atc         roxypb.AirTrafficControlClient
+	serviceName string
+	location    string
+	unique      string
+	namedPort   string
+	loadFn      LoadFunc
 
 	mu     sync.Mutex
 	cv     *sync.Cond
 	alive  bool
-	rc     roxypb.AirTrafficControl_ReportClient
+	rc     roxypb.AirTrafficControl_ServerAnnounceClient
 	doneCh chan struct{}
 	errs   multierror.Error
 }
 
-func (impl *atcImpl) Announce(ctx context.Context, ss *membership.ServerSet) error {
+func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
@@ -89,40 +89,38 @@ func (impl *atcImpl) Announce(ctx context.Context, ss *membership.ServerSet) err
 		return errors.New("Announce called twice")
 	}
 
-	tcpAddr := ss.TCPAddrForPort(impl.namedPort)
+	tcpAddr := r.NamedAddr(impl.namedPort)
 	if tcpAddr == nil {
 		return fmt.Errorf("unknown port name %q", impl.namedPort)
 	}
 
-	serverName := ss.Metadata["ServerName"]
+	serverName := r.ServerName
 
 	var (
-		shardID    int32
+		shardID    uint32
 		hasShardID bool
 	)
-	if ss.ShardID != nil {
-		shardID = *ss.ShardID
+	if r.ShardID != nil {
+		shardID = *r.ShardID
 		hasShardID = true
 	}
 
-	rc, err := impl.atc.Report(ctx)
+	rc, err := impl.atc.ServerAnnounce(ctx)
 	if err != nil {
 		return err
 	}
 
-	err = rc.Send(&roxypb.ReportRequest{
-		Load: impl.loadFn(),
-		FirstReport: &roxypb.ReportRequest_FirstReport{
-			Name:       impl.lbName,
-			Location:   impl.lbLoc,
-			Unique:     impl.unique,
-			ServerName: serverName,
-			ShardId:    shardID,
-			Ip:         []byte(tcpAddr.IP),
-			Zone:       tcpAddr.Zone,
-			Port:       uint32(tcpAddr.Port),
-			HasShardId: hasShardID,
-		},
+	err = rc.Send(&roxypb.ServerAnnounceRequest{
+		ServiceName: impl.serviceName,
+		ShardId:     shardID,
+		Location:    impl.location,
+		Unique:      impl.unique,
+		ServerName:  serverName,
+		Ip:          []byte(tcpAddr.IP),
+		Zone:        tcpAddr.Zone,
+		Port:        uint32(tcpAddr.Port),
+		HasShardId:  hasShardID,
+		Load:        impl.loadFn(),
 	})
 	if err != nil {
 		_ = rc.CloseSend()
@@ -152,7 +150,7 @@ func (impl *atcImpl) Announce(ctx context.Context, ss *membership.ServerSet) err
 			case <-doneCh2:
 				looping = false
 			case <-t.C:
-				err := rc.Send(&roxypb.ReportRequest{
+				err := rc.Send(&roxypb.ServerAnnounceRequest{
 					Load: impl.loadFn(),
 				})
 				impl.recordError(err)
