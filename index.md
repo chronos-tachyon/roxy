@@ -1,10 +1,10 @@
 # Roxy the Frontend Proxy
 
-[![Go](https://img.shields.io/github/go-mod/go-version/chronos-tachyon/roxy)](https://golang.org/)
-[![Latest Release](https://img.shields.io/github/v/release/chronos-tachyon/roxy?sort=semver)](https://github.com/chronos-tachyon/roxy/releases)
-[![License](https://img.shields.io/badge/license-Hippocratic%202.1-brightgreen)](https://firstdonoharm.dev/version/2/1/license/)
+[![Go](https://img.shields.io/github/go-mod/go-version/chronos-tachyon/roxy?logo=go)](https://golang.org/)
+[![Latest Release](https://img.shields.io/github/v/release/chronos-tachyon/roxy?logo=github&sort=semver)](https://github.com/chronos-tachyon/roxy/releases)
+[![License](https://img.shields.io/github/license/chronos-tachyon/roxy?logo=apache)](https://opensource.org/licenses/Apache-2.0)
 [![Build Status](https://img.shields.io/github/workflow/status/chronos-tachyon/roxy/Go)](https://github.com/chronos-tachyon/roxy/actions/workflows/go.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/chronostachyon/roxy)](https://hub.docker.com/r/chronostachyon/roxy)
+[![Docker Pulls](https://img.shields.io/docker/pulls/chronostachyon/roxy?logo=docker)](https://hub.docker.com/r/chronostachyon/roxy)
 [![Go Report Card](https://goreportcard.com/badge/github.com/chronos-tachyon/roxy)](https://goreportcard.com/report/github.com/chronos-tachyon/roxy)
 
 > ![Roxy Lalonde](https://chronos-tachyon.net/img/roxy-lalonde.png)
