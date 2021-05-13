@@ -9,8 +9,6 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -319,12 +317,6 @@ func (alt *tccJSON) toStd() TLSClientConfig {
 }
 
 func (tcc TLSClientConfig) postprocess() (out TLSClientConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("TLSClientConfig parse result")
-	}()
-
 	var zero TLSClientConfig
 
 	if !tcc.Enabled {

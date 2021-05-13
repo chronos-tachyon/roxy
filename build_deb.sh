@@ -60,6 +60,7 @@ build_for_os_arch() {
     "${BUILDDIR}/opt/roxy/share/misc" \
     "${BUILDDIR}/opt/roxy/share/templates" \
     "${BUILDDIR}/var/opt/roxy/lib/acme" \
+    "${BUILDDIR}/var/opt/roxy/lib/state" \
     "${BUILDDIR}/var/opt/roxy/log"
 
   TOPLEVELDIRS=( etc opt var )
@@ -70,7 +71,9 @@ build_for_os_arch() {
   echo '::endgroup::'
 
   echo '> go install ./...'
-  go install ./...
+  echo '::group::go install'
+  go install -v ./...
+  echo '::endgroup::'
 
   echo '> rm -rf .../opt/roxy/pkg'
   chmod -R u+w "${BUILDDIR}/opt/roxy/pkg"

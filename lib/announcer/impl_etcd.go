@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"os"
 	"sync"
 
 	v3 "go.etcd.io/etcd/client/v3"
@@ -14,46 +14,37 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func (a *Announcer) AddEtcd(etcd *v3.Client, etcdPath string, unique string, format Format, namedPort string) error {
-	impl, err := NewEtcd(etcd, etcdPath, unique, format, namedPort)
-	if err != nil {
-		return err
-	}
-	a.Add(impl)
-	return nil
-}
-
-func NewEtcd(etcd *v3.Client, etcdPath string, unique string, format Format, namedPort string) (Impl, error) {
+func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (Impl, error) {
 	if etcd == nil {
 		panic(errors.New("*v3.Client is nil"))
 	}
-	if err := roxyutil.ValidateEtcdPath(etcdPath); err != nil {
-		return nil, fmt.Errorf("invalid etcd path %q: %w", etcdPath, err)
+	if err := roxyutil.ValidateEtcdPath(path); err != nil {
+		return nil, err
+	}
+	if unique == "" {
+		unique = os.Getenv("HOSTNAME")
 	}
 	if namedPort != "" {
 		if err := roxyutil.ValidateNamedPort(namedPort); err != nil {
-			return nil, fmt.Errorf("invalid named port %q: %w", namedPort, err)
+			return nil, err
 		}
-	}
-	if unique == "" {
-		return nil, fmt.Errorf("invalid unique string %q", unique)
 	}
 	return &etcdImpl{
 		etcd:      etcd,
-		etcdPath:  etcdPath,
+		path:      path,
 		unique:    unique,
-		format:    format,
 		namedPort: namedPort,
+		format:    format,
 	}, nil
 }
 
 type etcdImpl struct {
 	wg        sync.WaitGroup
 	etcd      *v3.Client
-	etcdPath  string
+	path      string
 	unique    string
-	format    Format
 	namedPort string
+	format    Format
 
 	mu      sync.Mutex
 	alive   bool
@@ -102,7 +93,7 @@ func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		impl.wg.Done()
 	}()
 
-	key := impl.etcdPath + impl.unique
+	key := impl.path + impl.unique
 	_, err = impl.etcd.KV.Put(ctx, key, string(payload), v3.WithLease(lease.ID))
 	err = roxyresolver.MapEtcdError(err)
 	if err != nil {

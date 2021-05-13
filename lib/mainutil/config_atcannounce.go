@@ -5,36 +5,40 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/announcer"
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 type ATCAnnounceConfig struct {
-	GRPCClientConfig
-	NamedPort   string
+	ATCClientConfig
 	ServiceName string
 	Location    string
+	Unique      string
+	NamedPort   string
 }
 
 type aacJSON struct {
-	gccJSON
-	NamedPort   string `json:"namedPort"`
+	accJSON
 	ServiceName string `json:"serviceName"`
 	Location    string `json:"location"`
+	Unique      string `json:"unique"`
+	NamedPort   string `json:"namedPort"`
 }
 
 func (aac ATCAnnounceConfig) AppendTo(out *strings.Builder) {
-	aac.GRPCClientConfig.AppendTo(out)
+	aac.ATCClientConfig.AppendTo(out)
+	out.WriteString(";name=")
+	out.WriteString(aac.ServiceName)
+	out.WriteString(";location=")
+	out.WriteString(aac.Location)
+	out.WriteString(";unique=")
+	out.WriteString(aac.Unique)
 	if aac.NamedPort != "" {
 		out.WriteString(";port=")
 		out.WriteString(aac.NamedPort)
 	}
-	out.WriteString(";name=")
-	out.WriteString(aac.ServiceName)
-	out.WriteString(";loc=")
-	out.WriteString(aac.Location)
 }
 
 func (aac ATCAnnounceConfig) String() string {
@@ -81,14 +85,35 @@ func (aac *ATCAnnounceConfig) Parse(str string) error {
 
 	for _, item := range pieces[1:] {
 		switch {
-		case strings.HasPrefix(item, "port="):
-			aac.NamedPort = item[5:]
-
 		case strings.HasPrefix(item, "name="):
-			aac.ServiceName = item[5:]
+			aac.ServiceName, err = roxyutil.ExpandString(item[5:])
+			if err != nil {
+				return err
+			}
 
 		case strings.HasPrefix(item, "loc="):
-			aac.Location = item[4:]
+			aac.Location, err = roxyutil.ExpandString(item[4:])
+			if err != nil {
+				return err
+			}
+
+		case strings.HasPrefix(item, "location="):
+			aac.Location, err = roxyutil.ExpandString(item[9:])
+			if err != nil {
+				return err
+			}
+
+		case strings.HasPrefix(item, "unique="):
+			aac.Unique, err = roxyutil.ExpandString(item[7:])
+			if err != nil {
+				return err
+			}
+
+		case strings.HasPrefix(item, "port="):
+			aac.NamedPort, err = roxyutil.ExpandString(item[5:])
+			if err != nil {
+				return err
+			}
 
 		default:
 			rest.WriteString(";")
@@ -96,7 +121,7 @@ func (aac *ATCAnnounceConfig) Parse(str string) error {
 		}
 	}
 
-	err = aac.GRPCClientConfig.Parse(rest.String())
+	err = aac.ATCClientConfig.Parse(rest.String())
 	if err != nil {
 		return err
 	}
@@ -144,15 +169,24 @@ func (aac *ATCAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+func (aac ATCAnnounceConfig) AddTo(client *atcclient.ATCClient, loadFn atcclient.LoadFunc, a *announcer.Announcer) error {
+	impl, err := announcer.NewATC(client, aac.ServiceName, aac.Location, aac.Unique, aac.NamedPort, loadFn)
+	if err == nil {
+		a.Add(impl)
+	}
+	return err
+}
+
 func (aac ATCAnnounceConfig) toAlt() *aacJSON {
 	if !aac.Enabled {
 		return nil
 	}
 	return &aacJSON{
-		gccJSON:     *aac.GRPCClientConfig.toAlt(),
-		NamedPort:   aac.NamedPort,
+		accJSON:     *aac.ATCClientConfig.toAlt(),
 		ServiceName: aac.ServiceName,
 		Location:    aac.Location,
+		Unique:      aac.Unique,
+		NamedPort:   aac.NamedPort,
 	}
 }
 
@@ -160,39 +194,27 @@ func (alt *aacJSON) toStd() (ATCAnnounceConfig, error) {
 	if alt == nil {
 		return ATCAnnounceConfig{}, nil
 	}
-	tmp, err := alt.gccJSON.toStd()
+	tmp, err := alt.accJSON.toStd()
 	if err != nil {
 		return ATCAnnounceConfig{}, err
 	}
 	return ATCAnnounceConfig{
-		GRPCClientConfig: tmp,
-		NamedPort:        alt.NamedPort,
-		ServiceName:      alt.ServiceName,
-		Location:         alt.Location,
+		ATCClientConfig: tmp,
+		ServiceName:     alt.ServiceName,
+		Location:        alt.Location,
+		Unique:          alt.Unique,
+		NamedPort:       alt.NamedPort,
 	}, nil
 }
 
 func (aac ATCAnnounceConfig) postprocess() (out ATCAnnounceConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("ATCAnnounceConfig parse result")
-	}()
-
 	var zero ATCAnnounceConfig
 
-	tmp, err := aac.GRPCClientConfig.postprocess()
+	tmp, err := aac.ATCClientConfig.postprocess()
 	if err != nil {
 		return zero, nil
 	}
-	aac.GRPCClientConfig = tmp
-
-	if aac.NamedPort != "" {
-		err = roxyutil.ValidateNamedPort(aac.NamedPort)
-		if err != nil {
-			return zero, err
-		}
-	}
+	aac.ATCClientConfig = tmp
 
 	err = roxyutil.ValidateATCServiceName(aac.ServiceName)
 	if err != nil {
@@ -202,6 +224,24 @@ func (aac ATCAnnounceConfig) postprocess() (out ATCAnnounceConfig, err error) {
 	err = roxyutil.ValidateATCLocation(aac.Location)
 	if err != nil {
 		return zero, err
+	}
+
+	if aac.Unique == "" {
+		aac.Unique, err = UniqueID()
+		if err != nil {
+			return zero, err
+		}
+	}
+	err = roxyutil.ValidateATCUnique(aac.Unique)
+	if err != nil {
+		return zero, err
+	}
+
+	if aac.NamedPort != "" {
+		err = roxyutil.ValidateNamedPort(aac.NamedPort)
+		if err != nil {
+			return zero, err
+		}
 	}
 
 	return aac, nil

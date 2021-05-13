@@ -21,8 +21,10 @@ RUN set -euo pipefail; \
     fi; \
     echo '::group::go get'; \
     go get -d ./...; \
-    echo '::endgroup::'; \
-    go install ./...; \
+    echo; echo '::endgroup::'; \
+    echo '::group::go install'; \
+    go install -v ./...; \
+    echo; echo '::endgroup::'; \
     mv /go/pkg /junk; \
     chmod -R a+rX,u+w,go-w /build /go/bin; \
     if [ -d /go/bin/${GOOS}_${GOARCH} ]; then \
@@ -32,7 +34,7 @@ RUN set -euo pipefail; \
     setcap cap_net_bind_service=+ep /go/bin/roxy; \
     addgroup -S roxy -g 400; \
     adduser -S roxy -u 400 -G roxy -h /var/opt/roxy/lib -H -D; \
-    mkdir -p /etc/opt/roxy /etc/opt/atc /opt/roxy/share/misc /opt/roxy/share/templates /var/opt/roxy/lib/acme /var/opt/roxy/log /srv/www; \
+    mkdir -p /etc/opt/roxy /etc/opt/atc /opt/roxy/share/misc /opt/roxy/share/templates /var/opt/roxy/lib/acme /var/opt/roxy/lib/state /var/opt/roxy/log /srv/www; \
     cp /build/templates/* /opt/roxy/share/templates/; \
     cp /build/dist/roxy.config.json /opt/roxy/share/misc/roxy.config.json.example; \
     cp /build/dist/roxy.config.json /etc/opt/roxy/config.json.example; \
@@ -52,10 +54,10 @@ RUN set -euo pipefail; \
     find /etc/opt/roxy /etc/opt/atc /opt/roxy /var/opt/roxy /srv/www -print0 | xargs -0 touch -d '2000-01-01 00:00:00' --; \
     chown root:roxy /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example; \
     chown root:roxy /var/opt/roxy; \
-    chown roxy:roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme; \
+    chown roxy:roxy /var/opt/roxy/lib /var/opt/roxy/lib/acme /var/opt/roxy/lib/state; \
     chown roxy:adm  /var/opt/roxy/log; \
     chmod 0640 /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example; \
-    chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme; \
+    chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme /var/opt/roxy/lib/state; \
     chmod 2750 /var/opt/roxy/log
 
 FROM ${ARCH}/alpine:3.13 AS final

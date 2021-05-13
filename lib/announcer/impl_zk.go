@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"os"
 	"path"
 	"sync"
 
@@ -15,45 +15,36 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func (a *Announcer) AddZK(zkconn *zk.Conn, zkPath string, unique string, format Format, namedPort string) error {
-	impl, err := NewZK(zkconn, zkPath, unique, format, namedPort)
-	if err != nil {
-		return err
-	}
-	a.Add(impl)
-	return nil
-}
-
-func NewZK(zkconn *zk.Conn, zkPath string, unique string, format Format, namedPort string) (Impl, error) {
+func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Impl, error) {
 	if zkconn == nil {
 		panic(errors.New("*zk.Conn is nil"))
 	}
-	if err := roxyutil.ValidateZKPath(zkPath); err != nil {
-		return nil, fmt.Errorf("invalid ZooKeeper path %q: %w", zkPath, err)
+	if err := roxyutil.ValidateZKPath(path); err != nil {
+		return nil, err
+	}
+	if unique == "" {
+		unique = os.Getenv("HOSTNAME")
 	}
 	if namedPort != "" {
 		if err := roxyutil.ValidateNamedPort(namedPort); err != nil {
-			return nil, fmt.Errorf("invalid named port %q: %w", namedPort, err)
+			return nil, err
 		}
-	}
-	if unique == "" {
-		return nil, fmt.Errorf("invalid unique string %q", unique)
 	}
 	return &zkImpl{
 		zkconn:    zkconn,
-		zkPath:    zkPath,
+		path:      path,
 		unique:    unique,
-		format:    format,
 		namedPort: namedPort,
+		format:    format,
 	}, nil
 }
 
 type zkImpl struct {
 	zkconn    *zk.Conn
-	zkPath    string
+	path      string
 	unique    string
-	format    Format
 	namedPort string
+	format    Format
 
 	mu     sync.Mutex
 	alive  bool
@@ -83,7 +74,7 @@ func (impl *zkImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		return err
 	}
 
-	file := path.Join(impl.zkPath, impl.unique)
+	file := path.Join(impl.path, impl.unique)
 	actual, err := impl.zkconn.CreateProtectedEphemeralSequential(file, payload, zk.WorldACL(zk.PermAll))
 	err = roxyresolver.MapZKError(err)
 	if err != nil {

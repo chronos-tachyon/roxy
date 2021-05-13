@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rs/zerolog/log"
+	v3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
@@ -16,27 +16,33 @@ import (
 type EtcdAnnounceConfig struct {
 	EtcdConfig
 	Path      string
-	Format    announcer.Format
+	Unique    string
 	NamedPort string
+	Format    announcer.Format
 }
 
 type eacJSON struct {
 	ecJSON
 	Path      string           `json:"path"`
-	Format    announcer.Format `json:"format"`
+	Unique    string           `json:"unique"`
 	NamedPort string           `json:"namedPort"`
+	Format    announcer.Format `json:"format"`
 }
 
 func (eac EtcdAnnounceConfig) AppendTo(out *strings.Builder) {
 	eac.EtcdConfig.AppendTo(out)
 	out.WriteString(";path=")
 	out.WriteString(eac.Path)
-	out.WriteString(";format=")
-	out.WriteString(eac.Format.String())
+	if eac.Unique != "" {
+		out.WriteString(";unique=")
+		out.WriteString(eac.Unique)
+	}
 	if eac.NamedPort != "" {
 		out.WriteString(";port=")
 		out.WriteString(eac.NamedPort)
 	}
+	out.WriteString(";format=")
+	out.WriteString(eac.Format.String())
 }
 
 func (eac EtcdAnnounceConfig) String() string {
@@ -84,16 +90,28 @@ func (eac *EtcdAnnounceConfig) Parse(str string) error {
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "path="):
-			eac.Path = item[5:]
+			eac.Path, err = roxyutil.ExpandString(item[5:])
+			if err != nil {
+				return err
+			}
+
+		case strings.HasPrefix(item, "unique="):
+			eac.Unique, err = roxyutil.ExpandString(item[7:])
+			if err != nil {
+				return err
+			}
+
+		case strings.HasPrefix(item, "port="):
+			eac.NamedPort, err = roxyutil.ExpandString(item[5:])
+			if err != nil {
+				return err
+			}
 
 		case strings.HasPrefix(item, "format="):
 			err = eac.Format.Parse(item[7:])
 			if err != nil {
 				return fmt.Errorf("failed to parse format: %w", err)
 			}
-
-		case strings.HasPrefix(item, "port="):
-			eac.NamedPort = item[5:]
 
 		default:
 			rest.WriteString(";")
@@ -144,6 +162,14 @@ func (eac *EtcdAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+func (eac EtcdAnnounceConfig) AddTo(etcd *v3.Client, a *announcer.Announcer) error {
+	impl, err := announcer.NewEtcd(etcd, eac.Path, eac.Unique, eac.NamedPort, eac.Format)
+	if err == nil {
+		a.Add(impl)
+	}
+	return err
+}
+
 func (eac EtcdAnnounceConfig) toAlt() *eacJSON {
 	if !eac.Enabled {
 		return nil
@@ -151,8 +177,8 @@ func (eac EtcdAnnounceConfig) toAlt() *eacJSON {
 	return &eacJSON{
 		ecJSON:    *eac.EtcdConfig.toAlt(),
 		Path:      eac.Path,
-		Format:    eac.Format,
 		NamedPort: eac.NamedPort,
+		Format:    eac.Format,
 	}
 }
 
@@ -163,18 +189,12 @@ func (alt *eacJSON) toStd() EtcdAnnounceConfig {
 	return EtcdAnnounceConfig{
 		EtcdConfig: alt.ecJSON.toStd(),
 		Path:       alt.Path,
-		Format:     alt.Format,
 		NamedPort:  alt.NamedPort,
+		Format:     alt.Format,
 	}
 }
 
 func (eac EtcdAnnounceConfig) postprocess() (out EtcdAnnounceConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("EtcdAnnounceConfig parse result")
-	}()
-
 	var zero EtcdAnnounceConfig
 
 	tmp, err := eac.EtcdConfig.postprocess()
@@ -198,7 +218,7 @@ func (eac EtcdAnnounceConfig) postprocess() (out EtcdAnnounceConfig, err error) 
 		}
 	}
 
-	if eac.Format == announcer.FinagleFormat {
+	if eac.Format != announcer.GRPCFormat {
 		eac.NamedPort = ""
 	}
 

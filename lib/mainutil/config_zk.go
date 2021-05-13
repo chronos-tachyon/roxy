@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-zookeeper/zk"
-	"github.com/rs/zerolog/log"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -36,10 +35,10 @@ type ZKAuthConfig struct {
 type zcJSON struct {
 	Servers        []string      `json:"servers"`
 	SessionTimeout time.Duration `json:"sessionTimeout,omitempty"`
-	Auth           *zacJSON      `json:"auth,omitempty"`
+	Auth           *zcaJSON      `json:"auth,omitempty"`
 }
 
-type zacJSON struct {
+type zcaJSON struct {
 	Scheme   string `json:"scheme"`
 	Raw      string `json:"raw,omitempty"`
 	Username string `json:"username,omitempty"`
@@ -158,7 +157,7 @@ func (zc *ZKConfig) Parse(str string) error {
 
 		case strings.HasPrefix(item, "authdata="):
 			zc.Auth.Enabled = true
-			zc.Auth.Raw, err = tryB64DecodeString(item[9:])
+			zc.Auth.Raw, err = misc.TryBase64DecodeString(item[9:])
 			if err != nil {
 				return err
 			}
@@ -272,9 +271,9 @@ func (zc ZKConfig) toAlt() *zcJSON {
 		return nil
 	}
 
-	var altAuth *zacJSON
+	var altAuth *zcaJSON
 	if zc.Auth.Enabled {
-		altAuth = &zacJSON{
+		altAuth = &zcaJSON{
 			Scheme:   zc.Auth.Scheme,
 			Raw:      base64.StdEncoding.EncodeToString(zc.Auth.Raw),
 			Username: zc.Auth.Username,
@@ -296,7 +295,7 @@ func (alt *zcJSON) toStd() (ZKConfig, error) {
 
 	var stdAuth ZKAuthConfig
 	if alt.Auth != nil {
-		raw, err := tryB64DecodeString(alt.Auth.Raw)
+		raw, err := misc.TryBase64DecodeString(alt.Auth.Raw)
 		if err != nil {
 			return ZKConfig{}, err
 		}
@@ -319,12 +318,6 @@ func (alt *zcJSON) toStd() (ZKConfig, error) {
 }
 
 func (zc ZKConfig) postprocess() (out ZKConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("ZKConfig parse result")
-	}()
-
 	var zero ZKConfig
 
 	if !zc.Enabled {
@@ -361,27 +354,4 @@ func (zc ZKConfig) postprocess() (out ZKConfig, err error) {
 	}
 
 	return zc, nil
-}
-
-func tryB64DecodeString(str string) ([]byte, error) {
-	if str == "" {
-		return nil, nil
-	}
-
-	var firstErr error
-	for _, enc := range []*base64.Encoding{
-		base64.StdEncoding,
-		base64.URLEncoding,
-		base64.RawStdEncoding,
-		base64.RawURLEncoding,
-	} {
-		raw, err := enc.DecodeString(str)
-		if err == nil {
-			return raw, nil
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	return nil, fmt.Errorf("failed to decode base-64 string %q: %w", str, firstErr)
 }

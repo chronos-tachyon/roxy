@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
@@ -148,7 +149,9 @@ func (ref *Ref) TakeClientConn(ctx context.Context, addr *net.TCPAddr) (*grpc.Cl
 		return data.cc, nil
 	}
 
-	dialOpts := make([]grpc.DialOption, 0)
+	dialOpts := make([]grpc.DialOption, 2)
+	dialOpts[0] = roxyresolver.WithStandardResolvers(ctx)
+	dialOpts[1] = grpc.WithInsecure()
 
 	cc, err := grpc.DialContext(ctx, addr.String(), dialOpts...)
 	if err != nil {

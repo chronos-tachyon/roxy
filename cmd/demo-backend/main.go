@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,8 +36,8 @@ var (
 	flagAnnounceZK      string = ""
 	flagAnnounceEtcd    string = ""
 	flagAnnounceATC     string = ""
-	flagUnique          string = ""
 	flagShakespeareFile string = "/dev/null"
+	flagUniqueFile      string = "/var/opt/roxy/lib/state/demo-backend.id"
 )
 
 func init() {
@@ -49,8 +48,8 @@ func init() {
 	getopt.FlagLong(&flagAnnounceZK, "announce-zk", 'Z', "ZooKeeper announce configuration")
 	getopt.FlagLong(&flagAnnounceEtcd, "announce-etcd", 'E', "etcd announce configuration")
 	getopt.FlagLong(&flagAnnounceATC, "announce-atc", 'A', "ATC announce configuration")
-	getopt.FlagLong(&flagUnique, "unique", 'U', "unique identifier; defaults to os.Hostname()")
 	getopt.FlagLong(&flagShakespeareFile, "shakespeare-file", 'f', "file to serve; recommend using https://ocw.mit.edu/ans7870/6/6.006/s08/lecturenotes/files/t8.shakespeare.txt")
+	getopt.FlagLong(&flagUniqueFile, "unique-file", 'U', "file containing a unique ID for the ATC announcer")
 }
 
 var (
@@ -61,6 +60,8 @@ var (
 func main() {
 	getopt.Parse()
 
+	mainutil.SetUniqueFile(flagUniqueFile)
+
 	mainutil.InitContext()
 	defer mainutil.CancelRootContext()
 	ctx := mainutil.RootContext()
@@ -70,24 +71,7 @@ func main() {
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
-	var err error
-	if flagUnique == "" {
-		flagUnique, err = os.Hostname()
-		if err != nil {
-			log.Logger.Fatal().
-				Err(err).
-				Msg("--unique: failed to retrieve hostname")
-		}
-		flagUnique = strings.TrimRight(flagUnique, ".")
-	}
-	if !regexp.MustCompile(`^[0-9A-Za-z._+/-]+$`).MatchString(flagUnique) {
-		log.Logger.Fatal().
-			Str("input", flagUnique).
-			Msg("--unique: invalid unique string")
-	}
-
-	var expanded string
-	expanded, err = roxyutil.ExpandPath(flagShakespeareFile)
+	expanded, err := roxyutil.ExpandPath(flagShakespeareFile)
 	if err != nil {
 		log.Logger.Fatal().
 			Str("input", flagShakespeareFile).
@@ -175,10 +159,9 @@ func main() {
 
 		ctx = roxyresolver.WithZKConn(ctx, zkconn)
 
-		if err := ann.AddZK(zkconn, zac.Path, flagUnique, zac.Format, zac.NamedPort); err != nil {
+		if err := zac.AddTo(zkconn, ann); err != nil {
 			log.Logger.Fatal().
 				Interface("config", zac).
-				Str("unique", flagUnique).
 				Err(err).
 				Msg("--announce-zk: failed to announce to ZooKeeper")
 		}
@@ -197,32 +180,30 @@ func main() {
 
 		ctx = roxyresolver.WithEtcdV3Client(ctx, etcd)
 
-		if err := ann.AddEtcd(etcd, eac.Path, flagUnique, eac.Format, eac.NamedPort); err != nil {
+		if err := eac.AddTo(etcd, ann); err != nil {
 			log.Logger.Fatal().
 				Interface("config", eac).
-				Str("unique", flagUnique).
 				Err(err).
 				Msg("--announce-etcd: failed to announce to etcd")
 		}
 	}
 
-	lbcc, err := aac.Dial(ctx)
+	atcClient, err := aac.NewClient(ctx)
 	if err != nil {
-		defer lbcc.Close()
-
-		ctx = roxyresolver.WithATCClient(ctx, lbcc)
-
 		log.Logger.Fatal().
 			Interface("config", aac).
 			Err(err).
 			Msg("--announce-atc: failed to connect to ATC")
 	}
 
-	if lbcc != nil {
-		if err := ann.AddATC(lbcc, aac.ServiceName, aac.Location, flagUnique, "", nil); err != nil {
+	if atcClient != nil {
+		defer atcClient.Close()
+
+		ctx = roxyresolver.WithATCClient(ctx, atcClient)
+
+		if err := aac.AddTo(atcClient, nil, ann); err != nil {
 			log.Logger.Fatal().
 				Interface("config", aac).
-				Str("unique", flagUnique).
 				Err(err).
 				Msg("--announce-atc: failed to announce to ATC")
 		}

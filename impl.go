@@ -20,9 +20,9 @@ import (
 	v3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
-	"google.golang.org/grpc"
 
 	"github.com/chronos-tachyon/roxy/dist"
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -40,7 +40,7 @@ type Impl struct {
 	mimeRules  []*MimeRule
 	etcd       *v3.Client
 	zkconn     *zk.Conn
-	atc        *grpc.ClientConn
+	atc        *atcclient.ATCClient
 	storage    StorageEngine
 	hosts      []*regexp.Regexp
 	pages      map[string]pageData
@@ -287,8 +287,7 @@ func (impl *Impl) loadATC() error {
 
 	cfg := impl.cfg.Global.ATC
 
-	var err error
-	impl.atc, err = cfg.Dial(impl.ctx)
+	atcClient, err := cfg.NewClient(impl.ctx)
 	if err != nil {
 		return ConfigLoadError{
 			Path:    impl.configPath,
@@ -297,7 +296,8 @@ func (impl *Impl) loadATC() error {
 		}
 	}
 
-	impl.ctx = roxyresolver.WithATCClient(impl.ctx, impl.atc)
+	impl.atc = atcClient
+	impl.ctx = roxyresolver.WithATCClient(impl.ctx, atcClient)
 
 	return nil
 }

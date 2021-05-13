@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
@@ -142,31 +140,17 @@ func (gcc GRPCClientConfig) Dial(ctx context.Context, opts ...grpc.DialOption) (
 		return nil, nil
 	}
 
-	resolvers := make([]resolver.Builder, 3, 6)
-	resolvers[0] = roxyresolver.NewIPBuilder(nil, "")
-	resolvers[1] = roxyresolver.NewDNSBuilder(ctx, nil, "")
-	resolvers[2] = roxyresolver.NewSRVBuilder(ctx, nil, "")
-	if zkconn := roxyresolver.GetZKConn(ctx); zkconn != nil {
-		resolvers = append(resolvers, roxyresolver.NewZKBuilder(ctx, nil, zkconn, ""))
-	}
-	if etcd := roxyresolver.GetEtcdV3Client(ctx); etcd != nil {
-		resolvers = append(resolvers, roxyresolver.NewEtcdBuilder(ctx, nil, etcd, ""))
-	}
-	if lbcc := roxyresolver.GetATCClient(ctx); lbcc != nil {
-		resolvers = append(resolvers, roxyresolver.NewATCBuilder(ctx, nil, lbcc))
-	}
-
 	dialOpts := make([]grpc.DialOption, 2, 2+len(opts))
+	dialOpts[0] = roxyresolver.WithStandardResolvers(ctx)
 	if gcc.TLS.Enabled {
 		tlsConfig, err := gcc.TLS.MakeTLS(gcc.Target.ServerName)
 		if err != nil {
 			return nil, err
 		}
-		dialOpts[0] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
+		dialOpts[1] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	} else {
-		dialOpts[0] = grpc.WithInsecure()
+		dialOpts[1] = grpc.WithInsecure()
 	}
-	dialOpts[1] = grpc.WithResolvers(resolvers...)
 	dialOpts = append(dialOpts, opts...)
 
 	cc, err := grpc.DialContext(ctx, gcc.Target.String(), dialOpts...)
@@ -206,12 +190,6 @@ func (alt *gccJSON) toStd() (GRPCClientConfig, error) {
 }
 
 func (gcc GRPCClientConfig) postprocess() (out GRPCClientConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("GRPCClientConfig parse result")
-	}()
-
 	var zero GRPCClientConfig
 
 	if !gcc.Enabled {

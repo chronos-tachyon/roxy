@@ -33,11 +33,12 @@ var (
 )
 
 var (
-	flagConfig    string = defaultConfigFile
-	flagPromNet   string = "tcp"
-	flagPromAddr  string = "localhost:6800"
-	flagAdminNet  string = "unix"
-	flagAdminAddr string = "/var/opt/roxy/lib/admin.socket"
+	flagConfig     string = defaultConfigFile
+	flagPromNet    string = "tcp"
+	flagPromAddr   string = "localhost:6800"
+	flagAdminNet   string = "unix"
+	flagAdminAddr  string = "/var/opt/roxy/lib/admin.socket"
+	flagUniqueFile string = "/var/opt/roxy/lib/state/roxy.id"
 )
 
 func init() {
@@ -48,6 +49,7 @@ func init() {
 	getopt.FlagLong(&flagPromAddr, "prometheus-addr", 0, "address for Prometheus monitoring metrics")
 	getopt.FlagLong(&flagAdminNet, "admin-net", 0, "network for Admin gRPC interface")
 	getopt.FlagLong(&flagAdminAddr, "admin-addr", 0, "address for Admin gRPC interface")
+	getopt.FlagLong(&flagUniqueFile, "unique-file", 'U', "file containing a unique ID for the ATC resolver")
 }
 
 func main() {
@@ -57,6 +59,8 @@ func main() {
 	_ = gcBallast
 
 	getopt.Parse()
+
+	mainutil.SetUniqueFile(flagUniqueFile)
 
 	mainutil.InitContext()
 	defer mainutil.CancelRootContext()

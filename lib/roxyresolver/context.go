@@ -5,7 +5,8 @@ import (
 
 	"github.com/go-zookeeper/zk"
 	v3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/grpc"
+
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 )
 
 type contextKey string
@@ -14,7 +15,7 @@ const (
 	ShardIDContextKey   = contextKey("roxy.ShardID")
 	ZKConnContextKey    = contextKey("roxy.zk.Conn")
 	V3ClientContextKey  = contextKey("roxy.etcd.V3Client")
-	ATCClientContextKey = contextKey("roxy.atc.ClientConn")
+	ATCClientContextKey = contextKey("roxy.atc.Client")
 )
 
 func WithShardID(ctx context.Context, shardID int32) context.Context {
@@ -29,8 +30,8 @@ func WithEtcdV3Client(ctx context.Context, etcd *v3.Client) context.Context {
 	return context.WithValue(ctx, V3ClientContextKey, etcd)
 }
 
-func WithATCClient(ctx context.Context, cc *grpc.ClientConn) context.Context {
-	return context.WithValue(ctx, ATCClientContextKey, cc)
+func WithATCClient(ctx context.Context, client *atcclient.ATCClient) context.Context {
+	return context.WithValue(ctx, ATCClientContextKey, client)
 }
 
 func GetShardID(ctx context.Context) (shardID int32, ok bool) {
@@ -48,7 +49,7 @@ func GetEtcdV3Client(ctx context.Context) *v3.Client {
 	return etcd
 }
 
-func GetATCClient(ctx context.Context) *grpc.ClientConn {
-	cc, _ := ctx.Value(ATCClientContextKey).(*grpc.ClientConn)
+func GetATCClient(ctx context.Context) *atcclient.ATCClient {
+	cc, _ := ctx.Value(ATCClientContextKey).(*atcclient.ATCClient)
 	return cc
 }

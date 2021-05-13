@@ -9,8 +9,6 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -263,12 +261,6 @@ func (alt *tscJSON) toStd() TLSServerConfig {
 }
 
 func (tsc TLSServerConfig) postprocess() (out TLSServerConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("TLSServerConfig parse result")
-	}()
-
 	var zero TLSServerConfig
 
 	if !tsc.Enabled {

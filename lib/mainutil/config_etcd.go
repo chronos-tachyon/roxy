@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	v3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
@@ -238,12 +237,7 @@ func (ec EtcdConfig) Connect(ctx context.Context) (*v3.Client, error) {
 		return nil, nil
 	}
 
-	serverName, err := serverNameFromEtcdConfig(ec)
-	if err != nil {
-		return nil, err
-	}
-
-	tlsConfig, err := ec.TLS.MakeTLS(serverName)
+	tlsConfig, err := ec.TLS.MakeTLS("")
 	if err != nil {
 		return nil, fmt.Errorf("failed to instantiate TLS config: %w", err)
 	}
@@ -299,12 +293,6 @@ func (alt *ecJSON) toStd() EtcdConfig {
 }
 
 func (ec EtcdConfig) postprocess() (out EtcdConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("EtcdConfig parse result")
-	}()
-
 	var zero EtcdConfig
 
 	if !ec.Enabled {
@@ -330,16 +318,4 @@ func (ec EtcdConfig) postprocess() (out EtcdConfig, err error) {
 	}
 
 	return ec, nil
-}
-
-func serverNameFromEtcdConfig(ec EtcdConfig) (string, error) {
-	if !ec.Enabled || !ec.TLS.Enabled {
-		return "", nil
-	}
-	u, err := url.Parse(ec.Endpoints[0])
-	if err != nil {
-		return "", err
-	}
-	serverName := u.Hostname()
-	return serverName, nil
 }

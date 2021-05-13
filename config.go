@@ -13,17 +13,17 @@ type Config struct {
 }
 
 type GlobalConfig struct {
-	MimeFile              string                    `json:"mimeFile"`
-	ACMEDirectoryURL      string                    `json:"acmeDirectoryURL"`
-	ACMERegistrationEmail string                    `json:"acmeRegistrationEmail"`
-	ACMEUserAgent         string                    `json:"acmeUserAgent"`
-	MaxCacheSize          int64                     `json:"maxCacheSize"`
-	MaxComputeDigestSize  int64                     `json:"maxComputeDigestSize"`
-	ZK                    mainutil.ZKConfig         `json:"zookeeper"`
-	Etcd                  mainutil.EtcdConfig       `json:"etcd"`
-	ATC                   mainutil.GRPCClientConfig `json:"atc"`
-	Storage               *StorageConfig            `json:"storage"`
-	Pages                 *PagesConfig              `json:"pages"`
+	MimeFile              string                   `json:"mimeFile"`
+	ACMEDirectoryURL      string                   `json:"acmeDirectoryURL"`
+	ACMERegistrationEmail string                   `json:"acmeRegistrationEmail"`
+	ACMEUserAgent         string                   `json:"acmeUserAgent"`
+	MaxCacheSize          int64                    `json:"maxCacheSize"`
+	MaxComputeDigestSize  int64                    `json:"maxComputeDigestSize"`
+	ZK                    mainutil.ZKConfig        `json:"zookeeper"`
+	Etcd                  mainutil.EtcdConfig      `json:"etcd"`
+	ATC                   mainutil.ATCClientConfig `json:"atc"`
+	Storage               *StorageConfig           `json:"storage"`
+	Pages                 *PagesConfig             `json:"pages"`
 }
 
 type StorageConfig struct {

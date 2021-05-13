@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -189,12 +187,6 @@ func (alt *lcJSON) toStd() (ListenConfig, error) {
 }
 
 func (lc ListenConfig) postprocess() (out ListenConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("ListenConfig parse result")
-	}()
-
 	var zero ListenConfig
 
 	if !lc.Enabled {

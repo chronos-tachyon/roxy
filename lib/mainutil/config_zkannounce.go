@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rs/zerolog/log"
+	"github.com/go-zookeeper/zk"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
@@ -16,52 +16,58 @@ import (
 type ZKAnnounceConfig struct {
 	ZKConfig
 	Path      string
-	Format    announcer.Format
+	Unique    string
 	NamedPort string
+	Format    announcer.Format
 }
 
-type zanncJSON struct {
+type zacJSON struct {
 	zcJSON
 	Path      string           `json:"path"`
-	Format    announcer.Format `json:"format"`
+	Unique    string           `json:"unique"`
 	NamedPort string           `json:"namedPort"`
+	Format    announcer.Format `json:"format"`
 }
 
-func (zannc ZKAnnounceConfig) AppendTo(out *strings.Builder) {
-	zannc.ZKConfig.AppendTo(out)
+func (zac ZKAnnounceConfig) AppendTo(out *strings.Builder) {
+	zac.ZKConfig.AppendTo(out)
 	out.WriteString(";path=")
-	out.WriteString(zannc.Path)
-	out.WriteString(";format=")
-	out.WriteString(zannc.Format.String())
-	if zannc.NamedPort != "" {
-		out.WriteString(";port=")
-		out.WriteString(zannc.NamedPort)
+	out.WriteString(zac.Path)
+	if zac.Unique != "" {
+		out.WriteString(";unique=")
+		out.WriteString(zac.Unique)
 	}
+	if zac.NamedPort != "" {
+		out.WriteString(";port=")
+		out.WriteString(zac.NamedPort)
+	}
+	out.WriteString(";format=")
+	out.WriteString(zac.Format.String())
 }
 
-func (zannc ZKAnnounceConfig) String() string {
-	if !zannc.Enabled {
+func (zac ZKAnnounceConfig) String() string {
+	if !zac.Enabled {
 		return ""
 	}
 
 	var buf strings.Builder
 	buf.Grow(64)
-	zannc.AppendTo(&buf)
+	zac.AppendTo(&buf)
 	return buf.String()
 }
 
-func (zannc ZKAnnounceConfig) MarshalJSON() ([]byte, error) {
-	if !zannc.Enabled {
+func (zac ZKAnnounceConfig) MarshalJSON() ([]byte, error) {
+	if !zac.Enabled {
 		return nullBytes, nil
 	}
-	return json.Marshal(zannc.toAlt())
+	return json.Marshal(zac.toAlt())
 }
 
-func (zannc *ZKAnnounceConfig) Parse(str string) error {
+func (zac *ZKAnnounceConfig) Parse(str string) error {
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*zannc = ZKAnnounceConfig{}
+			*zac = ZKAnnounceConfig{}
 		}
 	}()
 
@@ -69,7 +75,7 @@ func (zannc *ZKAnnounceConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := misc.StrictUnmarshalJSON([]byte(str), zannc)
+	err := misc.StrictUnmarshalJSON([]byte(str), zac)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -84,16 +90,28 @@ func (zannc *ZKAnnounceConfig) Parse(str string) error {
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "path="):
-			zannc.Path = item[5:]
-
-		case strings.HasPrefix(item, "format="):
-			err = zannc.Format.Parse(item[7:])
+			zac.Path, err = roxyutil.ExpandString(item[5:])
 			if err != nil {
-				return fmt.Errorf("failed to parse format: %w", err)
+				return err
+			}
+
+		case strings.HasPrefix(item, "unique="):
+			zac.Unique, err = roxyutil.ExpandString(item[7:])
+			if err != nil {
+				return err
 			}
 
 		case strings.HasPrefix(item, "port="):
-			zannc.NamedPort = item[5:]
+			zac.NamedPort, err = roxyutil.ExpandString(item[5:])
+			if err != nil {
+				return err
+			}
+
+		case strings.HasPrefix(item, "format="):
+			err = zac.Format.Parse(item[7:])
+			if err != nil {
+				return fmt.Errorf("failed to parse format: %w", err)
+			}
 
 		default:
 			rest.WriteString(";")
@@ -101,26 +119,26 @@ func (zannc *ZKAnnounceConfig) Parse(str string) error {
 		}
 	}
 
-	err = zannc.ZKConfig.Parse(rest.String())
+	err = zac.ZKConfig.Parse(rest.String())
 	if err != nil {
 		return err
 	}
 
-	tmp, err := zannc.postprocess()
+	tmp, err := zac.postprocess()
 	if err != nil {
 		return err
 	}
 
-	*zannc = tmp
+	*zac = tmp
 	wantZero = false
 	return nil
 }
 
-func (zannc *ZKAnnounceConfig) UnmarshalJSON(raw []byte) error {
+func (zac *ZKAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*zannc = ZKAnnounceConfig{}
+			*zac = ZKAnnounceConfig{}
 		}
 	}()
 
@@ -128,7 +146,7 @@ func (zannc *ZKAnnounceConfig) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	var alt zanncJSON
+	var alt zacJSON
 	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
@@ -144,24 +162,32 @@ func (zannc *ZKAnnounceConfig) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 
-	*zannc = tmp2
+	*zac = tmp2
 	wantZero = false
 	return nil
 }
 
-func (zannc ZKAnnounceConfig) toAlt() *zanncJSON {
-	if !zannc.Enabled {
+func (zac ZKAnnounceConfig) AddTo(zkconn *zk.Conn, a *announcer.Announcer) error {
+	impl, err := announcer.NewZK(zkconn, zac.Path, zac.Unique, zac.NamedPort, zac.Format)
+	if err == nil {
+		a.Add(impl)
+	}
+	return err
+}
+
+func (zac ZKAnnounceConfig) toAlt() *zacJSON {
+	if !zac.Enabled {
 		return nil
 	}
-	return &zanncJSON{
-		zcJSON:    *zannc.ZKConfig.toAlt(),
-		Path:      zannc.Path,
-		Format:    zannc.Format,
-		NamedPort: zannc.NamedPort,
+	return &zacJSON{
+		zcJSON:    *zac.ZKConfig.toAlt(),
+		Path:      zac.Path,
+		Format:    zac.Format,
+		NamedPort: zac.NamedPort,
 	}
 }
 
-func (alt *zanncJSON) toStd() (ZKAnnounceConfig, error) {
+func (alt *zacJSON) toStd() (ZKAnnounceConfig, error) {
 	if alt == nil {
 		return ZKAnnounceConfig{}, nil
 	}
@@ -177,39 +203,33 @@ func (alt *zanncJSON) toStd() (ZKAnnounceConfig, error) {
 	}, nil
 }
 
-func (zannc ZKAnnounceConfig) postprocess() (out ZKAnnounceConfig, err error) {
-	defer func() {
-		log.Logger.Trace().
-			Interface("result", out).
-			Msg("ZKAnnounceConfig parse result")
-	}()
-
+func (zac ZKAnnounceConfig) postprocess() (out ZKAnnounceConfig, err error) {
 	var zero ZKAnnounceConfig
 
-	tmp, err := zannc.ZKConfig.postprocess()
+	tmp, err := zac.ZKConfig.postprocess()
 	if err != nil {
 		return zero, nil
 	}
-	zannc.ZKConfig = tmp
+	zac.ZKConfig = tmp
 
-	if !strings.HasSuffix(zannc.Path, "/") {
-		zannc.Path += "/"
+	if !strings.HasPrefix(zac.Path, "/") {
+		zac.Path = "/" + zac.Path
 	}
-	err = roxyutil.ValidateZKPath(zannc.Path)
+	err = roxyutil.ValidateZKPath(zac.Path)
 	if err != nil {
 		return zero, err
 	}
 
-	if zannc.NamedPort != "" {
-		err = roxyutil.ValidateNamedPort(zannc.NamedPort)
+	if zac.NamedPort != "" {
+		err = roxyutil.ValidateNamedPort(zac.NamedPort)
 		if err != nil {
 			return zero, err
 		}
 	}
 
-	if zannc.Format == announcer.FinagleFormat {
-		zannc.NamedPort = ""
+	if zac.Format != announcer.GRPCFormat {
+		zac.NamedPort = ""
 	}
 
-	return zannc, nil
+	return zac, nil
 }

@@ -3,29 +3,27 @@ package roxyresolver
 import (
 	"context"
 	"errors"
-	"io"
 	"math/rand"
 	"net"
 	"sync"
 
-	multierror "github.com/hashicorp/go-multierror"
-	"google.golang.org/grpc"
 	grpcresolver "google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
-func NewATCBuilder(ctx context.Context, rng *rand.Rand, lbcc *grpc.ClientConn) grpcresolver.Builder {
+func NewATCBuilder(ctx context.Context, rng *rand.Rand, client *atcclient.ATCClient) grpcresolver.Builder {
 	if ctx == nil {
 		panic(errors.New("context.Context is nil"))
 	}
-	if lbcc == nil {
+	if client == nil {
 		panic(errors.New("*grpc.ClientConn is nil"))
 	}
-	return atcBuilder{ctx, rng, lbcc}
+	return atcBuilder{ctx, rng, client}
 }
 
 func NewATCResolver(opts Options) (Resolver, error) {
@@ -33,8 +31,8 @@ func NewATCResolver(opts Options) (Resolver, error) {
 		panic(errors.New("context.Context is nil"))
 	}
 
-	lbcc := GetATCClient(opts.Context)
-	if lbcc == nil {
+	client := GetATCClient(opts.Context)
+	if client == nil {
 		panic(errors.New("*grpc.ClientConn is nil"))
 	}
 
@@ -47,7 +45,7 @@ func NewATCResolver(opts Options) (Resolver, error) {
 		Context:     opts.Context,
 		Random:      opts.Random,
 		Balancer:    balancer,
-		ResolveFunc: MakeATCResolveFunc(lbcc, lbName, lbLocation, lbUnique, isDSC, serverName),
+		ResolveFunc: MakeATCResolveFunc(client, lbName, lbLocation, lbUnique, isDSC, serverName),
 	})
 }
 
@@ -106,176 +104,40 @@ func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balance
 	return
 }
 
-func MakeATCResolveFunc(lbcc *grpc.ClientConn, lbName, lbLocation, lbUnique string, dsc bool, serverName string) WatchingResolveFunc {
+func MakeATCResolveFunc(client *atcclient.ATCClient, lbName, lbLocation, lbUnique string, dsc bool, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
-		lbclient := roxypb.NewAirTrafficControlClient(lbcc)
-
-		bc, err := lbclient.ClientAssign(ctx)
+		eventCh, errCh, err := client.ClientAssign(ctx, &roxypb.ClientAssignRequest{
+			ServiceName: lbName,
+			ShardId:     0,
+			Location:    lbLocation,
+			Unique:      lbUnique,
+			HasShardId:  false,
+		})
 		if err != nil {
-			lbcc.Close()
 			return nil, err
 		}
 
-		err = bc.Send(&roxypb.ClientAssignRequest{
-			ServiceName: lbName,
-			Location:    lbLocation,
-			Unique:      lbUnique,
-		})
-		if err != nil {
-			var errs multierror.Error
-			errs.Errors = make([]error, 1, 2)
-			errs.Errors[0] = err
-
-			err = bc.CloseSend()
-			if err != nil {
-				errs.Errors = append(errs.Errors, err)
-			}
-
-			lbcc.Close()
-			return nil, errs.ErrorOrNil()
-		}
-
 		ch := make(chan []Event)
-		activeCh := make(chan struct{})
-
-		// begin send thread
-		// {{{
 
 		wg.Add(1)
 		go func() {
-			defer func() {
-				_ = bc.CloseSend()
-				<-activeCh
-				lbcc.Close()
-				wg.Done()
-			}()
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-activeCh:
-				return
+			defer wg.Done()
+			for err := range errCh {
+				ch <- []Event{{Type: ErrorEvent, Err: err}}
 			}
 		}()
 
-		// }}}
-
-		// begin recv thread
-		// {{{
-
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			byUnique := make(map[string]Resolved, 16)
-
-			defer func() {
-				if len(byUnique) != 0 {
-					events := make([]Event, 0, len(byUnique))
-					for _, data := range byUnique {
-						events = append(events, Event{
-							Type: DeleteEvent,
-							Key:  data.Unique,
-						})
-					}
-					ch <- events
-				}
-				close(activeCh)
-				wg.Done()
-			}()
-
-			for {
-				resp, err := bc.Recv()
-				if err == io.EOF {
-					return
-				}
-				if err != nil {
-					ch <- []Event{
-						{
-							Type: ErrorEvent,
-							Err:  err,
-						},
-					}
-					return
-				}
-
-				var events []Event
-				for _, e := range resp.Events {
-					switch e.EventType {
-					case roxypb.Event_INSERT_IP:
-						tcpAddr := &net.TCPAddr{
-							IP:   net.IP(e.Ip),
-							Port: int(e.Port),
-							Zone: e.Zone,
-						}
-						myServerName := e.ServerName
-						if myServerName == "" {
-							myServerName = serverName
-						}
-						if myServerName == "" {
-							myServerName = tcpAddr.IP.String()
-						}
-						resAddr := Address{
-							Addr:       tcpAddr.String(),
-							ServerName: myServerName,
-						}
-						data := Resolved{
-							Unique:     e.Unique,
-							Location:   e.Location,
-							ServerName: myServerName,
-							Weight:     e.Weight,
-							HasWeight:  true,
-							Addr:       tcpAddr,
-							Address:    resAddr,
-						}
-						byUnique[data.Unique] = data
-						events = append(events, Event{
-							Type: UpdateEvent,
-							Key:  data.Unique,
-							Data: data,
-						})
-
-					case roxypb.Event_DELETE_IP:
-						delete(byUnique, e.Unique)
-						events = append(events, Event{
-							Type: DeleteEvent,
-							Key:  e.Unique,
-						})
-
-					case roxypb.Event_UPDATE_WEIGHT:
-						old := byUnique[e.Unique]
-						data := Resolved{
-							Unique:     old.Unique,
-							Location:   old.Location,
-							ServerName: old.ServerName,
-							ShardID:    old.ShardID,
-							Weight:     e.Weight,
-							HasShardID: old.HasShardID,
-							HasWeight:  true,
-							Addr:       old.Addr,
-							Address:    old.Address,
-							Dynamic:    old.Dynamic,
-						}
-						byUnique[data.Unique] = data
-						events = append(events, Event{
-							Type: StatusChangeEvent,
-							Key:  data.Unique,
-							Data: data,
-						})
-
-					case roxypb.Event_NEW_SERVICE_CONFIG:
-						events = append(events, Event{
-							Type:              NewServiceConfigEvent,
-							ServiceConfigJSON: e.ServiceConfigJson,
-						})
-					}
-				}
-				if len(events) != 0 {
-					ch <- events
+			for inList := range eventCh {
+				outList := mapATCEventsToEvents(serverName, byUnique, inList)
+				if len(outList) != 0 {
+					ch <- outList
 				}
 			}
 		}()
-
-		// end recv thread
-		// }}}
 
 		return ch, nil
 	}
@@ -284,9 +146,9 @@ func MakeATCResolveFunc(lbcc *grpc.ClientConn, lbName, lbLocation, lbUnique stri
 // type atcBuilder {{{
 
 type atcBuilder struct {
-	ctx  context.Context
-	rng  *rand.Rand
-	lbcc *grpc.ClientConn
+	ctx    context.Context
+	rng    *rand.Rand
+	client *atcclient.ATCClient
 }
 
 func (b atcBuilder) Scheme() string {
@@ -307,7 +169,7 @@ func (b atcBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:     b.ctx,
 		Random:      b.rng,
-		ResolveFunc: MakeATCResolveFunc(b.lbcc, lbName, lbLocation, lbUnique, opts.DisableServiceConfig, serverName),
+		ResolveFunc: MakeATCResolveFunc(b.client, lbName, lbLocation, lbUnique, opts.DisableServiceConfig, serverName),
 		ClientConn:  cc,
 	})
 }
@@ -315,3 +177,93 @@ func (b atcBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 var _ grpcresolver.Builder = atcBuilder{}
 
 // }}}
+
+func mapATCEventsToEvents(serverName string, byUnique map[string]Resolved, in []*roxypb.Event) []Event {
+	out := make([]Event, 0, len(in))
+	for _, event := range in {
+		out = mapATCEventToEvents(out, serverName, byUnique, event)
+	}
+	return out
+}
+
+func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Resolved, event *roxypb.Event) []Event {
+	switch event.EventType {
+	case roxypb.Event_INSERT_IP:
+		tcpAddr := &net.TCPAddr{
+			IP:   net.IP(event.Ip),
+			Port: int(event.Port),
+			Zone: event.Zone,
+		}
+
+		myServerName := event.ServerName
+		if myServerName == "" {
+			myServerName = serverName
+		}
+		if myServerName == "" {
+			myServerName = tcpAddr.IP.String()
+		}
+
+		resAddr := Address{
+			Addr:       tcpAddr.String(),
+			ServerName: myServerName,
+		}
+
+		data := Resolved{
+			Unique:     event.Unique,
+			Location:   event.Location,
+			ServerName: myServerName,
+			Weight:     event.Weight,
+			HasWeight:  true,
+			Addr:       tcpAddr,
+			Address:    resAddr,
+		}
+
+		byUnique[data.Unique] = data
+
+		out = append(out, Event{
+			Type: UpdateEvent,
+			Key:  data.Unique,
+			Data: data,
+		})
+
+	case roxypb.Event_DELETE_IP:
+		delete(byUnique, event.Unique)
+
+		out = append(out, Event{
+			Type: DeleteEvent,
+			Key:  event.Unique,
+		})
+
+	case roxypb.Event_UPDATE_WEIGHT:
+		old := byUnique[event.Unique]
+
+		data := Resolved{
+			Unique:     old.Unique,
+			Location:   old.Location,
+			ServerName: old.ServerName,
+			ShardID:    old.ShardID,
+			Weight:     event.Weight,
+			HasShardID: old.HasShardID,
+			HasWeight:  true,
+			Addr:       old.Addr,
+			Address:    old.Address,
+			Dynamic:    old.Dynamic,
+		}
+
+		byUnique[data.Unique] = data
+
+		out = append(out, Event{
+			Type: StatusChangeEvent,
+			Key:  data.Unique,
+			Data: data,
+		})
+
+	case roxypb.Event_NEW_SERVICE_CONFIG:
+		out = append(out, Event{
+			Type:              NewServiceConfigEvent,
+			ServiceConfigJSON: event.ServiceConfigJson,
+		})
+	}
+
+	return out
+}
