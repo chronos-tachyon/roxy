@@ -1,3 +1,6 @@
+v0.4.2
+  * Implement Admin.SetHealth RPC and "fooctl set-health" command
+
 v0.4.1
   * Implement ATCClient type to encapsulate/simplify ATC communication
 
