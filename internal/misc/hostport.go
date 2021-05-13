@@ -8,6 +8,9 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// SplitHostPort splits a string in "<host>:<port>" format, except that if a
+// port is not present in the string and defaultPort is non-empty, then
+// defaultPort is used instead.
 func SplitHostPort(str, defaultPort string) (host string, port string, err error) {
 	if str == "" {
 		return "", "", roxyutil.BadHostPortError{HostPort: str, Err: roxyutil.ErrExpectNonEmpty}
@@ -29,6 +32,7 @@ func SplitHostPort(str, defaultPort string) (host string, port string, err error
 	return host, port, nil
 }
 
+// ParseTCPAddrList parses a string in "<ip>:<port>,<ip>:<port>,..." format.
 func ParseTCPAddrList(str, defaultPort string) ([]*net.TCPAddr, error) {
 	list := strings.Split(str, ",")
 	out := make([]*net.TCPAddr, 0, len(list))
@@ -45,6 +49,7 @@ func ParseTCPAddrList(str, defaultPort string) ([]*net.TCPAddr, error) {
 	return out, nil
 }
 
+// ParseTCPAddr parses a string in "<ip>:<port>" format.
 func ParseTCPAddr(str, defaultPort string) (*net.TCPAddr, error) {
 	host, port, err := SplitHostPort(str, defaultPort)
 	if err != nil {
@@ -69,6 +74,7 @@ func ParseTCPAddr(str, defaultPort string) (*net.TCPAddr, error) {
 	return tcpAddr, nil
 }
 
+// ParseIPAndZone parses a string in "<ip>%<zone>" format.
 func ParseIPAndZone(host string) (net.IP, string, error) {
 	var zone string
 	if i := strings.IndexByte(host, '%'); i >= 0 {
@@ -78,6 +84,7 @@ func ParseIPAndZone(host string) (net.IP, string, error) {
 	return ip, zone, err
 }
 
+// ParseIP parses an IP address.
 func ParseIP(host string) (net.IP, error) {
 	if host == "" {
 		return nil, roxyutil.BadHostError{Host: host, Err: roxyutil.ErrExpectNonEmpty}
@@ -95,6 +102,7 @@ func ParseIP(host string) (net.IP, error) {
 	return ip, nil
 }
 
+// ParsePort parses a port number.
 func ParsePort(port string) (uint16, error) {
 	u64, err0 := strconv.ParseUint(port, 10, 16)
 	if err0 == nil {

@@ -22,23 +22,30 @@ import (
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
-const (
-	RetryInterval = 30 * time.Second
-	LoadInterval  = 30 * time.Second
-)
+// LoadInterval is the time interval between load reports sent within
+// ServerAnnounce.
+const LoadInterval = 10 * time.Second
 
 var gBackoff expbackoff.ExpBackoff = expbackoff.BuildDefault()
 
+// ATCClient is a client for communicating with the Roxy Air Traffic Controller
+// service.
+//
+// Each ATC tower is responsible for a set of (ServiceName, ShardID) tuples,
+// which are exclusive to that tower.  The client automatically determines
+// which tower it needs to speak with, by asking any tower within the service
+// to provide instructions.
 type ATCClient struct {
-	tc  *tls.Config
-	cc  *grpc.ClientConn
-	atc roxypb.AirTrafficControlClient
+	tc      *tls.Config
+	cc      *grpc.ClientConn
+	atc     roxypb.AirTrafficControlClient
+	closeCh chan struct{}
 
 	wg         sync.WaitGroup
 	mu         sync.Mutex
-	closed     bool
 	serviceMap map[serviceKey]*serviceData
 	connMap    map[*net.TCPAddr]*connData
+	closed     bool
 }
 
 type serviceKey struct {
@@ -51,6 +58,7 @@ type serviceData struct {
 	err     error
 	cv      *sync.Cond
 	addr    *net.TCPAddr
+	retries uint32
 	ready   bool
 }
 
@@ -60,9 +68,14 @@ type connData struct {
 	cv      *sync.Cond
 	cc      *grpc.ClientConn
 	atc     roxypb.AirTrafficControlClient
+	retries uint32
 	ready   bool
 }
 
+// New constructs and returns a new ATCClient.  The cc argument is a gRPC
+// ClientConn configured to speak to any/all ATC towers.  The tlsConfig
+// argument specifies the TLS client configuration to use when speaking to
+// individual ATC towers, or nil for gRPC with no TLS.
 func New(cc *grpc.ClientConn, tlsConfig *tls.Config) (*ATCClient, error) {
 	if cc == nil {
 		panic(errors.New("*grpc.ClientConn is nil"))
@@ -71,12 +84,14 @@ func New(cc *grpc.ClientConn, tlsConfig *tls.Config) (*ATCClient, error) {
 		tc:         tlsConfig,
 		cc:         cc,
 		atc:        roxypb.NewAirTrafficControlClient(cc),
+		closeCh:    make(chan struct{}),
 		serviceMap: make(map[serviceKey]*serviceData, 8),
 		connMap:    make(map[*net.TCPAddr]*connData, 4),
 	}
 	return c, nil
 }
 
+// Lookup queries any ATC tower for information about the given service.
 func (c *ATCClient) Lookup(ctx context.Context, serviceName string) (*roxypb.LookupResponse, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -118,6 +133,9 @@ func (c *ATCClient) Lookup(ctx context.Context, serviceName string) (*roxypb.Loo
 	return resp, err
 }
 
+// Find queries any ATC tower for information about which ATC tower is
+// responsible for the given (ServiceName, ShardID) tuple.  If useCache is
+// false, then the local cache will not be consulted.
 func (c *ATCClient) Find(ctx context.Context, serviceName string, shardID uint32, useCache bool) (*net.TCPAddr, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -221,9 +239,11 @@ func (c *ATCClient) Find(ctx context.Context, serviceName string, shardID uint32
 	if err == nil {
 		addr = goAwayToTCPAddr(resp.GoAway)
 		sd.addr = addr
+		sd.retries = 0
 	} else {
 		sd.err = err
-		sd.timeout = time.Now().Add(RetryInterval)
+		sd.timeout = time.Now().Add(gBackoff.Backoff(int(sd.retries)))
+		sd.retries++
 	}
 
 	sd.ready = true
@@ -236,6 +256,10 @@ func (c *ATCClient) Find(ctx context.Context, serviceName string, shardID uint32
 	return addr, err
 }
 
+// Dial returns a gRPC ClientConn connected directly to the given ATC tower.
+//
+// The caller should _not_ call Close() on it.  It is owned by the ATCClient
+// and will be re-used until the ATCClient itself is Close()'d.
 func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientConn, roxypb.AirTrafficControlClient, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -350,9 +374,11 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 		atc = roxypb.NewAirTrafficControlClient(cc)
 		cd.cc = cc
 		cd.atc = atc
+		cd.retries = 0
 	} else {
 		cd.err = err
-		cd.timeout = time.Now().Add(RetryInterval)
+		cd.timeout = time.Now().Add(gBackoff.Backoff(int(cd.retries)))
+		cd.retries++
 	}
 
 	cd.ready = true
@@ -365,7 +391,13 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 	return cc, atc, err
 }
 
-func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnounceRequest, loadFn LoadFunc) (context.CancelFunc, chan error, error) {
+// ServerAnnounce starts announcing that a new server is available for the
+// given (ServiceName, ShardID) tuple.  If the method returns with no error,
+// then the caller must call the returned CancelFunc when the announcement
+// should be withdrawn, and the caller must also ensure that the returned error
+// channel is drained in a timely manner.  The error channel will be closed
+// once all goroutines and other internal resources have been released.
+func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnounceRequest, loadFn LoadFunc) (context.CancelFunc, <-chan error, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
 
@@ -478,6 +510,10 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnoun
 				t.Stop()
 				return
 
+			case <-c.closeCh:
+				t.Stop()
+				return
+
 			case <-syncCh:
 				t.Stop()
 				ok = false
@@ -567,6 +603,14 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnoun
 				}
 			}
 
+			c.mu.Lock()
+			closed := c.closed
+			c.mu.Unlock()
+
+			if closed {
+				return
+			}
+
 			mu.Lock()
 			atc = nil
 			sac = nil
@@ -580,6 +624,14 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnoun
 				counter++
 				retries++
 				ok := true
+
+				c.mu.Lock()
+				closed := c.closed
+				c.mu.Unlock()
+
+				if closed {
+					return
+				}
 
 				mu.Lock()
 
@@ -649,7 +701,10 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnoun
 				mu.Unlock()
 
 				if ok {
-					syncCh <- struct{}{}
+					select {
+					case syncCh <- struct{}{}:
+					default:
+					}
 					break
 				}
 			}
@@ -660,7 +715,11 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnoun
 	return cancelFn, errCh, nil
 }
 
-func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRequest) (chan []*roxypb.Event, chan error, error) {
+// ClientAssign starts a subscription for assignment Events.  If the method
+// returns with no error, then the caller must call the returned CancelFunc
+// when it is no longer interested in receiving Events, and the caller is also
+// responsible for draining both channels in a timely manner.
+func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRequest) (context.CancelFunc, <-chan []*roxypb.Event, <-chan error, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
 
@@ -676,16 +735,24 @@ func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRe
 
 	addr, err := c.Find(ctx, req.ServiceName, req.ShardId, true)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	_, atc, err := c.Dial(ctx, addr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var counter int
 	var retries int
+
+	ctx, cancelFn := context.WithCancel(ctx)
+	needCancel := true
+	defer func() {
+		if needCancel {
+			cancelFn()
+		}
+	}()
 
 	log.Logger.Trace().
 		Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
@@ -697,7 +764,7 @@ func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRe
 
 	cac, err := atc.ClientAssign(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	log.Logger.Trace().
@@ -711,7 +778,7 @@ func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRe
 
 	err = cac.Send(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	recvUntilEOF := func(cac roxypb.AirTrafficControl_ClientAssignClient) {
@@ -779,6 +846,14 @@ func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRe
 				}
 			}
 
+			c.mu.Lock()
+			closed := c.closed
+			c.mu.Unlock()
+
+			if closed {
+				return
+			}
+
 			atc = nil
 			cac = nil
 
@@ -790,6 +865,14 @@ func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRe
 				counter++
 				retries++
 				ok := true
+
+				c.mu.Lock()
+				closed := c.closed
+				c.mu.Unlock()
+
+				if closed {
+					return
+				}
 
 				handleError := func(funcName string, err error) {
 					if err != nil {
@@ -860,9 +943,11 @@ func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRe
 		}
 	}()
 
-	return eventCh, errCh, nil
+	needCancel = false
+	return cancelFn, eventCh, errCh, nil
 }
 
+// Close closes all gRPC channels and blocks until all resources are freed.
 func (c *ATCClient) Close() error {
 	c.mu.Lock()
 	closed := c.closed
@@ -880,6 +965,8 @@ func (c *ATCClient) Close() error {
 	if closed {
 		return fs.ErrClosed
 	}
+
+	close(c.closeCh)
 
 	var errs multierror.Error
 
@@ -912,6 +999,7 @@ func (c *ATCClient) updateServiceData(key serviceKey, addr *net.TCPAddr) {
 	sd.addr = addr
 	sd.err = nil
 	sd.timeout = time.Time{}
+	sd.retries = 0
 	sd.cv.Broadcast()
 	c.mu.Unlock()
 }

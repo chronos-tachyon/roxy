@@ -13,22 +13,22 @@ import (
 // ExpBackoff implements an exponential backoff algorithm with random jitter.
 // The algorithm is identical to the one used in the guts of gRPC.
 type ExpBackoff struct {
-	Config backoff.Config
-	Rand   *rand.Rand
+	rng *rand.Rand
+	cfg backoff.Config
 }
 
 // Backoff returns the amount of time to wait until the next retry, given the
 // existing retry count.
 func (impl ExpBackoff) Backoff(retries int) time.Duration {
 	if retries < 1 {
-		return impl.Config.BaseDelay
+		return impl.cfg.BaseDelay
 	}
-	backoff, max := float64(impl.Config.BaseDelay), float64(impl.Config.MaxDelay)
-	backoff *= math.Pow(impl.Config.Multiplier, float64(retries))
+	backoff, max := float64(impl.cfg.BaseDelay), float64(impl.cfg.MaxDelay)
+	backoff *= math.Pow(impl.cfg.Multiplier, float64(retries))
 	if backoff > max {
 		backoff = max
 	}
-	backoff *= 1.0 + impl.Config.Jitter*(impl.Rand.Float64()*2.0-1.0)
+	backoff *= 1.0 + impl.cfg.Jitter*(impl.rng.Float64()*2.0-1.0)
 	if backoff < 0.0 {
 		backoff = 0.0
 	}
@@ -38,13 +38,16 @@ func (impl ExpBackoff) Backoff(retries int) time.Duration {
 // BuildDefault returns an ExpBackoff that uses the gRPC default backoff configuration.
 func BuildDefault() ExpBackoff {
 	return ExpBackoff{
-		Config: backoff.DefaultConfig,
-		Rand:   syncrand.Global(),
+		rng: syncrand.Global(),
+		cfg: backoff.DefaultConfig,
 	}
 }
 
 // BuildDefault returns an ExpBackoff that uses a custom backoff configuration.
-func Build(cfg backoff.Config) ExpBackoff {
+func Build(rng *rand.Rand, cfg backoff.Config) ExpBackoff {
+	if rng == nil {
+		rng = syncrand.Global()
+	}
 	if cfg.BaseDelay <= 0 {
 		cfg.BaseDelay = backoff.DefaultConfig.BaseDelay
 	}
@@ -58,7 +61,7 @@ func Build(cfg backoff.Config) ExpBackoff {
 		cfg.MaxDelay = backoff.DefaultConfig.MaxDelay
 	}
 	return ExpBackoff{
-		Config: cfg,
-		Rand:   syncrand.Global(),
+		rng: rng,
+		cfg: cfg,
 	}
 }

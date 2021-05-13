@@ -26,8 +26,8 @@ type WrappedSource interface {
 	Unwrap() rand.Source64
 }
 
-// Global returns this package's global instance of "math/rand".(*Rand).  It is
-// guaranteed to be thread-safe.
+// Global returns this package's global instance of Rand.  It is guaranteed to
+// be thread-safe.
 func Global() *rand.Rand {
 	gMu.Lock()
 	rng := gRand
@@ -35,9 +35,8 @@ func Global() *rand.Rand {
 	return rng
 }
 
-// GlobalSource returns this package's global instance of "math/rand".Source64,
-// which backs the "math/rand".(*Rand) returned by Global().  It is guaranteed
-// to be thread-safe.
+// GlobalSource returns this package's global instance of Source64, which backs
+// the Rand returned by Global().  It is guaranteed to be thread-safe.
 func GlobalSource() rand.Source64 {
 	gMu.Lock()
 	source := gSource
@@ -45,9 +44,9 @@ func GlobalSource() rand.Source64 {
 	return source
 }
 
-// SetGlobalSource atomically replaces the global instance of
-// "math/rand".Source64 with the provided one.  If it is not thread-safe, then
-// it is wrapped in an implementation of WrappedSource that _is_ thread-safe.
+// SetGlobalSource atomically replaces the global instance of Source64 with the
+// provided one.  If it is not thread-safe, then it is wrapped in an
+// implementation of WrappedSource that _is_ thread-safe.
 func SetGlobalSource(source rand.Source64) {
 	gMu.Lock()
 	gSource = WrapSource(source)
@@ -55,27 +54,27 @@ func SetGlobalSource(source rand.Source64) {
 	gMu.Unlock()
 }
 
-// New returns a new "math/rand".(*Rand) seeded with the given seed.  It is
-// guaranteed to be thread-safe.
+// New returns a new Rand seeded with the given seed.  It is guaranteed to be
+// thread-safe.
 func New(seed int64) *rand.Rand {
 	return rand.New(NewSource(seed))
 }
 
-// NewFromSource returns a new "math/rand".(*Rand) that is backed by the given
-// source.  It is guaranteed to be thread-safe.
+// NewFromSource returns a new Rand that is backed by the given source.  It is
+// guaranteed to be thread-safe.
 func NewFromSource(source rand.Source64) *rand.Rand {
 	return rand.New(WrapSource(source))
 }
 
-// NewSource returns a new "math/rand".Source64 that is seeded with the given
-// seed.  It is guaranteed to be thread-safe.
+// NewSource returns a new Source64 that is seeded with the given seed.  It is
+// guaranteed to be thread-safe.
 func NewSource(seed int64) rand.Source64 {
 	return WrapSource(rand.NewSource(seed).(rand.Source64))
 }
 
-// WrapSource returns an instance of "math/rand".Source64 that is thread-safe.
-// It may return its argument unchanged, if that argument is already known to
-// be thread-safe.
+// WrapSource returns an instance of Source64 that is thread-safe.  It may
+// return its argument unchanged, if that argument is already known to be
+// thread-safe.
 func WrapSource(source rand.Source64) rand.Source64 {
 	if IsThreadSafe(source) {
 		return source

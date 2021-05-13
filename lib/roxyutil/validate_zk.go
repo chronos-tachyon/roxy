@@ -4,6 +4,8 @@ import (
 	"strings"
 )
 
+// ValidateZKPath validates that the given string is a valid ZooKeeper node
+// path.
 func ValidateZKPath(str string) error {
 	if str == "" {
 		return BadPathError{Path: str, Err: ErrExpectNonEmpty}

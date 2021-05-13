@@ -1,5 +1,7 @@
 package roxyutil
 
+// ValidateATCServiceName validates that the given string is a valid Service
+// Name for the Air Traffic Control service.
 func ValidateATCServiceName(str string) error {
 	if str == "" {
 		return BadATCServiceNameError{
@@ -19,6 +21,8 @@ func ValidateATCServiceName(str string) error {
 	return nil
 }
 
+// ValidateATCServiceName validates that the given string is a valid Location
+// for the Air Traffic Control service.
 func ValidateATCLocation(str string) error {
 	if str == "" {
 		return nil
@@ -35,6 +39,8 @@ func ValidateATCLocation(str string) error {
 	return nil
 }
 
+// ValidateATCServiceName validates that the given string is a valid Unique ID
+// for the Air Traffic Control service.
 func ValidateATCUnique(str string) error {
 	if str == "" {
 		return BadATCUniqueError{

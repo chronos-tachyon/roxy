@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+// TryBase64DecodeString attempts to decode base-64 byte array using any of the
+// standard base-64 encodings.
 func TryBase64DecodeString(str string) ([]byte, error) {
 	if str == "" {
 		return nil, nil

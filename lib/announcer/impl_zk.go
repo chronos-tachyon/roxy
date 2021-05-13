@@ -14,7 +14,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Impl, error) {
+func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Interface, error) {
 	if zkconn == nil {
 		panic(errors.New("*zk.Conn is nil"))
 	}
@@ -35,7 +35,7 @@ func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Impl
 		unique:    unique,
 		namedPort: namedPort,
 		format:    format,
-		state:     stateInit,
+		state:     StateReady,
 	}, nil
 }
 
@@ -47,7 +47,7 @@ type zkImpl struct {
 	format    Format
 
 	mu     sync.Mutex
-	state  stateType
+	state  State
 	actual string
 }
 
@@ -70,7 +70,7 @@ func (impl *zkImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		return err
 	}
 
-	impl.state = stateRunning
+	impl.state = StateRunning
 	impl.actual = actual
 	return nil
 }
@@ -83,7 +83,7 @@ func (impl *zkImpl) Withdraw(ctx context.Context) error {
 
 	err := impl.zkconn.Delete(impl.actual, -1)
 	err = roxyresolver.MapZKError(err)
-	impl.state = stateInit
+	impl.state = StateReady
 	return err
 }
 
@@ -92,8 +92,8 @@ func (impl *zkImpl) Close() error {
 	defer impl.mu.Unlock()
 
 	err := checkClose(impl.state)
-	impl.state = stateClosed
+	impl.state = StateClosed
 	return err
 }
 
-var _ Impl = (*zkImpl)(nil)
+var _ Interface = (*zkImpl)(nil)

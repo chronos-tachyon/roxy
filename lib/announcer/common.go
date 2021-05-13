@@ -8,14 +8,14 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/membership"
 )
 
-func checkAnnounce(state stateType) {
+func checkAnnounce(state State) {
 	switch state {
-	case stateInit:
+	case StateReady:
 		return
 
-	case stateRunning:
+	case StateRunning:
 		fallthrough
-	case stateDead:
+	case StateDead:
 		panic(errors.New("Announce has already been called"))
 
 	default:
@@ -23,14 +23,14 @@ func checkAnnounce(state stateType) {
 	}
 }
 
-func checkWithdraw(state stateType) {
+func checkWithdraw(state State) {
 	switch state {
-	case stateInit:
+	case StateReady:
 		panic(errors.New("Announce has not yet been called"))
 
-	case stateRunning:
+	case StateRunning:
 		fallthrough
-	case stateDead:
+	case StateDead:
 		return
 
 	default:
@@ -38,14 +38,14 @@ func checkWithdraw(state stateType) {
 	}
 }
 
-func checkClose(state stateType) error {
+func checkClose(state State) error {
 	switch state {
-	case stateInit:
+	case StateReady:
 		return nil
 
-	case stateRunning:
+	case StateRunning:
 		fallthrough
-	case stateDead:
+	case StateDead:
 		panic(errors.New("Withdraw has not yet been called"))
 
 	default:

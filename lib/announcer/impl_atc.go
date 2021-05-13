@@ -14,7 +14,7 @@ import (
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
-func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPort string, loadFn atcclient.LoadFunc) (Impl, error) {
+func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPort string, loadFn atcclient.LoadFunc) (Interface, error) {
 	if client == nil {
 		panic(errors.New("*atcclient.ATCClient is nil"))
 	}
@@ -39,7 +39,7 @@ func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPor
 		unique:      unique,
 		namedPort:   namedPort,
 		loadFn:      loadFn,
-		state:       stateInit,
+		state:       StateReady,
 	}
 	impl.cv = sync.NewCond(&impl.mu)
 	return impl, nil
@@ -55,7 +55,7 @@ type atcImpl struct {
 
 	mu       sync.Mutex
 	cv       *sync.Cond
-	state    stateType
+	state    State
 	cancelFn context.CancelFunc
 	errs     multierror.Error
 }
@@ -105,12 +105,12 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		}
 
 		impl.mu.Lock()
-		impl.state = stateDead
+		impl.state = StateDead
 		impl.cv.Broadcast()
 		impl.mu.Unlock()
 	}()
 
-	impl.state = stateRunning
+	impl.state = StateRunning
 	impl.cancelFn = cancelFn
 	return nil
 }
@@ -123,14 +123,14 @@ func (impl *atcImpl) Withdraw(ctx context.Context) error {
 
 	impl.cancelFn()
 
-	for impl.state == stateRunning {
+	for impl.state == StateRunning {
 		impl.cv.Wait()
 	}
 
 	err := impl.errs.ErrorOrNil()
 	impl.cancelFn = nil
 	impl.errs.Errors = nil
-	impl.state = stateInit
+	impl.state = StateReady
 	return err
 }
 
@@ -139,8 +139,8 @@ func (impl *atcImpl) Close() error {
 	defer impl.mu.Unlock()
 
 	err := checkClose(impl.state)
-	impl.state = stateClosed
+	impl.state = StateClosed
 	return err
 }
 
-var _ Impl = (*atcImpl)(nil)
+var _ Interface = (*atcImpl)(nil)

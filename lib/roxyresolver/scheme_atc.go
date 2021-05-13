@@ -106,7 +106,7 @@ func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balance
 
 func MakeATCResolveFunc(client *atcclient.ATCClient, lbName, lbLocation, lbUnique string, dsc bool, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
-		eventCh, errCh, err := client.ClientAssign(ctx, &roxypb.ClientAssignRequest{
+		cancelFn, eventCh, errCh, err := client.ClientAssign(ctx, &roxypb.ClientAssignRequest{
 			ServiceName: lbName,
 			ShardId:     0,
 			Location:    lbLocation,
@@ -121,7 +121,10 @@ func MakeATCResolveFunc(client *atcclient.ATCClient, lbName, lbLocation, lbUniqu
 
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer func() {
+				cancelFn()
+				wg.Done()
+			}()
 			for err := range errCh {
 				ch <- []Event{{Type: ErrorEvent, Err: err}}
 			}

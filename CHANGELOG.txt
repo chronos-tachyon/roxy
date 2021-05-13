@@ -1,3 +1,7 @@
+v0.4.3
+  * Minor API tweaks for announcer and atcclient
+  * Improve GoDoc coverage
+
 v0.4.2
   * Implement Admin.SetHealth RPC and "fooctl set-health" command
 

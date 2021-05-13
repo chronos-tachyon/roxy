@@ -148,7 +148,7 @@ func main() {
 			Msg("--announce-atc: failed to parse ATC config")
 	}
 
-	ann := announcer.New()
+	ann := new(announcer.Announcer)
 	gHealthServer.Set("", true)
 
 	gMultiServer.OnShutdown(func(alreadyTermed bool) error {

@@ -15,7 +15,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (Impl, error) {
+func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (Interface, error) {
 	if etcd == nil {
 		panic(errors.New("*v3.Client is nil"))
 	}
@@ -36,7 +36,7 @@ func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (Im
 		unique:    unique,
 		namedPort: namedPort,
 		format:    format,
-		state:     stateInit,
+		state:     StateReady,
 	}
 	impl.cv = sync.NewCond(&impl.mu)
 	return impl, nil
@@ -51,7 +51,7 @@ type etcdImpl struct {
 
 	mu       sync.Mutex
 	cv       *sync.Cond
-	state    stateType
+	state    State
 	leaseID  v3.LeaseID
 	cancelFn context.CancelFunc
 	errs     multierror.Error
@@ -88,7 +88,7 @@ func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 	go func() {
 		defer func() {
 			impl.mu.Lock()
-			impl.state = stateDead
+			impl.state = StateDead
 			impl.cv.Broadcast()
 			impl.mu.Unlock()
 		}()
@@ -115,7 +115,7 @@ func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		}
 	}()
 
-	impl.state = stateRunning
+	impl.state = StateRunning
 	impl.leaseID = lease.ID
 	impl.cancelFn = cancelFn
 	return nil
@@ -134,7 +134,7 @@ func (impl *etcdImpl) Withdraw(ctx context.Context) error {
 	_, err := impl.etcd.Lease.Revoke(ctx, impl.leaseID)
 	err = roxyresolver.MapEtcdError(err)
 
-	for impl.state == stateRunning {
+	for impl.state == StateRunning {
 		impl.cv.Wait()
 	}
 
@@ -146,7 +146,7 @@ func (impl *etcdImpl) Withdraw(ctx context.Context) error {
 	impl.errs.Errors = nil
 	impl.cancelFn = nil
 	impl.leaseID = 0
-	impl.state = stateInit
+	impl.state = StateReady
 	return errs.ErrorOrNil()
 }
 
@@ -155,8 +155,8 @@ func (impl *etcdImpl) Close() error {
 	defer impl.mu.Unlock()
 
 	err := checkClose(impl.state)
-	impl.state = stateClosed
+	impl.state = StateClosed
 	return err
 }
 
-var _ Impl = (*etcdImpl)(nil)
+var _ Interface = (*etcdImpl)(nil)

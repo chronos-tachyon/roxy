@@ -24,6 +24,7 @@ var boolMap = map[string]bool{
 	"true":  true,
 }
 
+// ParseBool parses a boolean value.
 func ParseBool(str string) (bool, error) {
 	if value, found := boolMap[str]; found {
 		return value, nil

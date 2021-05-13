@@ -11,6 +11,7 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 )
 
+// ExpandString expands ${ENV_VAR} references.
 func ExpandString(in string) (string, error) {
 	var errs multierror.Error
 
@@ -27,6 +28,8 @@ func ExpandString(in string) (string, error) {
 	return expanded, err
 }
 
+// ExpandPath expands ${ENV_VAR} references, ~ and ~user references, and makes
+// the path absolute.
 func ExpandPath(in string) (string, error) {
 	var errs multierror.Error
 
@@ -87,6 +90,7 @@ func ExpandPath(in string) (string, error) {
 	return expanded, err
 }
 
+// ExpandPassword expands ${ENV_VAR} references and @file references.
 func ExpandPassword(in string) (string, error) {
 	var errs multierror.Error
 
