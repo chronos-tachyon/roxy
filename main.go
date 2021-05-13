@@ -1,3 +1,8 @@
+// Command "roxy" is an Internet-facing HTTPS frontend proxy that uses ACME
+// (Let's Encrypt et al.) to obtain TLS certificates.
+//
+// https://chronos-tachyon.github.io/roxy/
+//
 package main
 
 import (

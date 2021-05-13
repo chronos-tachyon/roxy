@@ -1,3 +1,22 @@
+// Command "zkcp" is a small command line tool for copying files between
+// ZooKeeper and the local filesystem.
+//
+// Usage:
+//
+//	zkcp [<flags>] <source> <destination>
+//
+// Flags:
+//
+//	-V, --version        print version and exit
+//	-Z, --zk=conf        ZooKeeper configuration
+//	-r, --reverse        copy from ZK to filesystem
+//	           [default: copy from filesystem to ZK]
+//	-J, --log-journald   log to journald
+//	-l, --log-file=path  log JSON to file
+//	-S, --log-stderr     log JSON to stderr
+//	-v, --verbose        enable debug logging
+//	-d, --debug          enable debug and trace logging
+//
 package main
 
 import (

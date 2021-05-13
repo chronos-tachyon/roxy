@@ -1,3 +1,32 @@
+// Command "roxyctl" is the admin CLI for "roxy".
+//
+// Usage:
+//
+//	roxyctl [<flags>] <cmd> [<args>...]
+//
+// Flags:
+//
+//	-V, --version        print version and exit
+//	-s, --server=addr    Address of the Roxy admin port
+//	     [default: "unix:/var/opt/roxy/lib/admin.socket"]
+//	-J, --log-journald   log to journald
+//	-l, --log-file=path  log JSON to file
+//	-S, --log-stderr     log JSON to stderr
+//	-v, --verbose        enable debug logging
+//	-d, --debug          enable debug and trace logging
+//
+// Commands:
+//
+//	help                 list available commands
+//	ping                 check that Roxy is running
+//	reload               tell Roxy to reload its config and to rotate its log file
+//	shutdown             tell Roxy to exit
+//	healthcheck name     check the health of the named subsystem(*)
+//	set-health name y/n  set the health of the named subsystem
+//
+//	(*) At startup, the only available subsystem is the empty string, "".
+//          The "set-health" command can create new named subsystems.
+//
 package main
 
 import (

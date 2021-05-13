@@ -1,3 +1,19 @@
+// Command "colorize-logs" is a small command line tool that allows
+// pretty-printing log files in JSON Lines format, with basic support for
+// "tail -f" operation.
+//
+// Usage:
+//
+//	colorize-logs [<flags>] [<logfile>]
+//
+// Flags:
+//
+//	-f, --follow       keep reading the logfile for new log messages
+//	-F, --follow-name  like --follow, but detect when the log file is rotated and re-open it
+//
+// If the <logfile> argument is omitted, then colorize-logs will read from
+// stdin.
+//
 package main
 
 import (

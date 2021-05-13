@@ -1,3 +1,34 @@
+// Command "atcctl" is the admin CLI for "atc".
+//
+// Usage:
+//
+//	atcctl [<flags>] <cmd> [<args>...]
+//
+// Flags:
+//
+//	-V, --version        print version and exit
+//	-s, --server=addr    Address of the ATC admin port
+//	  [default: "unix:/var/opt/roxy/lib/atc.admin.socket"]
+//	-J, --log-journald   log to journald
+//	-l, --log-file=path  log JSON to file
+//	-S, --log-stderr     log JSON to stderr
+//	-v, --verbose        enable debug logging
+//	-d, --debug          enable debug and trace logging
+//
+// Commands:
+//
+//	help                 list available commands
+//	ping                 check that ATC is running
+//	reload               tell ATC to reload its config and to rotate its log file
+//	shutdown             tell ATC to exit
+//	healthcheck name     check the health of the named subsystem(*)
+//	set-health name y/n  set the health of the named subsystem
+//	lookup service       perform a /roxy.AirTrafficControl/Lookup RPC
+//	find service shard   perform a /roxy.AirTrafficControl/Find RPC
+//
+//	(*) At startup, the only available subsystem is the empty string, "".
+//          The "set-health" command can create new named subsystems.
+//
 package main
 
 import (

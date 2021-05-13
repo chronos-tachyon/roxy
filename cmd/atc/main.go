@@ -1,3 +1,7 @@
+// Command "atc" is the Roxy Air Traffic Controller, a piece of software which
+// provides load-balanced routing of requests from ATC-aware clients to
+// ATC-aware servers.
+//
 package main
 
 import (

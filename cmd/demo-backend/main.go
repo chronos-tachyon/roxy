@@ -1,3 +1,7 @@
+// Command "demo-backend" is a demonstration of a server which uses the Roxy
+// libraries "membership", "announce", and "mainutil", and which serves web
+// content via both HTTP(S) and gRPC.
+//
 package main
 
 import (
