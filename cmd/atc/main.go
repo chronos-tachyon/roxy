@@ -36,6 +36,10 @@ var (
 func init() {
 	getopt.SetParameters("")
 
+	mainutil.SetAppVersion(mainutil.RoxyVersion())
+	mainutil.RegisterVersionFlag()
+	mainutil.RegisterLoggingFlags()
+
 	getopt.FlagLong(&flagConfig, "config", 'c', "path to configuration file")
 	getopt.FlagLong(&flagEtcd, "etcd", 'E', "etcd config")
 	getopt.FlagLong(&flagListenATC, "listen-atc", 'L', "ATC gRPC interface listen config")
@@ -50,12 +54,14 @@ func main() {
 
 	getopt.Parse()
 
-	mainutil.InitContext()
-	defer mainutil.CancelRootContext()
-	ctx := mainutil.RootContext()
+	mainutil.InitVersion()
 
 	mainutil.InitLogging()
 	defer mainutil.DoneLogging()
+
+	mainutil.InitContext()
+	defer mainutil.CancelRootContext()
+	ctx := mainutil.RootContext()
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 

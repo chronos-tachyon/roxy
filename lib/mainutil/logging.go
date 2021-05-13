@@ -37,8 +37,11 @@ var (
 	flagLogFile     string
 )
 
-func init() {
+func RegisterVersionFlag() {
 	getopt.FlagLong(&flagVersion, "version", 'V', "print version and exit")
+}
+
+func RegisterLoggingFlags() {
 	getopt.FlagLong(&flagDebug, "verbose", 'v', "enable debug logging")
 	getopt.FlagLong(&flagTrace, "debug", 'd', "enable debug and trace logging")
 	getopt.FlagLong(&flagLogStderr, "log-stderr", 'S', "log JSON to stderr")
@@ -46,12 +49,14 @@ func init() {
 	getopt.FlagLong(&flagLogFile, "log-file", 'l', "log JSON to file")
 }
 
-func InitLogging() {
+func InitVersion() {
 	if flagVersion {
-		fmt.Println(Version())
+		fmt.Println(AppVersion())
 		os.Exit(0)
 	}
+}
 
+func InitLogging() {
 	if flagLogStderr && flagLogJournald {
 		fmt.Fprintln(os.Stderr, "fatal: flags '--log-stderr' and '--log-journald' are mutually exclusive")
 		os.Exit(1)

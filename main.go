@@ -49,6 +49,10 @@ var (
 func init() {
 	getopt.SetParameters("")
 
+	mainutil.SetAppVersion(mainutil.RoxyVersion())
+	mainutil.RegisterVersionFlag()
+	mainutil.RegisterLoggingFlags()
+
 	getopt.FlagLong(&flagConfig, "config", 'c', "path to configuration file")
 	getopt.FlagLong(&flagPromNet, "prometheus-net", 0, "network for Prometheus monitoring metrics")
 	getopt.FlagLong(&flagPromAddr, "prometheus-addr", 0, "address for Prometheus monitoring metrics")
@@ -65,14 +69,16 @@ func main() {
 
 	getopt.Parse()
 
-	mainutil.SetUniqueFile(flagUniqueFile)
+	mainutil.InitVersion()
+
+	mainutil.InitLogging()
+	defer mainutil.DoneLogging()
 
 	mainutil.InitContext()
 	defer mainutil.CancelRootContext()
 	ctx := mainutil.RootContext()
 
-	mainutil.InitLogging()
-	defer mainutil.DoneLogging()
+	mainutil.SetUniqueFile(flagUniqueFile)
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 

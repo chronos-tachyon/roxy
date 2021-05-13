@@ -8,6 +8,7 @@
 //
 // Flags:
 //
+//	-V, --version      print version and exit
 //	-f, --follow       keep reading the logfile for new log messages
 //	-F, --follow-name  like --follow, but detect when the log file is rotated and re-open it
 //
@@ -29,6 +30,8 @@ import (
 	getopt "github.com/pborman/getopt/v2"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/chronos-tachyon/roxy/lib/mainutil"
 )
 
 var (
@@ -38,12 +41,18 @@ var (
 
 func init() {
 	getopt.SetParameters("[<logfile>]")
+
+	mainutil.SetAppVersion(mainutil.RoxyVersion())
+	mainutil.RegisterVersionFlag()
+
 	getopt.FlagLong(&flagFollow, "follow", 'f', "follow the log file in real time")
 	getopt.FlagLong(&flagFollowName, "follow-name", 'F', "follow the log file in real time (with periodic checks for log rotation)")
 }
 
 func main() {
 	getopt.Parse()
+
+	mainutil.InitVersion()
 
 	var consoleWriter io.Writer = zerolog.ConsoleWriter{Out: os.Stdout}
 	log.Logger = log.Output(consoleWriter)

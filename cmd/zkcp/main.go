@@ -35,7 +35,12 @@ var (
 )
 
 func init() {
-	getopt.SetParameters("<src> <dest>")
+	getopt.SetParameters("<source> <destination>")
+
+	mainutil.SetAppVersion(mainutil.RoxyVersion())
+	mainutil.RegisterVersionFlag()
+	mainutil.RegisterLoggingFlags()
+
 	getopt.FlagLong(&flagZK, "zk", 'Z', "ZooKeeper client configuration")
 	getopt.FlagLong(&flagReverse, "reverse", 'r', "copy from ZooKeeper to filesystem, instead of filesystem to ZooKeeper")
 }
@@ -43,12 +48,14 @@ func init() {
 func main() {
 	getopt.Parse()
 
-	mainutil.InitContext()
-	defer mainutil.CancelRootContext()
-	ctx := mainutil.RootContext()
+	mainutil.InitVersion()
 
 	mainutil.InitLogging()
 	defer mainutil.DoneLogging()
+
+	mainutil.InitContext()
+	defer mainutil.CancelRootContext()
+	ctx := mainutil.RootContext()
 
 	var zc mainutil.ZKConfig
 	err := zc.Parse(flagZK)

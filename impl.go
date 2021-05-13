@@ -141,7 +141,7 @@ func LoadImpl(ctx context.Context, configPath string) (*Impl, error) {
 func (impl *Impl) loadManager() error {
 	acmeDirectoryURL := autocert.DefaultACMEDirectory
 	acmeRegistrationEmail := ""
-	acmeUserAgent := "roxy/" + mainutil.Version()
+	acmeUserAgent := "roxy/" + mainutil.RoxyVersion()
 
 	if impl.cfg.Global != nil {
 		if impl.cfg.Global.ACMEDirectoryURL != "" {

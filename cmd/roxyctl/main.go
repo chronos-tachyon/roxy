@@ -58,18 +58,25 @@ var (
 
 func init() {
 	getopt.SetParameters("<cmd> [<arg>...]")
+
+	mainutil.SetAppVersion(mainutil.RoxyVersion())
+	mainutil.RegisterVersionFlag()
+	mainutil.RegisterLoggingFlags()
+
 	getopt.FlagLong(&flagAdminTarget, "server", 's', "address for Admin gRPC interface")
 }
 
 func main() {
 	getopt.Parse()
 
-	mainutil.InitContext()
-	defer mainutil.CancelRootContext()
-	ctx := mainutil.RootContext()
+	mainutil.InitVersion()
 
 	mainutil.InitLogging()
 	defer mainutil.DoneLogging()
+
+	mainutil.InitContext()
+	defer mainutil.CancelRootContext()
+	ctx := mainutil.RootContext()
 
 	var cmd string
 	if getopt.NArgs() == 0 {

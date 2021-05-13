@@ -47,6 +47,10 @@ var (
 func init() {
 	getopt.SetParameters("")
 
+	mainutil.SetAppVersion(mainutil.RoxyVersion())
+	mainutil.RegisterVersionFlag()
+	mainutil.RegisterLoggingFlags()
+
 	getopt.FlagLong(&flagListenHTTP, "listen-http", 'H', "ip:port to listen on (HTTP or HTTPS)")
 	getopt.FlagLong(&flagListenGRPC, "listen-grpc", 'G', "ip:port to listen on (gRPC or gRPCS)")
 	getopt.FlagLong(&flagAnnounceZK, "announce-zk", 'Z', "ZooKeeper announce configuration")
@@ -64,14 +68,16 @@ var (
 func main() {
 	getopt.Parse()
 
-	mainutil.SetUniqueFile(flagUniqueFile)
+	mainutil.InitVersion()
+
+	mainutil.InitLogging()
+	defer mainutil.DoneLogging()
 
 	mainutil.InitContext()
 	defer mainutil.CancelRootContext()
 	ctx := mainutil.RootContext()
 
-	mainutil.InitLogging()
-	defer mainutil.DoneLogging()
+	mainutil.SetUniqueFile(flagUniqueFile)
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 

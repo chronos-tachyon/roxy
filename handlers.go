@@ -296,7 +296,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	idStr := id.String()
 	r.Header.Set("xid", idStr)
 	w.Header().Set("xid", idStr)
-	w.Header().Set("server", "roxy/"+mainutil.Version())
+	w.Header().Set("server", "roxy/"+mainutil.RoxyVersion())
 	w.Header().Set("content-security-policy", "default-src 'self';")
 	w.Header().Set("strict-transport-security", "max-age=86400")
 	w.Header().Set("x-content-type-options", "nosniff")
