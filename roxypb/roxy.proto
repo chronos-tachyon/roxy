@@ -112,6 +112,7 @@ service Admin {
   rpc Ping (PingRequest) returns (PingResponse) {}
   rpc Reload (ReloadRequest) returns (ReloadResponse) {}
   rpc Shutdown (ShutdownRequest) returns (ShutdownResponse) {}
+  rpc SetHealth (SetHealthRequest) returns (SetHealthResponse) {}
 }
 
 message PingRequest {}
@@ -122,3 +123,11 @@ message ReloadResponse {}
 
 message ShutdownRequest {}
 message ShutdownResponse {}
+
+message SetHealthRequest {
+  string subsystem_name = 1;
+  bool is_healthy = 2;
+}
+
+message SetHealthResponse {
+}

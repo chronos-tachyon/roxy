@@ -1,15 +1,30 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strconv"
 
 	getopt "github.com/pborman/getopt/v2"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
+
+const helpText = `atcctl [<flags>] <cmd> [<args>...]
+Commands available:
+	help
+	ping
+	reload
+	shutdown
+	healthcheck <subsystem>
+	set-health <subsystem> <value>
+	lookup <service>
+	find <service> <shard-id>
+`
 
 var (
 	flagAdminTarget string = "unix:/var/opt/roxy/lib/atc.admin.socket"
@@ -32,15 +47,22 @@ func main() {
 
 	var cmd string
 	if getopt.NArgs() == 0 {
-		cmd = "ping"
+		cmd = "help"
 	} else {
 		cmd = getopt.Arg(0)
+	}
+
+	if cmd == "help" {
+		fmt.Println(helpText)
+		os.Exit(0)
 	}
 
 	expectedNArgs := 1
 	switch cmd {
 	case "healthcheck":
 		expectedNArgs = 2
+	case "set-health":
+		expectedNArgs = 3
 	case "lookup":
 		expectedNArgs = 2
 	case "find":
@@ -114,6 +136,26 @@ func main() {
 			log.Logger.Fatal().
 				Err(err).
 				Msg("call to /roxy.Admin/Shutdown failed")
+		}
+
+	case "set-health":
+		subsystemName := getopt.Arg(1)
+		isHealthy, err := misc.ParseBool(getopt.Arg(2))
+		if err != nil {
+			log.Logger.Fatal().
+				Str("input", getopt.Arg(2)).
+				Err(err).
+				Msg("invalid boolean")
+		}
+		req := &roxypb.SetHealthRequest{
+			SubsystemName: subsystemName,
+			IsHealthy:     isHealthy,
+		}
+		_, err = admin.SetHealth(ctx, req)
+		if err != nil {
+			log.Logger.Fatal().
+				Err(err).
+				Msg("call to /roxy.Admin/SetHealth failed")
 		}
 
 	case "lookup":

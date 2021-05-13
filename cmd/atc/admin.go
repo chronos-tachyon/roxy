@@ -49,3 +49,16 @@ func (AdminServer) Shutdown(ctx context.Context, req *roxypb.ShutdownRequest) (*
 	}
 	return &roxypb.ShutdownResponse{}, nil
 }
+
+func (AdminServer) SetHealth(ctx context.Context, req *roxypb.SetHealthRequest) (*roxypb.SetHealthResponse, error) {
+	log.Logger.Info().
+		Str("rpcService", "roxy.Admin").
+		Str("rpcMethod", "SetHealth").
+		Str("rpcInterface", "admin").
+		Str("subsystem", req.SubsystemName).
+		Bool("healthy", req.IsHealthy).
+		Msg("RPC")
+
+	gHealthServer.Set(req.SubsystemName, req.IsHealthy)
+	return &roxypb.SetHealthResponse{}, nil
+}

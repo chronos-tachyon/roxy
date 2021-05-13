@@ -108,7 +108,7 @@ func (s *HealthServer) Watch(req *healthCheckRequest, ws grpc_health_v1.Health_W
 
 	for !stopped {
 		s.mu.Lock()
-		for !stopped && ok == h.ok {
+		for !s.stopped && ok == h.ok {
 			h.cv.Wait()
 		}
 		didChange := (ok != h.ok)

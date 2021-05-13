@@ -398,6 +398,7 @@ type AdminClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 	Reload(ctx context.Context, in *ReloadRequest, opts ...grpc.CallOption) (*ReloadResponse, error)
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
+	SetHealth(ctx context.Context, in *SetHealthRequest, opts ...grpc.CallOption) (*SetHealthResponse, error)
 }
 
 type adminClient struct {
@@ -435,6 +436,15 @@ func (c *adminClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ..
 	return out, nil
 }
 
+func (c *adminClient) SetHealth(ctx context.Context, in *SetHealthRequest, opts ...grpc.CallOption) (*SetHealthResponse, error) {
+	out := new(SetHealthResponse)
+	err := c.cc.Invoke(ctx, "/roxy.Admin/SetHealth", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminServer is the server API for Admin service.
 // All implementations must embed UnimplementedAdminServer
 // for forward compatibility
@@ -442,6 +452,7 @@ type AdminServer interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Reload(context.Context, *ReloadRequest) (*ReloadResponse, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
+	SetHealth(context.Context, *SetHealthRequest) (*SetHealthResponse, error)
 	mustEmbedUnimplementedAdminServer()
 }
 
@@ -457,6 +468,9 @@ func (UnimplementedAdminServer) Reload(context.Context, *ReloadRequest) (*Reload
 }
 func (UnimplementedAdminServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedAdminServer) SetHealth(context.Context, *SetHealthRequest) (*SetHealthResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetHealth not implemented")
 }
 func (UnimplementedAdminServer) mustEmbedUnimplementedAdminServer() {}
 
@@ -525,6 +539,24 @@ func _Admin_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Admin_SetHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetHealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).SetHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.Admin/SetHealth",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).SetHealth(ctx, req.(*SetHealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Admin_ServiceDesc is the grpc.ServiceDesc for Admin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -543,6 +575,10 @@ var Admin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Shutdown",
 			Handler:    _Admin_Shutdown_Handler,
+		},
+		{
+			MethodName: "SetHealth",
+			Handler:    _Admin_SetHealth_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
