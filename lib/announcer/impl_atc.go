@@ -39,13 +39,13 @@ func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPor
 		unique:      unique,
 		namedPort:   namedPort,
 		loadFn:      loadFn,
+		state:       stateInit,
 	}
 	impl.cv = sync.NewCond(&impl.mu)
 	return impl, nil
 }
 
 type atcImpl struct {
-	wg          sync.WaitGroup
 	client      *atcclient.ATCClient
 	serviceName string
 	location    string
@@ -55,7 +55,7 @@ type atcImpl struct {
 
 	mu       sync.Mutex
 	cv       *sync.Cond
-	alive    bool
+	state    stateType
 	cancelFn context.CancelFunc
 	errs     multierror.Error
 }
@@ -64,9 +64,7 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	if impl.alive {
-		return errors.New("Announce called twice")
-	}
+	checkAnnounce(impl.state)
 
 	tcpAddr := r.NamedAddr(impl.namedPort)
 	if tcpAddr == nil {
@@ -99,21 +97,20 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		return err
 	}
 
-	impl.wg.Add(1)
 	go func() {
 		for err := range errCh {
 			impl.mu.Lock()
 			impl.errs.Errors = append(impl.errs.Errors, err)
 			impl.mu.Unlock()
 		}
+
 		impl.mu.Lock()
-		impl.alive = false
+		impl.state = stateDead
 		impl.cv.Broadcast()
 		impl.mu.Unlock()
-		impl.wg.Done()
 	}()
 
-	impl.alive = true
+	impl.state = stateRunning
 	impl.cancelFn = cancelFn
 	return nil
 }
@@ -122,25 +119,28 @@ func (impl *atcImpl) Withdraw(ctx context.Context) error {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	if !impl.alive {
-		return nil
-	}
+	checkWithdraw(impl.state)
 
 	impl.cancelFn()
 
-	for impl.alive {
+	for impl.state == stateRunning {
 		impl.cv.Wait()
 	}
 
 	err := impl.errs.ErrorOrNil()
 	impl.cancelFn = nil
 	impl.errs.Errors = nil
+	impl.state = stateInit
 	return err
 }
 
 func (impl *atcImpl) Close() error {
-	impl.wg.Wait()
-	return nil
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+
+	err := checkClose(impl.state)
+	impl.state = stateClosed
+	return err
 }
 
 var _ Impl = (*atcImpl)(nil)

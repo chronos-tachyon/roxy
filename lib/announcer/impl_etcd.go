@@ -2,11 +2,12 @@ package announcer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"sync"
+	"time"
 
+	multierror "github.com/hashicorp/go-multierror"
 	v3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/chronos-tachyon/roxy/lib/membership"
@@ -29,50 +30,43 @@ func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (Im
 			return nil, err
 		}
 	}
-	return &etcdImpl{
+	impl := &etcdImpl{
 		etcd:      etcd,
 		path:      path,
 		unique:    unique,
 		namedPort: namedPort,
 		format:    format,
-	}, nil
+		state:     stateInit,
+	}
+	impl.cv = sync.NewCond(&impl.mu)
+	return impl, nil
 }
 
 type etcdImpl struct {
-	wg        sync.WaitGroup
 	etcd      *v3.Client
 	path      string
 	unique    string
 	namedPort string
 	format    Format
 
-	mu      sync.Mutex
-	alive   bool
-	leaseID v3.LeaseID
+	mu       sync.Mutex
+	cv       *sync.Cond
+	state    stateType
+	leaseID  v3.LeaseID
+	cancelFn context.CancelFunc
+	errs     multierror.Error
 }
 
 func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
+	payload, err := convertToJSON(r, impl.format, impl.namedPort)
+	if err != nil {
+		return err
+	}
+
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	var v interface{}
-	var err error
-	switch impl.format {
-	case FinagleFormat:
-		v, err = r.AsServerSet()
-	case GRPCFormat:
-		v, err = r.AsGRPC(impl.namedPort)
-	default:
-		v, err = r.AsRoxyJSON()
-	}
-	if err != nil {
-		return err
-	}
-
-	payload, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
+	checkAnnounce(impl.state)
 
 	lease, err := impl.etcd.Lease.Grant(ctx, 30)
 	err = roxyresolver.MapEtcdError(err)
@@ -80,48 +74,89 @@ func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		return err
 	}
 
-	ch, err := impl.etcd.Lease.KeepAlive(ctx, lease.ID)
-	err = roxyresolver.MapEtcdError(err)
-	if err != nil {
-		return err
-	}
-
-	impl.wg.Add(1)
-	go func() {
-		for range ch {
-		}
-		impl.wg.Done()
-	}()
-
 	key := impl.path + impl.unique
+
 	_, err = impl.etcd.KV.Put(ctx, key, string(payload), v3.WithLease(lease.ID))
 	err = roxyresolver.MapEtcdError(err)
 	if err != nil {
 		_, _ = impl.etcd.Lease.Revoke(ctx, lease.ID)
 		return err
 	}
-	impl.alive = true
+
+	ctx, cancelFn := context.WithCancel(ctx)
+
+	go func() {
+		defer func() {
+			impl.mu.Lock()
+			impl.state = stateDead
+			impl.cv.Broadcast()
+			impl.mu.Unlock()
+		}()
+
+		for {
+			t := time.NewTimer(10 * time.Second)
+
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return
+
+			case <-t.C:
+				// pass
+			}
+
+			_, err := impl.etcd.Lease.KeepAliveOnce(ctx, lease.ID)
+			err = roxyresolver.MapEtcdError(err)
+			if err != nil {
+				impl.mu.Lock()
+				impl.errs.Errors = append(impl.errs.Errors, err)
+				impl.mu.Unlock()
+			}
+		}
+	}()
+
+	impl.state = stateRunning
 	impl.leaseID = lease.ID
+	impl.cancelFn = cancelFn
 	return nil
 }
 
 func (impl *etcdImpl) Withdraw(ctx context.Context) error {
+	var errs multierror.Error
+
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	if !impl.alive {
-		return nil
-	}
+	checkWithdraw(impl.state)
 
-	impl.alive = false
+	impl.cancelFn()
+
 	_, err := impl.etcd.Lease.Revoke(ctx, impl.leaseID)
 	err = roxyresolver.MapEtcdError(err)
-	return err
+
+	for impl.state == stateRunning {
+		impl.cv.Wait()
+	}
+
+	errs.Errors = impl.errs.Errors
+	if err != nil {
+		errs.Errors = append(errs.Errors, err)
+	}
+
+	impl.errs.Errors = nil
+	impl.cancelFn = nil
+	impl.leaseID = 0
+	impl.state = stateInit
+	return errs.ErrorOrNil()
 }
 
 func (impl *etcdImpl) Close() error {
-	impl.wg.Wait()
-	return nil
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+
+	err := checkClose(impl.state)
+	impl.state = stateClosed
+	return err
 }
 
 var _ Impl = (*etcdImpl)(nil)

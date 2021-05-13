@@ -2,7 +2,6 @@ package announcer
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path"
@@ -36,6 +35,7 @@ func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Impl
 		unique:    unique,
 		namedPort: namedPort,
 		format:    format,
+		state:     stateInit,
 	}, nil
 }
 
@@ -47,40 +47,30 @@ type zkImpl struct {
 	format    Format
 
 	mu     sync.Mutex
-	alive  bool
+	state  stateType
 	actual string
 }
 
 func (impl *zkImpl) Announce(ctx context.Context, r *membership.Roxy) error {
+	payload, err := convertToJSON(r, impl.format, impl.namedPort)
+	if err != nil {
+		return err
+	}
+
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	var v interface{}
-	var err error
-	switch impl.format {
-	case FinagleFormat:
-		v, err = r.AsServerSet()
-	case GRPCFormat:
-		v, err = r.AsGRPC(impl.namedPort)
-	default:
-		v, err = r.AsRoxyJSON()
-	}
-	if err != nil {
-		return err
-	}
-
-	payload, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
+	checkAnnounce(impl.state)
 
 	file := path.Join(impl.path, impl.unique)
+
 	actual, err := impl.zkconn.CreateProtectedEphemeralSequential(file, payload, zk.WorldACL(zk.PermAll))
 	err = roxyresolver.MapZKError(err)
 	if err != nil {
 		return err
 	}
-	impl.alive = true
+
+	impl.state = stateRunning
 	impl.actual = actual
 	return nil
 }
@@ -89,15 +79,21 @@ func (impl *zkImpl) Withdraw(ctx context.Context) error {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
-	if !impl.alive {
-		return nil
-	}
-	impl.alive = false
-	return roxyresolver.MapZKError(impl.zkconn.Delete(impl.actual, -1))
+	checkWithdraw(impl.state)
+
+	err := impl.zkconn.Delete(impl.actual, -1)
+	err = roxyresolver.MapZKError(err)
+	impl.state = stateInit
+	return err
 }
 
 func (impl *zkImpl) Close() error {
-	return nil
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+
+	err := checkClose(impl.state)
+	impl.state = stateClosed
+	return err
 }
 
 var _ Impl = (*zkImpl)(nil)
