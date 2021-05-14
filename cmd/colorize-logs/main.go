@@ -49,6 +49,7 @@ func init() {
 	getopt.FlagLong(&flagFollowName, "follow-name", 'F', "follow the log file in real time (with periodic checks for log rotation)")
 }
 
+//nolint:gocyclo
 func main() {
 	getopt.Parse()
 

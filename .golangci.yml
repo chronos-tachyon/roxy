@@ -1,0 +1,21 @@
+---
+linters:
+  enable:
+    - deadcode
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - structcheck
+    - typecheck
+    - unused
+    - varcheck
+    - exportloopref
+    - goconst
+    - gocyclo
+    - godot
+    - gofmt
+    - goimports
+    - importas
+    - misspell

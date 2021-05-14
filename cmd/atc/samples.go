@@ -1,10 +1,14 @@
 package main
 
 const (
-	// 10 minutes @ 1 sample per 10 seconds
+	// NumSamples is the number of samples to store.
+	//
+	// 60 samples = (10 minutes) * (60 seconds / minute) * (1 sample / 10 seconds).
 	NumSamples = 60
 
-	// weight of sample @ (t - 10 seconds) vs sample @ (t seconds)
+	// DecayFactor is the relative weight of old samples vs new samples.
+	//
+	// 0.875 = 7/8 = (weight of sample N-1) / (weight of sample N).
 	DecayFactor = 0.875
 )
 

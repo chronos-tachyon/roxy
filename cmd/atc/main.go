@@ -183,8 +183,7 @@ func main() {
 	roxypb.RegisterAdminServer(adminServer, AdminServer{})
 	roxypb.RegisterAirTrafficControlServer(adminServer, &adminATCServer)
 
-	var promHandler http.Handler
-	promHandler = promhttp.HandlerFor(
+	promHandler := promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
 		promhttp.HandlerOpts{
 			ErrorLog:            mainutil.PromLoggerBridge{},

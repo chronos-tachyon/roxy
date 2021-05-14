@@ -40,6 +40,20 @@ import (
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
+const (
+	schemeHTTP  = "http"
+	schemeHTTPS = "https"
+
+	subsysProm  = "prom"
+	subsysHTTP  = "http"
+	subsysHTTPS = "https"
+
+	problemNone = "none"
+	problem4xx  = "4xx"
+	problem5xx  = "5xx"
+	problemErr  = "error"
+)
+
 type cacheKey struct {
 	dev uint64
 	ino uint64
@@ -63,7 +77,7 @@ var (
 	promFileCacheCount = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: "roxy",
-			Subsystem: "https",
+			Subsystem: subsysHTTPS,
 			Name:      "cache_files",
 			Help:      "number of files in the in-RAM cache",
 		},
@@ -78,7 +92,7 @@ var (
 	promFileCacheBytes = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: "roxy",
-			Subsystem: "https",
+			Subsystem: subsysHTTPS,
 			Name:      "cache_bytes",
 			Help:      "number of bytes in the in-RAM cache",
 		},
@@ -92,9 +106,9 @@ var (
 )
 
 var gMetrics = map[string]*Metrics{
-	"prom":  NewMetrics("prom"),
-	"http":  NewMetrics("http"),
-	"https": NewMetrics("https"),
+	subsysProm:  NewMetrics(subsysProm),
+	subsysHTTP:  NewMetrics(subsysHTTP),
+	subsysHTTPS: NewMetrics(subsysHTTPS),
 }
 
 func init() {
@@ -182,7 +196,7 @@ func NewMetrics(proto string) *Metrics {
 		},
 	)
 
-	if proto == "https" {
+	if proto == subsysHTTPS {
 		m.ResponseCountByCodeAndFrontend = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "roxy",
@@ -365,13 +379,13 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var problemType string
 		switch {
 		case rc.Writer.SawError():
-			problemType = "error"
+			problemType = problemErr
 		case rc.Writer.Status() >= 500:
-			problemType = "5xx"
+			problemType = problem5xx
 		case rc.Writer.Status() >= 400:
-			problemType = "4xx"
+			problemType = problem4xx
 		default:
-			problemType = "none"
+			problemType = problemNone
 		}
 
 		rc.Metrics.ResponseCountByCode.WithLabelValues(code).Inc()
@@ -398,7 +412,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			default:
 				event = event.Interface("panic", x)
 			}
-		} else if rc.Proto == "prom" {
+		} else if rc.Proto == subsysProm {
 			event = rc.Logger.Debug()
 		} else {
 			event = rc.Logger.Info()
@@ -503,7 +517,7 @@ func (SecureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc.FrontendKey = "!EOF"
 	rc.Writer.WriteError(http.StatusNotFound)
-	rc.Request.URL.Scheme = "https"
+	rc.Request.URL.Scheme = schemeHTTPS
 	rc.Request.URL.Host = rc.Request.Host
 	rc.Logger.Warn().
 		Str("mutatedURL", rc.Request.URL.String()).
@@ -541,7 +555,7 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	u := new(url.URL)
 	*u = *rc.Request.URL
-	u.Scheme = "https"
+	u.Scheme = schemeHTTPS
 	u.Host = rc.Request.Host
 
 	var buf strings.Builder
@@ -854,6 +868,7 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 	http.ServeContent(rc.Writer, rc.Request, fi.Name(), mtime, body)
 }
 
+//nolint:gocyclo
 func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.FileInfo) {
 	hdrs := rc.Writer.Header()
 
@@ -1213,7 +1228,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
 	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
-	rc.Request.Header.Set("x-forwarded-proto", "https")
+	rc.Request.Header.Set("x-forwarded-proto", schemeHTTPS)
 	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add(
@@ -1222,7 +1237,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			quoteForwardedAddr(rc.LocalAddr),
 			quoteForwardedAddr(rc.RemoteAddr),
 			rc.Request.Host,
-			"https"))
+			schemeHTTPS))
 
 	if values := rc.Request.Header.Values("x-forwarded-for"); len(values) > 1 {
 		rc.Request.Header.Set("x-forwarded-for", strings.Join(values, ", "))
@@ -1230,10 +1245,10 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	innerURL := new(url.URL)
 	*innerURL = *rc.Request.URL
-	innerURL.Scheme = "http"
+	innerURL.Scheme = schemeHTTP
 	innerURL.Host = "example.com"
 	if h.client.IsTLS() {
-		innerURL.Scheme = "https"
+		innerURL.Scheme = schemeHTTPS
 	}
 
 	innerReq, err := http.NewRequestWithContext(
@@ -1322,7 +1337,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
 	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
-	rc.Request.Header.Set("x-forwarded-proto", "https")
+	rc.Request.Header.Set("x-forwarded-proto", schemeHTTPS)
 	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add(
@@ -1331,7 +1346,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			quoteForwardedAddr(rc.LocalAddr),
 			quoteForwardedAddr(rc.RemoteAddr),
 			rc.Request.Host,
-			"https"))
+			schemeHTTPS))
 
 	var wg sync.WaitGroup
 	defer func() {
@@ -1363,7 +1378,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go h.recvThread(rc, sc, &wg)
 
 	kv := make([]*roxypb.KeyValue, 4, 4+len(rc.Request.Header))
-	kv[0] = &roxypb.KeyValue{Key: ":scheme", Value: "https"}
+	kv[0] = &roxypb.KeyValue{Key: ":scheme", Value: schemeHTTPS}
 	kv[1] = &roxypb.KeyValue{Key: ":method", Value: rc.Request.Method}
 	kv[2] = &roxypb.KeyValue{Key: ":authority", Value: rc.Request.Host}
 	kv[3] = &roxypb.KeyValue{Key: ":path", Value: rc.Request.URL.Path}

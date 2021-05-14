@@ -14,8 +14,6 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 )
 
-type ConnContext = mainutil.ConnContext
-
 type RequestContext struct {
 	Context        context.Context
 	Logger         zerolog.Logger

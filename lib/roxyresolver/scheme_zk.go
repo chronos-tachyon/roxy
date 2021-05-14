@@ -99,6 +99,7 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	return
 }
 
+//nolint:gocyclo
 func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error) {
 		var children []string
@@ -264,6 +265,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName
 					switch zev.Type {
 					case zk.EventNodeChildrenChanged:
 						// pass
+
 					case zk.EventNodeDeleted:
 						err := fmt.Errorf("node %q was deleted: %w", zkPath, fs.ErrNotExist)
 						ch <- []Event{
@@ -273,6 +275,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName
 							},
 						}
 						return
+
 					default:
 						err = MapZKError(zev.Err)
 						if err != nil {

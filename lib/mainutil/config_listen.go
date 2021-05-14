@@ -14,6 +14,12 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+const (
+	netDefault = ""
+	netUnix    = "unix"
+	netTCP     = "tcp"
+)
+
 type ListenConfig struct {
 	Enabled bool
 	Network string
@@ -197,31 +203,31 @@ func (lc ListenConfig) postprocess() (out ListenConfig, err error) {
 		return zero, fmt.Errorf("invalid address %q: %w", lc.Address, roxyutil.ErrExpectNonEmpty)
 	}
 
-	maybeUnix := (lc.Network == "") || strings.HasPrefix(lc.Network, "unix")
+	maybeUnix := (lc.Network == netDefault) || strings.HasPrefix(lc.Network, netUnix)
 	if maybeUnix {
 		if lc.Address[0] == '/' || lc.Address[0] == '\x00' {
-			if lc.Network == "" {
-				lc.Network = "unix"
+			if lc.Network == netDefault {
+				lc.Network = netUnix
 			}
 		} else if lc.Address[0] == '@' {
 			lc.Address = "\x00" + lc.Address[1:]
-			if lc.Network == "" {
-				lc.Network = "unix"
+			if lc.Network == netDefault {
+				lc.Network = netUnix
 			}
-		} else if lc.Network != "" || strings.Contains(lc.Address, "/") {
+		} else if lc.Network != netDefault || strings.Contains(lc.Address, "/") {
 			abs, err := filepath.Abs(lc.Address)
 			if err != nil {
 				return zero, err
 			}
 			lc.Address = abs
-			if lc.Network == "" {
-				lc.Network = "unix"
+			if lc.Network == netDefault {
+				lc.Network = netUnix
 			}
 		}
 	}
 
-	if lc.Network == "" {
-		lc.Network = "tcp"
+	if lc.Network == netDefault {
+		lc.Network = netTCP
 	}
 
 	return lc, nil
