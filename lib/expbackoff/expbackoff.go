@@ -43,7 +43,7 @@ func BuildDefault() ExpBackoff {
 	}
 }
 
-// BuildDefault returns an ExpBackoff that uses a custom backoff configuration.
+// Build returns an ExpBackoff that uses a custom backoff configuration.
 func Build(rng *rand.Rand, cfg backoff.Config) ExpBackoff {
 	if rng == nil {
 		rng = syncrand.Global()

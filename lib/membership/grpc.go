@@ -115,7 +115,7 @@ func (op GRPCOperation) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON fulfills json.Unmarshaler.
-func (ptr *GRPCOperation) UnmarshalJSON(raw []byte) error {
+func (op *GRPCOperation) UnmarshalJSON(raw []byte) error {
 	if raw == nil {
 		panic(errors.New("raw is nil"))
 	}
@@ -124,11 +124,11 @@ func (ptr *GRPCOperation) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	*ptr = ^GRPCOperation(0)
+	*op = ^GRPCOperation(0)
 
 	for _, row := range grpcOperationJSON {
 		if bytes.Equal(raw, row.bytes) {
-			*ptr = GRPCOperation(row.index)
+			*op = GRPCOperation(row.index)
 			return nil
 		}
 	}
@@ -137,7 +137,7 @@ func (ptr *GRPCOperation) UnmarshalJSON(raw []byte) error {
 	err0 := json.Unmarshal(raw, &num)
 	if err0 == nil {
 		if uint(num) < uint(len(grpcOperationData)) {
-			*ptr = GRPCOperation(num)
+			*op = GRPCOperation(num)
 			return nil
 		}
 		return fmt.Errorf("invalid GRPCOperation value %d", num)
@@ -148,7 +148,7 @@ func (ptr *GRPCOperation) UnmarshalJSON(raw []byte) error {
 	if err1 == nil {
 		for index, data := range grpcOperationData {
 			if strings.EqualFold(str, data.Name) || strings.EqualFold(str, data.GoName) {
-				*ptr = GRPCOperation(index)
+				*op = GRPCOperation(index)
 				return nil
 			}
 		}
