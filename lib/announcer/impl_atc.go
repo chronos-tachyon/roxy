@@ -71,25 +71,18 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		return fmt.Errorf("unknown port name %q", impl.namedPort)
 	}
 
-	var shardID uint32
-	var hasShardID bool
-	if r.ShardID != nil {
-		shardID = *r.ShardID
-		hasShardID = true
-	}
-
 	cancelFn, errCh, err := impl.client.ServerAnnounce(
 		ctx,
 		&roxypb.ServerAnnounceRequest{
 			ServiceName: impl.serviceName,
-			ShardId:     shardID,
+			ShardId:     r.ShardID,
 			Location:    impl.location,
 			Unique:      impl.unique,
 			ServerName:  r.ServerName,
 			Ip:          []byte(tcpAddr.IP),
 			Zone:        tcpAddr.Zone,
 			Port:        uint32(tcpAddr.Port),
-			HasShardId:  hasShardID,
+			HasShardId:  r.HasShardID,
 		},
 		impl.loadFn,
 	)

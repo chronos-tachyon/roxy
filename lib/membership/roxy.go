@@ -12,6 +12,15 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
+type Interface interface {
+	IsAlive() bool
+	NamedPorts() []string
+	PrimaryAddr() *net.TCPAddr
+	NamedAddr(string) *net.TCPAddr
+}
+
+// type Roxy {{{
+
 type Roxy struct {
 	Ready           bool
 	IP              net.IP
@@ -19,23 +28,19 @@ type Roxy struct {
 	ServerName      string
 	PrimaryPort     uint16
 	AdditionalPorts map[string]uint16
-	ShardID         *uint32
+	ShardID         uint32
+	HasShardID      bool
 	Metadata        map[string]string
 }
 
-type RoxyJSON struct {
-	Ready           bool              `json:"ready"`
-	IP              string            `json:"ip,omitempty"`
-	Zone            string            `json:"zone,omitempty"`
-	ServerName      string            `json:"serverName,omitempty"`
-	PrimaryPort     uint16            `json:"primaryPort,omitempty"`
-	AdditionalPorts map[string]uint16 `json:"additionalPorts,omitempty"`
-	ShardID         *uint32           `json:"shardID,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+// IsAlive returns true if this represents the advertisement of a live server.
+func (r *Roxy) IsAlive() bool {
+	return r != nil && r.Ready
 }
 
+// NamedPorts returns the list of named ports advertized by the server.
 func (r *Roxy) NamedPorts() []string {
-	if !r.Ready {
+	if !r.IsAlive() {
 		return nil
 	}
 	list := make([]string, 0, len(r.AdditionalPorts))
@@ -46,52 +51,131 @@ func (r *Roxy) NamedPorts() []string {
 	return list
 }
 
+// PrimaryAddr returns the server's primary endpoint as a TCPAddr.
 func (r *Roxy) PrimaryAddr() *net.TCPAddr {
-	if !r.Ready {
+	if !r.IsAlive() {
 		return nil
 	}
 	return &net.TCPAddr{
 		IP:   r.IP,
-		Zone: r.Zone,
 		Port: int(r.PrimaryPort),
+		Zone: r.Zone,
 	}
 }
 
+// NamedAddr returns the server's named endpoint as a TCPAddr.
 func (r *Roxy) NamedAddr(namedPort string) *net.TCPAddr {
 	if namedPort == "" {
 		return r.PrimaryAddr()
 	}
-	if !r.Ready {
+	if !r.IsAlive() {
 		return nil
 	}
 	port, ok := r.AdditionalPorts[namedPort]
 	if !ok {
-		return nil
+		panic(fmt.Errorf("unknown named port %q", namedPort))
 	}
 	return &net.TCPAddr{
 		IP:   r.IP,
-		Zone: r.Zone,
 		Port: int(port),
+		Zone: r.Zone,
 	}
 }
 
-func (r *Roxy) AsRoxyJSON() (*RoxyJSON, error) {
+// MarshalJSON fulfills json.Marshaler.
+func (r *Roxy) MarshalJSON() ([]byte, error) {
+	if r == nil {
+		return nullBytes, nil
+	}
+	return json.Marshal(r.AsRoxyJSON())
+}
+
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (r *Roxy) UnmarshalJSON(raw []byte) error {
+	if raw == nil {
+		panic(errors.New("raw is nil"))
+	}
+
+	if bytes.Equal(raw, nullBytes) {
+		return nil
+	}
+
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*r = Roxy{}
+		}
+	}()
+
+	var x RoxyJSON
+	err0 := misc.StrictUnmarshalJSON(raw, &x)
+	if err0 == nil {
+		err := r.FromRoxyJSON(&x)
+		if err == nil {
+			wantZero = false
+			return nil
+		}
+		return err
+	}
+
+	var y ServerSet
+	err1 := misc.StrictUnmarshalJSON(raw, &y)
+	if err1 == nil {
+		err := r.FromServerSet(&y)
+		if err == nil {
+			wantZero = false
+			return nil
+		}
+		return err
+	}
+
+	var z GRPC
+	err2 := misc.StrictUnmarshalJSON(raw, &z)
+	if err2 == nil {
+		err := r.FromGRPC(&z)
+		if err == nil {
+			wantZero = false
+			return nil
+		}
+		return err
+	}
+
+	return err0
+}
+
+func (r *Roxy) AsRoxyJSON() *RoxyJSON {
+	if r == nil {
+		return nil
+	}
+
+	ip := r.IP.String()
+
+	var shardID *uint32
+	if r.HasShardID {
+		shardID = new(uint32)
+		*shardID = r.ShardID
+	}
+
 	out := &RoxyJSON{
 		Ready:           r.Ready,
-		IP:              r.IP.String(),
+		IP:              ip,
 		Zone:            r.Zone,
 		PrimaryPort:     r.PrimaryPort,
 		AdditionalPorts: r.AdditionalPorts,
 		ServerName:      r.ServerName,
-		ShardID:         r.ShardID,
+		ShardID:         shardID,
 		Metadata:        r.Metadata,
 	}
-	return out, nil
+	return out
 }
 
-func (r *Roxy) AsServerSet() (*ServerSet, error) {
+func (r *Roxy) AsServerSet() *ServerSet {
+	if r == nil {
+		return nil
+	}
+
 	status := StatusDead
-	if r.Ready {
+	if r.IsAlive() {
 		status = StatusAlive
 	}
 
@@ -103,12 +187,9 @@ func (r *Roxy) AsServerSet() (*ServerSet, error) {
 	}
 
 	var shardID *int32
-	if r.ShardID != nil {
-		if *r.ShardID >= uint32(1<<31) {
-			return nil, fmt.Errorf("ShardID %d is out of range", *r.ShardID)
-		}
+	if r.HasShardID {
 		shardID = new(int32)
-		*shardID = int32(*r.ShardID)
+		*shardID = int32(r.ShardID)
 	}
 
 	metadata := make(map[string]string, 1)
@@ -123,26 +204,27 @@ func (r *Roxy) AsServerSet() (*ServerSet, error) {
 		ShardID:             shardID,
 		Metadata:            metadata,
 	}
-	return out, nil
+	return out
 }
 
-func (r *Roxy) AsGRPC(namedPort string) (*GRPC, error) {
+func (r *Roxy) AsGRPC(namedPort string) *GRPC {
+	if r == nil {
+		return nil
+	}
+
 	op := GRPCOpDelete
-	if r.Ready {
+	if r.IsAlive() {
 		op = GRPCOpAdd
 	}
 
 	tcpAddr := r.NamedAddr(namedPort)
-	if tcpAddr == nil {
-		return nil, fmt.Errorf("unknown named port %q", namedPort)
-	}
 
 	metadata := make(map[string]interface{}, 8)
 	if r.ServerName != "" {
 		metadata["ServerName"] = r.ServerName
 	}
-	if r.ShardID != nil {
-		metadata["ShardID"] = *r.ShardID
+	if r.HasShardID {
+		metadata["ShardID"] = r.ShardID
 	}
 
 	out := &GRPC{
@@ -150,33 +232,54 @@ func (r *Roxy) AsGRPC(namedPort string) (*GRPC, error) {
 		Addr:     tcpAddr.String(),
 		Metadata: metadata,
 	}
-	return out, nil
+	return out
 }
 
 func (r *Roxy) FromRoxyJSON(x *RoxyJSON) error {
+	if r == nil {
+		panic(errors.New("*membership.Roxy is nil"))
+	}
 	if x == nil {
 		panic(errors.New("*membership.RoxyJSON is nil"))
 	}
 
-	ip, err := misc.ParseIP(x.IP)
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*r = Roxy{}
+		}
+	}()
+
+	if !x.Ready {
+		return nil
+	}
+
+	r.Ready = true
+	r.Zone = x.Zone
+	r.ServerName = x.ServerName
+	r.PrimaryPort = x.PrimaryPort
+	r.AdditionalPorts = x.AdditionalPorts
+	r.Metadata = x.Metadata
+
+	var err error
+	r.IP, err = misc.ParseIP(x.IP)
 	if err != nil {
 		return err
 	}
 
-	*r = Roxy{
-		Ready:           x.Ready,
-		IP:              ip,
-		Zone:            x.Zone,
-		ServerName:      x.ServerName,
-		PrimaryPort:     x.PrimaryPort,
-		AdditionalPorts: x.AdditionalPorts,
-		ShardID:         x.ShardID,
-		Metadata:        x.Metadata,
+	if x.ShardID != nil {
+		r.ShardID = *x.ShardID
+		r.HasShardID = true
 	}
+
+	wantZero = false
 	return nil
 }
 
 func (r *Roxy) FromServerSet(ss *ServerSet) error {
+	if r == nil {
+		panic(errors.New("*membership.Roxy is nil"))
+	}
 	if ss == nil {
 		panic(errors.New("*membership.ServerSet is nil"))
 	}
@@ -219,11 +322,8 @@ func (r *Roxy) FromServerSet(ss *ServerSet) error {
 	}
 
 	if ss.ShardID != nil {
-		if *ss.ShardID < 0 {
-			return fmt.Errorf("ServerSet with negative ShardID not supported: %d", *ss.ShardID)
-		}
-		r.ShardID = new(uint32)
-		*r.ShardID = uint32(*ss.ShardID)
+		r.ShardID = uint32(*ss.ShardID)
+		r.HasShardID = true
 	}
 
 	r.Metadata = make(map[string]string, len(ss.Metadata))
@@ -241,6 +341,9 @@ func (r *Roxy) FromServerSet(ss *ServerSet) error {
 }
 
 func (r *Roxy) FromGRPC(grpc *GRPC) error {
+	if r == nil {
+		panic(errors.New("*membership.Roxy is nil"))
+	}
 	if grpc == nil {
 		panic(errors.New("*membership.GRPC is nil"))
 	}
@@ -289,9 +392,8 @@ func (r *Roxy) FromGRPC(grpc *GRPC) error {
 	if str, found := r.Metadata["ShardID"]; found {
 		if u64, err := strconv.ParseUint(str, 10, 32); err == nil {
 			delete(r.Metadata, "ShardID")
-			shardID := new(uint32)
-			*shardID = uint32(u64)
-			r.ShardID = shardID
+			r.ShardID = uint32(u64)
+			r.HasShardID = true
 		}
 	}
 
@@ -299,82 +401,21 @@ func (r *Roxy) FromGRPC(grpc *GRPC) error {
 	return nil
 }
 
-func (r *Roxy) MarshalJSON() ([]byte, error) {
-	if r == nil {
-		return nullBytes, nil
-	}
+var _ Interface = (*Roxy)(nil)
 
-	x, err := r.AsRoxyJSON()
-	if err != nil {
-		return nil, err
-	}
+// }}}
 
-	return json.Marshal(x)
+// type RoxyJSON {{{
+
+type RoxyJSON struct {
+	Ready           bool              `json:"ready"`
+	IP              string            `json:"ip,omitempty"`
+	Zone            string            `json:"zone,omitempty"`
+	ServerName      string            `json:"serverName,omitempty"`
+	PrimaryPort     uint16            `json:"primaryPort,omitempty"`
+	AdditionalPorts map[string]uint16 `json:"additionalPorts,omitempty"`
+	ShardID         *uint32           `json:"shardID,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
-func (r *Roxy) UnmarshalJSON(raw []byte) error {
-	if raw == nil {
-		panic(errors.New("raw is nil"))
-	}
-
-	if bytes.Equal(raw, nullBytes) {
-		return nil
-	}
-
-	var x RoxyJSON
-	err := misc.StrictUnmarshalJSON(raw, &x)
-	if err != nil {
-		return err
-	}
-
-	return r.FromRoxyJSON(&x)
-}
-
-func (r *Roxy) Parse(raw []byte) error {
-	if r == nil {
-		panic(errors.New("*Roxy is nil"))
-	}
-
-	if bytes.Equal(raw, nullBytes) {
-		return nil
-	}
-
-	wantZero := true
-	defer func() {
-		if wantZero {
-			*r = Roxy{}
-		}
-	}()
-
-	err0 := misc.StrictUnmarshalJSON(raw, r)
-	if err0 == nil {
-		wantZero = false
-		return nil
-	}
-
-	var ss ServerSet
-	err1 := misc.StrictUnmarshalJSON(raw, &ss)
-	if err1 == nil {
-		err := r.FromServerSet(&ss)
-		if err != nil {
-			return err
-		}
-
-		wantZero = false
-		return nil
-	}
-
-	var grpc GRPC
-	err2 := misc.StrictUnmarshalJSON(raw, &grpc)
-	if err2 == nil {
-		err := r.FromGRPC(&grpc)
-		if err != nil {
-			return err
-		}
-
-		wantZero = false
-		return nil
-	}
-
-	return fmt.Errorf("failed to parse JSON: `%s`: %w", string(raw), err0)
-}
+// }}}

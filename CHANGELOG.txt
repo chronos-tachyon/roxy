@@ -1,3 +1,6 @@
+v0.4.4
+  * Minor API tweaks for membership
+
 v0.4.3
   * Minor API tweaks for announcer and atcclient
   * Improve GoDoc coverage

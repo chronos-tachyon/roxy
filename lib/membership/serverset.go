@@ -1,57 +1,31 @@
 package membership
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
+// type ServerSet {{{
+
+// ServerSet represents a service advertisement in Finagle's ServerSet format.
+//
+// See: https://github.com/twitter/finagle/blob/develop/finagle-serversets/src/main/scala/com/twitter/finagle/serverset2/Entry.scala
 type ServerSet struct {
 	ServiceEndpoint     *ServerSetEndpoint            `json:"serviceEndpoint"`
 	AdditionalEndpoints map[string]*ServerSetEndpoint `json:"additionalEndpoints"`
 	Status              ServerSetStatus               `json:"status"`
-	ShardID             *int32                        `json:"shardId,omitempty"`
+	ShardID             *int32                        `json:"shard,omitempty"`
 	Metadata            map[string]string             `json:"metadata,omitempty"`
 }
 
-func (ss *ServerSet) AsGRPC(namedPort string) *GRPC {
-	out := new(GRPC)
-	if ss.Status != StatusAlive {
-		out.Op = GRPCOpDelete
-		return out
-	}
-
-	tcpAddr := ss.TCPAddrForPort(namedPort)
-	if tcpAddr == nil {
-		panic(fmt.Errorf("unknown named port %q", namedPort))
-	}
-
-	metadata := make(map[string]interface{}, 2+len(ss.Metadata))
-	for key, value := range ss.Metadata {
-		metadata[key] = value
-	}
-	if ss.ShardID != nil {
-		metadata["ShardID"] = *ss.ShardID
-	}
-
-	out.Op = GRPCOpAdd
-	out.Addr = tcpAddr.String()
-	out.Metadata = metadata
-	return out
-}
-
-func (ss *ServerSet) AsJSON() []byte {
-	raw, err := json.Marshal(ss)
-	if err != nil {
-		panic(fmt.Errorf("failed to json.Marshal your ServerSet: %w", err))
-	}
-	return raw
-}
-
+// IsAlive returns true if this represents the advertisement of a live server.
 func (ss *ServerSet) IsAlive() bool {
 	if ss == nil {
 		return false
@@ -59,26 +33,61 @@ func (ss *ServerSet) IsAlive() bool {
 	return ss.Status == StatusAlive
 }
 
-func (ss *ServerSet) TCPAddrForPort(namedPort string) *net.TCPAddr {
-	if ss == nil {
+// NamedPorts returns the list of named ports advertized by the server.
+func (ss *ServerSet) NamedPorts() []string {
+	if !ss.IsAlive() {
 		return nil
 	}
-	ep := ss.ServiceEndpoint
-	if namedPort != "" {
-		ep = ss.AdditionalEndpoints[namedPort]
+	list := make([]string, 0, len(ss.AdditionalEndpoints))
+	for name, endpoint := range ss.AdditionalEndpoints {
+		if endpoint != nil {
+			list = append(list, name)
+		}
 	}
-	return ep.TCPAddr()
+	sort.Strings(list)
+	return list
 }
 
+// PrimaryAddr returns the server's primary endpoint as a TCPAddr.
+func (ss *ServerSet) PrimaryAddr() *net.TCPAddr {
+	if !ss.IsAlive() {
+		return nil
+	}
+	return ss.ServiceEndpoint.Addr()
+}
+
+// NamedAddr returns the server's named endpoint as a TCPAddr.
+func (ss *ServerSet) NamedAddr(namedPort string) *net.TCPAddr {
+	if namedPort == "" {
+		return ss.PrimaryAddr()
+	}
+	if !ss.IsAlive() {
+		return nil
+	}
+	endpoint := ss.AdditionalEndpoints[namedPort]
+	if endpoint == nil {
+		panic(fmt.Errorf("unknown named port %q", namedPort))
+	}
+	return endpoint.Addr()
+}
+
+var _ Interface = (*ServerSet)(nil)
+
+// }}}
+
+// type ServerSetEndpoint {{{
+
+// ServerSetEndpoint represents a single endpoint in a ServerSet advertisement.
+//
+// Each server's ServerSet can contain one primary and multiple named endpoints.
 type ServerSetEndpoint struct {
 	Host string `json:"host"`
 	Port uint16 `json:"port"`
 }
 
-func (ep *ServerSetEndpoint) TCPAddr() *net.TCPAddr {
-	if ep == nil {
-		return nil
-	}
+// Addr returns this endpoint as a TCPAddr.  Panics if the endpoint data cannot
+// be parsed as an IP and port.
+func (ep *ServerSetEndpoint) Addr() *net.TCPAddr {
 	tcpAddr, err := TCPAddrFromServerSetEndpoint(ep)
 	if err != nil {
 		panic(err)
@@ -86,6 +95,14 @@ func (ep *ServerSetEndpoint) TCPAddr() *net.TCPAddr {
 	return tcpAddr
 }
 
+// }}}
+
+// type ServerSetStatus {{{
+
+// ServerSetStatus represents the status of the server being advertized.
+//
+//	StatusAlive    healthy
+//	anything else  not healthy
 type ServerSetStatus uint8
 
 const (
@@ -106,74 +123,89 @@ var serversetStatusData = []enumData{
 	{"StatusWarning", "WARNING"},
 }
 
-var serversetStatusMap = map[string]ServerSetStatus{
-	"0":        StatusDead,
-	"1":        StatusStarting,
-	"2":        StatusAlive,
-	"3":        StatusStopping,
-	"4":        StatusStopped,
-	"5":        StatusWarning,
-	"DEAD":     StatusDead,
-	"STARTING": StatusStarting,
-	"ALIVE":    StatusAlive,
-	"STOPPING": StatusStopping,
-	"STOPPED":  StatusStopped,
-	"WARNING":  StatusWarning,
+var serversetStatusJSON = []enumJSON{
+	{uint(StatusDead), []byte(`"DEAD"`)},
+	{uint(StatusStarting), []byte(`"STARTING"`)},
+	{uint(StatusAlive), []byte(`"ALIVE"`)},
+	{uint(StatusStopping), []byte(`"STOPPING"`)},
+	{uint(StatusStopped), []byte(`"STOPPED"`)},
+	{uint(StatusWarning), []byte(`"WARNING"`)},
+	{uint(StatusDead), []byte(`"dead"`)},
+	{uint(StatusStarting), []byte(`"starting"`)},
+	{uint(StatusAlive), []byte(`"alive"`)},
+	{uint(StatusStopping), []byte(`"stopping"`)},
+	{uint(StatusStopped), []byte(`"stopped"`)},
+	{uint(StatusWarning), []byte(`"warning"`)},
+	{uint(StatusDead), []byte("0")},
+	{uint(StatusStarting), []byte("1")},
+	{uint(StatusAlive), []byte("2")},
+	{uint(StatusStopping), []byte("3")},
+	{uint(StatusStopped), []byte("4")},
+	{uint(StatusWarning), []byte("5")},
 }
 
-func (st ServerSetStatus) String() string {
-	if uint(st) >= uint(len(serversetStatusData)) {
-		return fmt.Sprintf("#%d", uint(st))
+// GoString fulfills fmt.GoStringer.
+func (status ServerSetStatus) GoString() string {
+	if uint(status) >= uint(len(serversetStatusData)) {
+		panic(fmt.Errorf("invalid ServerSetStatus value %d", uint(status)))
 	}
-	return serversetStatusData[st].Name
+	return serversetStatusData[status].GoName
 }
 
-func (st ServerSetStatus) GoString() string {
-	if uint(st) >= uint(len(serversetStatusData)) {
-		return fmt.Sprintf("ServerSetStatus(%d)", uint(st))
+// String fulfills fmt.Stringer.
+func (status ServerSetStatus) String() string {
+	if uint(status) >= uint(len(serversetStatusData)) {
+		panic(fmt.Errorf("invalid ServerSetStatus value %d", uint(status)))
 	}
-	return serversetStatusData[st].GoName
+	return serversetStatusData[status].Name
 }
 
-func (st ServerSetStatus) MarshalJSON() ([]byte, error) {
-	return json.Marshal(st.String())
+// MarshalJSON fulfills json.Marshaler.
+func (status ServerSetStatus) MarshalJSON() ([]byte, error) {
+	return json.Marshal(status.String())
 }
 
-func (st *ServerSetStatus) UnmarshalJSON(raw []byte) error {
-	if string(raw) == "null" {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (status *ServerSetStatus) UnmarshalJSON(raw []byte) error {
+	if raw == nil {
+		panic(errors.New("raw is nil"))
+	}
+
+	if bytes.Equal(raw, nullBytes) {
 		return nil
 	}
 
-	if num, found := serversetStatusMap[string(raw)]; found {
-		*st = num
-		return nil
+	*status = ^ServerSetStatus(0)
+
+	for _, row := range serversetStatusJSON {
+		if bytes.Equal(raw, row.bytes) {
+			*status = ServerSetStatus(row.index)
+			return nil
+		}
 	}
 
 	var str string
 	err0 := json.Unmarshal(raw, &str)
 	if err0 == nil {
-		if num, found := serversetStatusMap[str]; found {
-			*st = num
-			return nil
-		}
 		for index, data := range serversetStatusData {
-			if strings.EqualFold(str, data.Name) {
-				*st = ServerSetStatus(index)
+			if strings.EqualFold(str, data.Name) || strings.EqualFold(str, data.GoName) {
+				*status = ServerSetStatus(index)
 				return nil
 			}
 		}
-		*st = 0
-		return fmt.Errorf("unknown ServerSetStatus %q", str)
+		return fmt.Errorf("invalid ServerSetStatus value %q", str)
 	}
 
 	var num uint8
 	err1 := json.Unmarshal(raw, &num)
 	if err1 == nil {
-		*st = ServerSetStatus(num)
-		return nil
+		if uint(num) < uint(len(serversetStatusData)) {
+			*status = ServerSetStatus(num)
+			return nil
+		}
+		return fmt.Errorf("invalid ServerSetStatus value %d", num)
 	}
 
-	*st = 0
 	return err0
 
 }
@@ -183,23 +215,31 @@ var _ fmt.GoStringer = ServerSetStatus(0)
 var _ json.Marshaler = ServerSetStatus(0)
 var _ json.Unmarshaler = (*ServerSetStatus)(nil)
 
+// }}}
+
+// ServerSetEndpointFromTCPAddr is a helper function that creates a new
+// ServerSetEndpoint representing the given TCPAddr.
 func ServerSetEndpointFromTCPAddr(addr *net.TCPAddr) *ServerSetEndpoint {
 	if addr == nil {
 		return nil
 	}
+
 	ipAndZone := addr.IP.String()
 	if addr.Zone != "" {
 		ipAndZone += "%" + addr.Zone
 	}
+
 	return &ServerSetEndpoint{
 		Host: ipAndZone,
 		Port: uint16(addr.Port),
 	}
 }
 
+// TCPAddrFromServerSetEndpoint is a helper function that parses an existing
+// ServerSetEndpoint to produce a TCPAddr.
 func TCPAddrFromServerSetEndpoint(ep *ServerSetEndpoint) (*net.TCPAddr, error) {
 	if ep == nil {
-		panic(errors.New("*ServerSetEndpoint is nil"))
+		return nil, nil
 	}
 
 	ip, zone, err := misc.ParseIPAndZone(ep.Host)
@@ -213,9 +253,4 @@ func TCPAddrFromServerSetEndpoint(ep *ServerSetEndpoint) (*net.TCPAddr, error) {
 		Zone: zone,
 	}
 	return tcpAddr, nil
-}
-
-type enumData struct {
-	GoName string
-	Name   string
 }

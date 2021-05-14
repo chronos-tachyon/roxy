@@ -57,14 +57,11 @@ func convertToJSON(in *membership.Roxy, format Format, namedPort string) (raw []
 	var v interface{}
 	switch format {
 	case FinagleFormat:
-		v, err = in.AsServerSet()
+		v = in.AsServerSet()
 	case GRPCFormat:
-		v, err = in.AsGRPC(namedPort)
+		v = in.AsGRPC(namedPort)
 	default:
-		v, err = in.AsRoxyJSON()
-	}
-	if err != nil {
-		return nil, err
+		v = in.AsRoxyJSON()
 	}
 
 	raw, err = json.Marshal(v)

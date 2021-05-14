@@ -1,5 +1,5 @@
 // Package announcer encapsulates the idea of a server that dynamically
-// advertises its presence to clients through various media.
+// advertizes its presence to clients through various media.
 //
 // Typical usage:
 //
