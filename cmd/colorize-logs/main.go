@@ -49,7 +49,6 @@ func init() {
 	getopt.FlagLong(&flagFollowName, "follow-name", 'F', "follow the log file in real time (with periodic checks for log rotation)")
 }
 
-//nolint:gocyclo
 func main() {
 	getopt.Parse()
 
@@ -63,7 +62,7 @@ func main() {
 	wantClose := false
 	defer func() {
 		if wantClose {
-			inputFile.Close()
+			_ = inputFile.Close()
 		}
 	}()
 
@@ -100,7 +99,7 @@ func main() {
 			wantClose2 := true
 			defer func() {
 				if wantClose2 {
-					inputFile2.Close()
+					_ = inputFile2.Close()
 				}
 			}()
 

@@ -38,7 +38,9 @@ func sdNotify(payload string) {
 			Msg("sdNotify: failed to Dial")
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	_, err = io.Copy(conn, strings.NewReader(payload))
 	if err != nil {

@@ -50,7 +50,7 @@ func UniqueID() (string, error) {
 
 		_, err = f.Write(raw)
 		if err != nil {
-			f.Close()
+			_ = f.Close()
 			return "", err
 		}
 

@@ -12,7 +12,6 @@ const (
 	DecayFactor = 0.875
 )
 
-//nolint:unused
 type SampleHistory struct {
 	raw     [NumSamples]float32
 	data    []float32

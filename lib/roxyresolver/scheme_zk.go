@@ -99,7 +99,6 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	return
 }
 
-//nolint:gocyclo
 func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error) {
 		var children []string

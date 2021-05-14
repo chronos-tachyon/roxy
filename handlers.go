@@ -359,7 +359,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if !rc.Body.WasClosed() {
 			_, _ = io.Copy(io.Discard, rc.Body)
-			rc.Body.Close()
+			_ = rc.Body.Close()
 		}
 
 		rc.EndTime = time.Now()
@@ -634,7 +634,9 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer reqFile.Close()
+	defer func() {
+		_ = reqFile.Close()
+	}()
 
 	reqStat, err := reqFile.Stat()
 	if err != nil {
@@ -660,7 +662,7 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case err == nil:
 			defer func() {
 				if idxFile != nil {
-					idxFile.Close()
+					_ = idxFile.Close()
 				}
 			}()
 
@@ -717,7 +719,7 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 		mapFilePath := rc.Request.URL.Path + ".map"
 		mapFile, err := h.fs.Open(mapFilePath)
 		if err == nil {
-			mapFile.Close()
+			_ = mapFile.Close()
 			hdrs.Set("sourcemap", mapFilePath)
 		}
 	}
@@ -868,7 +870,6 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 	http.ServeContent(rc.Writer, rc.Request, fi.Name(), mtime, body)
 }
 
-//nolint:gocyclo
 func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.FileInfo) {
 	hdrs := rc.Writer.Header()
 
@@ -1064,7 +1065,7 @@ func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.File
 			if parentInfo, err := parentFile.Stat(); err == nil {
 				populateRealStats(&e, parentInfo, parentDir)
 			}
-			parentFile.Close()
+			_ = parentFile.Close()
 		}
 
 		entries = append(entries, e)
@@ -1289,7 +1290,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	needBodyClose := true
 	defer func() {
 		if needBodyClose {
-			innerResp.Body.Close()
+			_ = innerResp.Body.Close()
 		}
 	}()
 
@@ -1352,7 +1353,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rc.Body.WasClosed() {
 			_, _ = io.Copy(io.Discard, rc.Body)
-			rc.Body.Close()
+			_ = rc.Body.Close()
 		}
 		wg.Wait()
 	}()

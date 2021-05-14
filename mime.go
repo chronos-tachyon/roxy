@@ -42,7 +42,9 @@ func DetectMimeProperties(impl *Impl, logger zerolog.Logger, filesystem http.Fil
 		return
 	}
 
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	haveContentType := false
 	if raw, err := readXattr(f, xattrMimeType); err == nil {

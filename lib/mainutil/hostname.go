@@ -11,9 +11,9 @@ func init() {
 		hostname, err := os.Hostname()
 		if err == nil {
 			hostname = strings.TrimRight(hostname, ".")
-			os.Setenv("HOSTNAME", hostname)
+			_ = os.Setenv("HOSTNAME", hostname)
 		} else {
-			os.Setenv("HOSTNAME", "localhost")
+			_ = os.Setenv("HOSTNAME", "localhost")
 		}
 	}
 }

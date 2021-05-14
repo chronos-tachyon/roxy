@@ -91,7 +91,6 @@ func (ec EtcdConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ec.toAlt())
 }
 
-//nolint:gocyclo
 func (ec *EtcdConfig) Parse(str string) error {
 	wantZero := true
 	defer func() {

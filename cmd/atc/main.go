@@ -146,7 +146,9 @@ func main() {
 			Err(err).
 			Msg("--etcd: failed to connect")
 	}
-	defer etcd.Close()
+	defer func() {
+		_ = etcd.Close()
+	}()
 
 	var ref Ref
 	ref.Init(flagConfig, atcAddr, etcd)

@@ -116,7 +116,7 @@ func InitLogging() {
 
 func DoneLogging() {
 	if gLogger != nil {
-		gLogger.Close()
+		_ = gLogger.Close()
 	}
 }
 

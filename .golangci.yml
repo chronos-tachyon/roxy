@@ -18,3 +18,18 @@ linters:
     - gofmt
     - goimports
     - misspell
+
+linters-settings:
+  gocyclo:
+    min-complexity: 50
+  staticcheck:
+    go: "1.16"
+  unused:
+    go: "1.16"
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    - linters:
+      - staticcheck
+      text: "SA1019: http.CloseNotifier"

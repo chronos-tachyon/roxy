@@ -13,7 +13,6 @@ type Event struct {
 	ServiceConfigJSON string
 }
 
-//nolint:gocyclo
 func (event *Event) Check() {
 	if checkDisabled {
 		return

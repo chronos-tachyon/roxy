@@ -30,7 +30,6 @@ const (
 	dnsPort   = "53"
 	httpPort  = "80"
 	httpsPort = "443"
-	atcPort   = "2987" //nolint:varcheck,deadcode
 )
 
 var (

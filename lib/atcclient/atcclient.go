@@ -364,7 +364,9 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 
 	if err == nil && c.closed {
 		cc2 := cc
-		defer cc2.Close()
+		defer func() {
+			_ = cc2.Close()
+		}()
 		cc = nil
 		err = fs.ErrClosed
 	}
@@ -397,8 +399,6 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 // should be withdrawn, and the caller must also ensure that the returned error
 // channel is drained in a timely manner.  The error channel will be closed
 // once all goroutines and other internal resources have been released.
-//
-//nolint:gocyclo
 func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnounceRequest, loadFn LoadFunc) (context.CancelFunc, <-chan error, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -721,8 +721,6 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, req *roxypb.ServerAnnoun
 // returns with no error, then the caller must call the returned CancelFunc
 // when it is no longer interested in receiving Events, and the caller is also
 // responsible for draining both channels in a timely manner.
-//
-//nolint:gocyclo
 func (c *ATCClient) ClientAssign(ctx context.Context, req *roxypb.ClientAssignRequest) (context.CancelFunc, <-chan []*roxypb.Event, <-chan error, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()

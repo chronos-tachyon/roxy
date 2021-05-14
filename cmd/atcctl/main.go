@@ -130,7 +130,9 @@ func main() {
 			Err(err).
 			Msg("--server: failed to Dial")
 	}
-	defer cc.Close()
+	defer func() {
+		_ = cc.Close()
+	}()
 
 	health := grpc_health_v1.NewHealthClient(cc)
 	admin := roxypb.NewAdminClient(cc)

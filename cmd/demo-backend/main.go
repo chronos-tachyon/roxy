@@ -186,7 +186,9 @@ func main() {
 	}
 
 	if etcd != nil {
-		defer etcd.Close()
+		defer func() {
+			_ = etcd.Close()
+		}()
 
 		ctx = roxyresolver.WithEtcdV3Client(ctx, etcd)
 
@@ -207,7 +209,9 @@ func main() {
 	}
 
 	if atcClient != nil {
-		defer atcClient.Close()
+		defer func() {
+			_ = atcClient.Close()
+		}()
 
 		ctx = roxyresolver.WithATCClient(ctx, atcClient)
 
