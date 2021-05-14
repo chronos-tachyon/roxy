@@ -397,6 +397,8 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			default:
 				event = event.Interface("panic", x)
 			}
+		} else if rc.Proto == "prom" {
+			event = rc.Logger.Debug()
 		} else {
 			event = rc.Logger.Info()
 		}
