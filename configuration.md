@@ -2,25 +2,25 @@
 
 # Roxy: The Full Configuration Reference
 
-Roxy's configuration files use [the JSON format](https://www.json.org/).
-The primary config file lives at `/etc/opt/roxy/config.json`, while
-the MIME rules live at `/etc/opt/roxy/mime.json`.
+Roxy's configuration files use [JSON format](https://www.json.org/).  The primary
+config file lives at `/etc/opt/roxy/config.json`, while the MIME rules live at
+`/etc/opt/roxy/mime.json`.
 
 The overall layout of `config.json` looks like this:
 
 ```
 {
-  "global": {...},   # Section "global" (an Object)
-  "hosts": [...],    # Section "hosts" (an Array of String)
-  "targets": {...},  # Section "targets" (an Object)
-  "rules": [...]     # Section "rules" (an Array of Object)
+  "global": {...},     # Section "global" (an Object)
+  "hosts": [...],      # Section "hosts" (an Array of String)
+  "frontends": {...},  # Section "frontends" (an Object)
+  "rules": [...]       # Section "rules" (an Array of Object)
 }
 ```
 
-All sections are _technically_ optional, but nearly every setup will
-want to define [`"hosts"`](#section-hosts),
-[`"targets"`](#section-targets), and [`"rules"`](#section-rules).
-Advanced users will also care about [`"global"`](#section-global).
+All sections are _technically_ optional, but nearly every setup will want to
+define [`"hosts"`](#section-hosts), [`"frontends"`](#section-frontends), and
+[`"rules"`](#section-rules).  Advanced users will also care about
+[`"global"`](#section-global).
 
 ## Full working example
 
@@ -35,7 +35,7 @@ rewrites:
     "subdomain.example.org",
     "other.example.org"
   ],
-  "targets": {
+  "frontends": {
     "fs-example-com": {
       "type": "fs",
       "path": "/srv/www/example.com/htdocs"
@@ -46,7 +46,9 @@ rewrites:
     },
     "http-other-example-org": {
       "type": "http",
-      "target": "dns:///127.0.0.1:8001"
+      "client": {
+        "target": "dns:///127.0.0.1:8001"
+      }
     }
   },
   "rules": [
@@ -54,13 +56,13 @@ rewrites:
       "match": {
         "Host": "(.*\\.)?example\\.com"
       },
-      "target": "fs-example-com"
+      "frontend": "fs-example-com"
     },
     {
       "match": {
         "Host": "subdomain\\.example\\.org"
       },
-      "target": "fs-subdomain-example-org"
+      "frontend": "fs-subdomain-example-org"
     },
     {
       "match": {
@@ -80,10 +82,10 @@ rewrites:
           "replace": "\\1; image-src 'self' https://*.example.com;"
         }
       ],
-      "target": "http-other-example-org"
+      "frontend": "http-other-example-org"
     },
     {
-      "target": "ERROR:404"
+      "frontend": "ERROR:404"
     }
   ]
 }
@@ -232,7 +234,7 @@ You can set the xattrs on a file using the
 
 Subsection `"global.zk"` enables the use of [Apache ZooKeeper](https://zookeeper.apache.org/) to
 store TLS certificates ([subsection `"global.storage"`](#subsection-globalstorage)) and to look
-up backends ([section `"targets"`](#section-targets)).  It has the following structure:
+up servers ([section `"frontends"`](#section-frontends)).  It has the following structure:
 
 ```
 {
@@ -271,8 +273,8 @@ Managing a ZooKeeper cluster is beyond the scope of this documentation.
 ### Subsection `"global.etcd"`
 
 Subsection `"global.etcd"` enables the use of [Etcd](https://etcd.io/) to store TLS certificates
-(see [subsection `"global.storage"`](#subsection-globalstorage)) and to look up backends
-(see [section `"targets"`](#section-targets)).  It has the following structure:
+(see [subsection `"global.storage"`](#subsection-globalstorage)) and to look up servers
+(see [section `"frontends"`](#section-frontends)).  It has the following structure:
 
 ```
 {
@@ -440,24 +442,23 @@ Someone who doesn't like one of your websites could potentially make HTTPS reque
 domains that you don't actually own, which will cause your ACME provider to block your
 webserver from obtaining future TLS certs.
 
-## Section `"targets"`
+## Section `"frontends"`
 
-Section `"targets"` is a map from target names (strings) to target configurations (objects).
-A target name is a unique identifier that will be used by the [`"rules"` section](#section-rules)
-to refer back to the target configuration.
+Section `"frontends"` is a map from frontend names (strings) to frontend configurations (objects).
+A frontend name is a unique identifier that will be used by the [`"rules"` section](#section-rules)
+to refer back to the frontend configuration.
 
-The target configuration has the following structure:
+The frontend configuration has the following structure:
 
 ```
 {
   ...
-  "targets": {
+  "frontends": {
     ...
     "<name>": {
-      "type": "...",    # The target type (a String; one of "fs", "http", or "grpc"; required)
+      "type": "...",    # The frontend type (a String; one of "fs", "http", or "grpc"; required)
       "path": "...",    # Path to the directory to serve (a String)
-      "target": "...",  # Target spec for the host(s) being reverse proxied (a String)
-      "tls": {...}      # TLS client configuration for connecting to the host(s) (an Object)
+      "client": {...}   # HTTP or gRPC client configuration (an Object)
     },
     ...
   },
@@ -465,12 +466,12 @@ The target configuration has the following structure:
 }
 ```
 
-The `"<name>"` key is a unique identifier for this target configuration.  The name must
+The `"<name>"` key is a unique identifier for this frontend configuration.  The name must
 consist of letters, numbers, or the punctuation characters `_`, `.`, `+`, and `-`.  The
 name cannot begin with a number or punctuation, nor can it end with punctuation, nor can
 two punctuation characters appear next to each other.
 
-The `"type"` field selects which target type to use for this target configuration:
+The `"type"` field selects which frontend type to use for this frontend configuration:
 
 * `"fs"` serves static content out of the local filesystem
 * `"http"` provides reverse proxying to one or more hosts via HTTP (with or without TLS)
@@ -485,20 +486,16 @@ options.
 NB: The `"fs"` type does _not_ support disabling of automatically-generated directory
 indexes, and only supports index files with the exact name `index.html`.
 
-The `"target"` field is required for `"type": "http"` and `"type": "grpc"`, and is
-forbidden for other types.  It specifies the "target spec", i.e. how to connect to
-the hosts being reverse proxied.  See [the "Target specs" heading](#target-specs).
+The `"client"` field is required for `"type": "http"` and `"type": "grpc"`, and is
+forbidden for other types.  It specifies the "client config", i.e. how to connect to
+the hosts being reverse proxied.  See [the "Client configs" heading](#client-configs).
 
-The `"tls"` field is optional for `"type": "http"` and `"type": "grpc"`, and is
-forbidden for other types.  The syntax is explored later in this document, under
-[the "TLS client configuration" heading](#tls-client-configuration).
-
-A simple target for static file serving might look like this:
+A simple frontend for static file serving might look like this:
 
 ```json
 {
-  "targets": {
-    "my-target-name": {
+  "frontends": {
+    "my-frontend-name": {
       "type": "fs",
       "path": "/srv/www"
     }
@@ -506,18 +503,20 @@ A simple target for static file serving might look like this:
 }
 ```
 
-A target that uses mutual TLS ("mTLS") to connect to an HTTPS backend,
+A frontend that uses mutual TLS ("mTLS") to connect to an HTTPS backend,
 on the other hand, might look like this:
 
 ```json
 {
-  "targets": {
-    "my-target-name": {
+  "frontends": {
+    "my-frontend-name": {
       "type": "http",
-      "target": "dns:///backend.internal:443",
-      "tls": {
-        "clientCert": "/path/to/client/cert.pem",
-        "clientKey": "/path/to/client/key.pem"
+      "client": {
+        "target": "dns:///backend.internal:443",
+        "tls": {
+          "clientCert": "/path/to/client/cert.pem",
+          "clientKey": "/path/to/client/key.pem"
+        }
       }
     }
   }
@@ -528,8 +527,8 @@ on the other hand, might look like this:
 
 Section `"rules"` is structured as an Array of Objects, where each Object represents a
 single "rule".  A rule is an optional set of matching criteria, an optional list of
-mutations to apply, and an optional target spec.  It does not make sense to specify a
-rule with no mutations _and_ no target, but nothing prevents you from doing this.
+mutations to apply, and an optional frontend name.  It does not make sense to specify a
+rule with no mutations _and_ no frontend, but nothing prevents you from doing this.
 
 ```
 "rules": [
@@ -537,7 +536,7 @@ rule with no mutations _and_ no target, but nothing prevents you from doing this
   {
     "match": {...},      # Headers to match (Object of String)
     "mutations": [...],  # Mutations to apply to matching requests (Array of Object)
-    "target": "..."      # A target name (String)
+    "frontend": "..."    # A frontend name (String)
   },
   ...
 ]
@@ -605,17 +604,19 @@ on the `"search"` regexp.
 
 **NB: As a convenience, the strings `\\0` through `\\9` are synonyms for `{{"{{"}} index . N }}` in the `"replace"` string.**
 
-### Field `"target"`
+### Field `"frontend"`
 
-The `"target"` field consists of the name of a target (see [Section "Targets"](#section-targets)),
-or one of a handful of special strings indicating a built-in target.
+The `"frontend"` field consists of the name of a frontend (see
+[Section "Frontends"](#section-frontends)), or one of a handful of special strings
+indicating a built-in frontend.
 
-If the `"target"` field is present at all, it means that **every request** which matches
-the current rule will stop processing all later rules.
-**No further rules will be processed (first match wins).**  Conversely, if no `"target"`
-field is present, then processing continues to the next matching rule.
+If the `"frontend"` field is present at all, it means that **every request** which
+matches the current rule will stop processing all later rules.
+**No further rules will be processed (first match wins).**
+Conversely, if no `"frontend"` field is present, then processing continues to the
+next matching rule.
 
-Here are the special built-in targets:
+Here are the special built-in frontends:
 
 * `"ERROR:<status>"` causes Roxy to fail the request with the given 4xx or 5xx status code
 * `"REDIR:<status>:<url>"` causes Roxy to send a redirect with the given 3xx status code and URL
@@ -625,16 +626,30 @@ The `<url>` in `REDIR:<status>:<url>` is a template in
 `.` equal to a [`*url.URL`](https://golang.org/pkg/net/url/#URL) representing the current
 request URI, with scheme and host filled in, and with all mutations made up to this point.
 This means that, if you want to rewrite the URL and then redirect the client to the mutated
-URL, `"target": "STATUS:302:{{.}}"` will do nicely.
+URL, `"frontend": "STATUS:302:{{.}}"` will do nicely.
 
 ***
+
+## Client configs
+
+A client config has two parts: a mandatory `"target"` field, containing a String in
+[target spec](#target-specs) format, and an optional `"tls"` field, containing an Object
+in [TLS client configuration](#tls-client-configuration) format.  The structure is as
+follows:
+
+```
+{
+  "target": "...",  # The target spec (a String; required)
+  "tls": {...}      # The TLS client configuration (an Object)
+}
+```
 
 ## Target specs
 
 A target spec is defined similarly to
 [the gRPC Name Syntax](https://github.com/grpc/grpc/blob/master/doc/naming.md):
 a target spec is a URL-like string which contains an optional "scheme", an
-optional "authority", a mandatory "target", and an optional "query".
+optional "authority", a mandatory "endpoint", and an optional "query".
 
 * `"some_string"` is interpreted as `(nil, nil, "some_string", nil)`
 * `"some:string"` is interpreted as `("some", nil, "string", nil)`
@@ -644,7 +659,7 @@ optional "authority", a mandatory "target", and an optional "query".
 * `"some://long/string"` is interpreted as `("some", "long", "string", nil)`
 * `"some://long/string?q=1"` is interpreted as `("some", "long", "string", "q=1")`
 
-The meaning of the authority, target, and query depends on the scheme.
+The meaning of the authority, endpoint, and query depends on the scheme.
 
 The following schemes are supported, both for HTTP and for gRPC:
 
@@ -657,7 +672,7 @@ server, overriding your OS `/etc/resolv.conf` settings.  If this is present
 at all, the port is almost always 53, which is the default.  Very few people
 will want to specify this.
 
-The `<domain:port>` (of the mandatory target string) is the domain name to
+The `<domain:port>` (of the mandatory endpoint string) is the domain name to
 resolve, plus a named or numbered port.  The `domain` specifies the A/AAAA
 records to query.  The `port` is optional, with a default of `80` without
 TLS or `443` with TLS.  All hosts must use the same port.
@@ -682,7 +697,7 @@ server, overriding your OS `/etc/resolv.conf` settings.  If this is present
 at all, the port is almost always 53, which is the default.  Very few people
 will want to specify this.
 
-The `<domain>/<service>` (of the mandatory target string) is used to
+The `<domain>/<service>` (of the mandatory endpoint string) is used to
 construct the domain name to resolve.  Both parts are mandatory.  DNS SRV
 records will be queried at `_<service>._tcp.<domain>`, followed by lookups
 of the A/AAAA records of the resulting domain names.  Each SRV record
@@ -708,7 +723,7 @@ Complete syntax: `zk:///path/to/dir:namedPort?balancer=<algo>`
 
 The authority section must be empty.
 
-The mandatory `path/to/dir` (of the mandatory target string) specifies the path to
+The mandatory `path/to/dir` (of the mandatory endpoint string) specifies the path to
 a ZooKeeper directory containing files, one per host, in either of two
 JSON syntaxes:
 * [Finagle ServerSet](https://github.com/twitter/finagle)
@@ -716,7 +731,7 @@ JSON syntaxes:
 
 If `path/to/dir` does _not_ begin with a `/`, one is automatically added for you.
 
-The optional `portName` (of the mandatory target string) names a port within the Finagle ServerSet data.
+The optional `portName` (of the mandatory endpoint string) names a port within the Finagle ServerSet data.
 
 The optional `balancer=<algo>` query parameter specifies the balancer
 algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
@@ -725,7 +740,7 @@ algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
 
 Complete syntax: `etcd:///prefix/string:namedPort?balancer=<algo>`
 
-The mandatory `prefix/string` (of the mandatory target string) specifies the prefix
+The mandatory `prefix/string` (of the mandatory endpoint string) specifies the prefix
 of an Etcd keyspace containing key-value pairs, one per host, in either of two
 JSON syntaxes:
 * [Finagle ServerSet](https://github.com/twitter/finagle)
@@ -734,10 +749,10 @@ JSON syntaxes:
 If `prefix/string` does _not_ begin with a `/`, it **will not** be added for you.
 Etcd 3.x allows keys whose names don't start with `/`, even though the `/` is
 conventional.  If your `prefix/string` starts with a `/`, use four slashes between
-the scheme and the target, like so: `etcd:////path/to/dir`.
+the scheme and the endpoint, like so: `etcd:////path/to/dir`.
 
-The `prefix/string` _must not_ end with a `/`.  One will be automatically added
-for you.
+The `prefix/string` _may_ end with a `/`.  One will be automatically added for you
+if it does not already do so.
 
 The optional `balancer=<algo>` query parameter specifies the balancer
 algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
@@ -768,24 +783,38 @@ respects the SRV records' priority and weight fields to do weighted, non-uniform
 random selection.  As health checking has not yet been implemented, it will
 never use any priority tier except the one with lowest numeric value.
 
+### Balancer `"weightedRandom"`
+
+This balancer picks a host at random, but for each host it uses the weight
+assigned to the host by the resolver in order to determine the probability of
+selecting that host.  Only certain resolvers implement weights.
+
+### Balancer `"weightedRoundRobin"`
+
+This balancer shuffles the hosts into a randomized K-length list, where each
+host occurs approximately N times such that (N/K) is roughly equal to the
+normalized value of the host's resolver-assigned weight.  Only certain
+resolvers implement weights.
+
 ***
 
 ## TLS client configuration
 
 Some sections, such as [`"global.etcd"`](#subsection-globaletcd) and
-[`"targets"`](#section-targets), optionally take a `"tls"` block to specify (1) that TLS
-should be used, and (2) how to configure it.  It has the following structure:
+[`"frontends"`](#section-frontends), optionally take a `"tls"` block to specify
+(1) that TLS should be used, and (2) how to configure it.  It has the following
+structure:
 
 ```
 ...
 "tls": {
-  "skipVerify": bool,         # Bool, if true then no validation whatsoever is performed on the server's certificate
-  "skipVerifyDNSName": bool,  # Bool, if true then no checking is done that the TLS server's certificate matches ServerName (rootCA and exactCN are still checked)
-  "rootCA": "...",            # String, if not empty then it contains the path to the trusted root CAs as a concatenated PEM file; default is to use the system trusted roots
-  "exactCN": "...",           # String, if not empty then it contains the CommonName which must match the TLS server's certificate subject name
-  "forceDNSName": "...",      # String, if not empty then it contains the DNSName or IPAddress which must match the TLS server's certificate extensions
-  "clientCert": "...",        # String, if not empty then it contains the path to a PEM file containing your client cert
-  "clientKey": "..."          # String, if not empty then it contains the path to a PEM file containing your client private key; default is to check clientCert
+  "skipVerify": bool,            # Whether or not to perform any validation whatsoever (Bool)
+  "skipVerifyServerName": bool,  # Whether or not to check the ServerName against the server's SANs (Bool)
+  "rootCA": "...",               # The path to the trusted root CAs as a concatenated PEM file (String); default is to use the system trusted roots
+  "serverName": "...",           # The SNI / SAN DNSName / SAN IPAddress to verify (String); default is to guess
+  "commonName": "...",           # The Subject CommonName which we will verify (String); this is rare, you should normally use ServerName
+  "clientCert": "...",           # The path to the PEM file containing your client cert (String)
+  "clientKey": "..."             # The path to the PEM file containing your client private key (String); default is the value of clientCert
 },
 ...
 ```
