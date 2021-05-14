@@ -64,7 +64,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: "roxy",
 			Subsystem: "https",
-			Name:      "cache_count",
+			Name:      "cache_files",
 			Help:      "number of files in the in-RAM cache",
 		},
 		func() float64 {
@@ -127,7 +127,7 @@ func NewMetrics(proto string) *Metrics {
 		prometheus.CounterOpts{
 			Namespace: "roxy",
 			Subsystem: proto,
-			Name:      "panic_count",
+			Name:      "panics_total",
 			Help:      "the number of HTTP requests whose handlers paniced",
 		},
 	)
@@ -136,7 +136,7 @@ func NewMetrics(proto string) *Metrics {
 		prometheus.CounterOpts{
 			Namespace: "roxy",
 			Subsystem: proto,
-			Name:      "request_by_method_count",
+			Name:      "requests_total",
 			Help:      "the number of incoming HTTP requests",
 		},
 		[]string{"method"},
@@ -146,7 +146,7 @@ func NewMetrics(proto string) *Metrics {
 		prometheus.CounterOpts{
 			Namespace: "roxy",
 			Subsystem: proto,
-			Name:      "response_by_code_count",
+			Name:      "responses_total",
 			Help:      "the number of outgoing HTTP responses",
 		},
 		[]string{"code"},
@@ -176,7 +176,7 @@ func NewMetrics(proto string) *Metrics {
 		prometheus.HistogramOpts{
 			Namespace: "roxy",
 			Subsystem: proto,
-			Name:      "response_duration_secs",
+			Name:      "response_duration_seconds",
 			Help:      "the duration of the HTTP request lifetime",
 			Buckets:   prometheus.ExponentialBuckets(0.001, 10, 7),
 		},
@@ -187,7 +187,7 @@ func NewMetrics(proto string) *Metrics {
 			prometheus.CounterOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "response_by_code_and_frontend_count",
+				Name:      "frontend_responses_total",
 				Help:      "the number of outgoing HTTP responses",
 			},
 			[]string{"code", "frontend"},
@@ -197,7 +197,7 @@ func NewMetrics(proto string) *Metrics {
 			prometheus.CounterOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "problem_by_type_and_frontend_count",
+				Name:      "frontend_problems_total",
 				Help:      "the number of failed HTTP responses",
 			},
 			[]string{"type", "frontend"},
@@ -207,7 +207,7 @@ func NewMetrics(proto string) *Metrics {
 			prometheus.HistogramOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "response_size_by_frontend_bytes",
+				Name:      "frontend_response_size_bytes",
 				Help:      "the size of the outgoing HTTP response",
 				Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
 			},
@@ -218,7 +218,7 @@ func NewMetrics(proto string) *Metrics {
 			prometheus.HistogramOpts{
 				Namespace: "roxy",
 				Subsystem: proto,
-				Name:      "response_duration_by_frontend_secs",
+				Name:      "frontend_response_duration_seconds",
 				Help:      "the duration of the HTTP request lifetime",
 				Buckets:   prometheus.ExponentialBuckets(0.001, 10, 7),
 			},
@@ -380,10 +380,11 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.Metrics.ResponseDuration.Observe(duration)
 
 		if rc.Metrics.ResponseCountByCodeAndFrontend != nil {
-			rc.Metrics.ResponseCountByCodeAndFrontend.WithLabelValues(code, rc.FrontendKey).Inc()
-			rc.Metrics.ProblemCountByTypeAndFrontend.WithLabelValues(problemType, rc.FrontendKey).Inc()
-			rc.Metrics.ResponseSizeByFrontend.WithLabelValues(rc.FrontendKey).Observe(bytesWritten)
-			rc.Metrics.ResponseDurationByFrontend.WithLabelValues(rc.FrontendKey).Observe(duration)
+			frontendKey := simplifyFrontendKey(rc.FrontendKey)
+			rc.Metrics.ResponseCountByCodeAndFrontend.WithLabelValues(code, frontendKey).Inc()
+			rc.Metrics.ProblemCountByTypeAndFrontend.WithLabelValues(problemType, frontendKey).Inc()
+			rc.Metrics.ResponseSizeByFrontend.WithLabelValues(frontendKey).Observe(bytesWritten)
+			rc.Metrics.ResponseDurationByFrontend.WithLabelValues(frontendKey).Observe(duration)
 		}
 
 		var event *zerolog.Event
