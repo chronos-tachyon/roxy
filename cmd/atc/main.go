@@ -6,8 +6,12 @@ package main
 
 import (
 	"net"
+	"net/http"
+	"time"
 
 	getopt "github.com/pborman/getopt/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -29,8 +33,9 @@ var (
 var (
 	flagConfig      string = defaultConfigFile
 	flagEtcd        string = "http://127.0.0.1:2379"
-	flagListenATC   string = "127.0.0.1:2987"
 	flagListenAdmin string = "/var/opt/roxy/lib/atc.admin.socket;net=unix"
+	flagListenProm  string = "localhost:6801"
+	flagListenATC   string = "localhost:2987"
 )
 
 func init() {
@@ -42,8 +47,9 @@ func init() {
 
 	getopt.FlagLong(&flagConfig, "config", 'c', "path to configuration file")
 	getopt.FlagLong(&flagEtcd, "etcd", 'E', "etcd config")
-	getopt.FlagLong(&flagListenATC, "listen-atc", 'L', "ATC gRPC interface listen config")
-	getopt.FlagLong(&flagListenAdmin, "listen-admin", 'A', "Admin gRPC interface listen config")
+	getopt.FlagLong(&flagListenAdmin, "listen-admin", 'A', "listen config for Admin gRPC interface")
+	getopt.FlagLong(&flagListenProm, "listen-prom", 'P', "listen config for Prometheus monitoring metrics")
+	getopt.FlagLong(&flagListenATC, "listen-atc", 'L', "listen config for ATC gRPC interface")
 }
 
 func main() {
@@ -90,6 +96,15 @@ func main() {
 			Str("input", flagListenAdmin).
 			Err(err).
 			Msg("--listen-admin: failed to process path")
+	}
+
+	var promListenConfig mainutil.ListenConfig
+	err = promListenConfig.Parse(flagListenProm)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagListenProm).
+			Err(err).
+			Msg("--listen-prom: failed to parse")
 	}
 
 	var atcListenConfig mainutil.ListenConfig
@@ -168,6 +183,30 @@ func main() {
 	roxypb.RegisterAdminServer(adminServer, AdminServer{})
 	roxypb.RegisterAirTrafficControlServer(adminServer, &adminATCServer)
 
+	var promHandler http.Handler
+	promHandler = promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{
+			ErrorLog:            mainutil.PromLoggerBridge{},
+			Registry:            prometheus.DefaultRegisterer,
+			MaxRequestsInFlight: 4,
+			EnableOpenMetrics:   true,
+		})
+	promServer := &http.Server{
+		Handler:           promHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+		BaseContext:       mainutil.MakeBaseContextFunc(),
+		ConnContext:       mainutil.MakeConnContextFunc("prom"),
+	}
+
+	atcServer := grpc.NewServer()
+	grpc_health_v1.RegisterHealthServer(atcServer, &gHealthServer)
+	roxypb.RegisterAirTrafficControlServer(atcServer, &mainATCServer)
+
 	var adminListener net.Listener
 	adminListener, err = adminListenConfig.Listen(ctx)
 	if err != nil {
@@ -175,14 +214,18 @@ func main() {
 			Str("server", "admin").
 			Interface("config", adminListenConfig).
 			Err(err).
-			Msg("failed to Listen")
+			Msg("--listen-admin: failed to Listen")
 	}
 
-	gMultiServer.AddGRPCServer("admin", adminServer, adminListener)
-
-	atcServer := grpc.NewServer()
-	grpc_health_v1.RegisterHealthServer(atcServer, &gHealthServer)
-	roxypb.RegisterAirTrafficControlServer(atcServer, &mainATCServer)
+	var promListener net.Listener
+	promListener, err = promListenConfig.Listen(ctx)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("server", "prom").
+			Interface("config", promListenConfig).
+			Err(err).
+			Msg("--listen-prom: failed to Listen")
+	}
 
 	var atcListener net.Listener
 	atcListener, err = atcListenConfig.Listen(ctx)
@@ -191,9 +234,11 @@ func main() {
 			Str("server", "atc").
 			Interface("config", atcListenConfig).
 			Err(err).
-			Msg("failed to Listen")
+			Msg("--listen-atc: failed to Listen")
 	}
 
+	gMultiServer.AddGRPCServer("admin", adminServer, adminListener)
+	gMultiServer.AddHTTPServer("prom", promServer, promListener)
 	gMultiServer.AddGRPCServer("atc", atcServer, atcListener)
 
 	gMultiServer.OnReload(mainutil.RotateLogs)

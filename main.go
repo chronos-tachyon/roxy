@@ -6,13 +6,10 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -38,12 +35,10 @@ var (
 )
 
 var (
-	flagConfig     string = defaultConfigFile
-	flagPromNet    string = "tcp"
-	flagPromAddr   string = "localhost:6800"
-	flagAdminNet   string = "unix"
-	flagAdminAddr  string = "/var/opt/roxy/lib/admin.socket"
-	flagUniqueFile string = "/var/opt/roxy/lib/state/roxy.id"
+	flagConfig      string = defaultConfigFile
+	flagListenAdmin string = "/var/opt/roxy/lib/admin.socket;net=unix"
+	flagListenProm  string = "localhost:6800"
+	flagUniqueFile  string = "/var/opt/roxy/lib/state/roxy.id"
 )
 
 func init() {
@@ -54,10 +49,8 @@ func init() {
 	mainutil.RegisterLoggingFlags()
 
 	getopt.FlagLong(&flagConfig, "config", 'c', "path to configuration file")
-	getopt.FlagLong(&flagPromNet, "prometheus-net", 0, "network for Prometheus monitoring metrics")
-	getopt.FlagLong(&flagPromAddr, "prometheus-addr", 0, "address for Prometheus monitoring metrics")
-	getopt.FlagLong(&flagAdminNet, "admin-net", 0, "network for Admin gRPC interface")
-	getopt.FlagLong(&flagAdminAddr, "admin-addr", 0, "address for Admin gRPC interface")
+	getopt.FlagLong(&flagListenAdmin, "listen-admin", 'A', "listen config for Admin gRPC interface")
+	getopt.FlagLong(&flagListenProm, "listen-prom", 'P', "listen config for Prometheus monitoring metrics")
 	getopt.FlagLong(&flagUniqueFile, "unique-file", 'U', "file containing a unique ID for the ATC resolver")
 }
 
@@ -84,27 +77,29 @@ func main() {
 
 	abs, err := roxyutil.ExpandPath(flagConfig)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
-		os.Exit(1)
+		log.Logger.Fatal().
+			Str("input", flagConfig).
+			Err(err).
+			Msg("--config: failed to process path")
 	}
 	flagConfig = abs
 
-	if strings.HasPrefix(flagPromNet, "unix") && flagPromAddr != "" && flagPromAddr[0] != '@' {
-		abs, err = roxyutil.ExpandPath(flagPromAddr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
-			os.Exit(1)
-		}
-		flagPromAddr = abs
+	var adminListenConfig mainutil.ListenConfig
+	err = adminListenConfig.Parse(flagListenAdmin)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagListenAdmin).
+			Err(err).
+			Msg("--listen-admin: failed to parse")
 	}
 
-	if strings.HasPrefix(flagAdminNet, "unix") && flagAdminAddr != "" && flagAdminAddr[0] != '@' {
-		abs, err = roxyutil.ExpandPath(flagAdminAddr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
-			os.Exit(1)
-		}
-		flagAdminAddr = abs
+	var promListenConfig mainutil.ListenConfig
+	err = promListenConfig.Parse(flagListenProm)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagListenProm).
+			Err(err).
+			Msg("--listen-prom: failed to parse")
 	}
 
 	err = gRef.Load(ctx, flagConfig)
@@ -147,8 +142,8 @@ func main() {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
-		BaseContext:       MakeBaseContextFunc(),
-		ConnContext:       MakeConnContextFunc("prom"),
+		BaseContext:       mainutil.MakeBaseContextFunc(),
+		ConnContext:       mainutil.MakeConnContextFunc("prom"),
 	}
 
 	var insecureHandler http.Handler
@@ -161,8 +156,8 @@ func main() {
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
-		BaseContext:       MakeBaseContextFunc(),
-		ConnContext:       MakeConnContextFunc("http"),
+		BaseContext:       mainutil.MakeBaseContextFunc(),
+		ConnContext:       mainutil.MakeConnContextFunc("http"),
 	}
 
 	var secureHandler http.Handler
@@ -173,24 +168,24 @@ func main() {
 		ReadHeaderTimeout: 60 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
-		BaseContext:       MakeBaseContextFunc(),
-		ConnContext:       MakeConnContextFunc("https"),
+		BaseContext:       mainutil.MakeBaseContextFunc(),
+		ConnContext:       mainutil.MakeConnContextFunc("https"),
 	}
 
-	adminListener, err := net.Listen(flagAdminNet, flagAdminAddr)
+	adminListener, err := adminListenConfig.Listen(ctx)
 	if err != nil {
 		log.Logger.Fatal().
 			Str("server", "admin").
 			Err(err).
-			Msg("failed to Listen")
+			Msg("--listen-admin: failed to Listen")
 	}
 
-	promListener, err := net.Listen(flagPromNet, flagPromAddr)
+	promListener, err := promListenConfig.Listen(ctx)
 	if err != nil {
 		log.Logger.Fatal().
 			Str("server", "prom").
 			Err(err).
-			Msg("failed to Listen")
+			Msg("--listen-prom: failed to Listen")
 	}
 
 	insecureListener, err := net.Listen("tcp", ":80")
@@ -244,27 +239,6 @@ func main() {
 
 	log.Logger.Info().
 		Msg("Exit")
-}
-
-func MakeBaseContextFunc() func(net.Listener) context.Context {
-	return func(l net.Listener) context.Context {
-		return mainutil.RootContext()
-	}
-}
-
-func MakeConnContextFunc(name string) func(context.Context, net.Conn) context.Context {
-	return func(ctx context.Context, c net.Conn) context.Context {
-		cc := &ConnContext{
-			Logger:     log.Logger.With().Str("server", name).Logger(),
-			Proto:      name,
-			LocalAddr:  c.LocalAddr(),
-			RemoteAddr: c.RemoteAddr(),
-		}
-		ctx = WithConnContext(ctx, cc)
-		ctx = cc.Logger.WithContext(ctx)
-		cc.Context = ctx
-		return ctx
-	}
 }
 
 type SecureListener struct {

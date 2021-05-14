@@ -200,7 +200,7 @@ func NewMetrics(proto string) *Metrics {
 				Name:      "frontend_problems_total",
 				Help:      "the number of failed HTTP responses",
 			},
-			[]string{"type", "frontend"},
+			[]string{"problem", "frontend"},
 		)
 
 		m.ResponseSizeByFrontend = prometheus.NewHistogramVec(
@@ -303,7 +303,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("x-xss-protection", "1; mode=block")
 
 	ctx := r.Context()
-	cc := GetConnContext(ctx)
+	cc := mainutil.GetConnContext(ctx)
 	impl := h.Ref.Get()
 
 	c := cc.Logger.With()

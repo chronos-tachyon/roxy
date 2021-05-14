@@ -1,4 +1,6 @@
 v0.4.4
+  * Rename Roxy Prometheus metrics to meet naming best practices
+  * Add stub Prometheus metrics server to ATC
   * Minor API tweaks for membership
 
 v0.4.3
