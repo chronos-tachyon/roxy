@@ -663,6 +663,35 @@ The meaning of the authority, endpoint, and query depends on the scheme.
 
 The following schemes are supported, both for HTTP and for gRPC:
 
+### Scheme `"unix"`
+
+Complete syntax: `"unix:/path/to/socket?balancer=<algo>&serverName=<name>"`
+
+The `/path/to/socket` (of the mandatory endpoint string) is a filesystem
+path pointing to an `AF_UNIX` socket.
+
+The optional `balancer=<algo>` query parameter specifies the balancer
+algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
+
+The optional `serverName=<name>` query parameter specifies the expected
+DNSName SAN on the TLS certificate, overriding the default of `"localhost"`.
+This only has an effect when TLS is in use.
+
+### Scheme `"ip"`
+
+Complete syntax: `"ip:<ip:port>[,<ip2:port>...]?balancer=<algo>&serverName=<name>"`
+
+The `<ip:port>[,<ip2:port>...]` (of the mandatory endpoint string) is a
+comma-separated list of IP addresses and port numbers.  The ports are
+optional, with a default of `80` without TLS or `443` with TLS.
+
+The optional `balancer=<algo>` query parameter specifies the balancer
+algorithm to use. See [the "Balancer algorithms" heading](#balancer-algorithms).
+
+The optional `serverName=<name>` query parameter specifies the expected
+DNSName SAN on the TLS certificate, overriding the default of `<ip>`.
+This only has an effect when TLS is in use.
+
 ### Scheme `"dns"`
 
 Complete syntax: `"dns://<server:port>/<domain:port>?balancer=<algo>&pollInterval=<dur>&serverName=<name>"`
@@ -685,7 +714,7 @@ cache the DNS query results in memory before making another query.  The
 default is a fairly aggressive `"1m"` (one minute).
 
 The optional `serverName=<name>` query parameter specifies the expected
-DNSName SAN on the TLS certificate, overriding the default of `domain`.
+DNSName SAN on the TLS certificate, overriding the default of `<domain>`.
 This only has an effect when TLS is in use.
 
 ### Scheme `"srv"`
