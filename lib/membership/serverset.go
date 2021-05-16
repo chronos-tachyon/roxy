@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
@@ -100,11 +101,12 @@ func (ep *ServerSetEndpoint) Addr() *net.TCPAddr {
 // type ServerSetStatus {{{
 
 // ServerSetStatus represents the status of the server being advertized.
+type ServerSetStatus uint8
+
+// ServerSetStatus constants:
 //
 //	StatusAlive    healthy
 //	anything else  not healthy
-type ServerSetStatus uint8
-
 const (
 	StatusDead ServerSetStatus = iota
 	StatusStarting
@@ -171,7 +173,7 @@ func (status *ServerSetStatus) UnmarshalJSON(raw []byte) error {
 		panic(errors.New("raw is nil"))
 	}
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

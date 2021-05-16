@@ -14,6 +14,7 @@ import (
 	"github.com/chronos-tachyon/roxy/roxypb"
 )
 
+// NewATC creates a new Roxy Air Traffic Control announcer.
 func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPort string, loadFn atcclient.LoadFunc) (Interface, error) {
 	if client == nil {
 		panic(errors.New("*atcclient.ATCClient is nil"))

@@ -9,6 +9,7 @@ import (
 
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
@@ -155,7 +156,7 @@ type atcBuilder struct {
 }
 
 func (b atcBuilder) Scheme() string {
-	return atcScheme
+	return constants.SchemeATC
 }
 
 func (b atcBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {

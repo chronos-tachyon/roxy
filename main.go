@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -75,34 +76,16 @@ func main() {
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
-	abs, err := roxyutil.ExpandPath(flagConfig)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagConfig).
-			Err(err).
-			Msg("--config: failed to process path")
-	}
-	flagConfig = abs
-
 	var adminListenConfig mainutil.ListenConfig
-	err = adminListenConfig.Parse(flagListenAdmin)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagListenAdmin).
-			Err(err).
-			Msg("--listen-admin: failed to parse")
-	}
-
+	var adminServerOpts []grpc.ServerOption
 	var promListenConfig mainutil.ListenConfig
-	err = promListenConfig.Parse(flagListenProm)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagListenProm).
-			Err(err).
-			Msg("--listen-prom: failed to parse")
-	}
+	processFlags(
+		&adminListenConfig,
+		&adminServerOpts,
+		&promListenConfig,
+	)
 
-	err = gRef.Load(ctx, flagConfig)
+	err := gRef.Load(ctx, flagConfig)
 	if err != nil {
 		log.Logger.Fatal().
 			Str("path", flagConfig).
@@ -121,7 +104,7 @@ func main() {
 		return nil
 	})
 
-	adminServer := grpc.NewServer()
+	adminServer := grpc.NewServer(adminServerOpts...)
 	grpc_health_v1.RegisterHealthServer(adminServer, &gHealthServer)
 	roxypb.RegisterAdminServer(adminServer, AdminServer{})
 
@@ -143,7 +126,7 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 		BaseContext:       mainutil.MakeBaseContextFunc(),
-		ConnContext:       mainutil.MakeConnContextFunc("prom"),
+		ConnContext:       mainutil.MakeConnContextFunc(constants.SubsystemProm),
 	}
 
 	var insecureHandler http.Handler
@@ -157,7 +140,7 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 		BaseContext:       mainutil.MakeBaseContextFunc(),
-		ConnContext:       mainutil.MakeConnContextFunc("http"),
+		ConnContext:       mainutil.MakeConnContextFunc(constants.SubsystemHTTP),
 	}
 
 	var secureHandler http.Handler
@@ -169,13 +152,13 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 		BaseContext:       mainutil.MakeBaseContextFunc(),
-		ConnContext:       mainutil.MakeConnContextFunc("https"),
+		ConnContext:       mainutil.MakeConnContextFunc(constants.SubsystemHTTPS),
 	}
 
-	adminListener, err := adminListenConfig.Listen(ctx)
+	adminListener, err := adminListenConfig.ListenNoTLS(ctx)
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "admin").
+			Str("subsystem", constants.SubsystemAdmin).
 			Err(err).
 			Msg("--listen-admin: failed to Listen")
 	}
@@ -183,33 +166,33 @@ func main() {
 	promListener, err := promListenConfig.Listen(ctx)
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "prom").
+			Str("subsystem", constants.SubsystemProm).
 			Err(err).
 			Msg("--listen-prom: failed to Listen")
 	}
 
-	insecureListener, err := net.Listen("tcp", ":80")
+	insecureListener, err := net.Listen(constants.NetTCP, ":80")
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "http").
+			Str("subsystem", constants.SubsystemHTTP).
 			Err(err).
 			Msg("failed to Listen")
 	}
 
-	secureListenerRaw, err := net.Listen("tcp", ":443")
+	secureListenerRaw, err := net.Listen(constants.NetTCP, ":443")
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "https").
+			Str("subsystem", constants.SubsystemHTTPS).
 			Err(err).
 			Msg("failed to Listen")
 	}
 
 	secureListener := &SecureListener{Ref: &gRef, Raw: secureListenerRaw}
 
-	gMultiServer.AddGRPCServer("admin", adminServer, adminListener)
-	gMultiServer.AddHTTPServer("prom", promServer, promListener)
-	gMultiServer.AddHTTPServer("http", insecureServer, insecureListener)
-	gMultiServer.AddHTTPServer("https", secureServer, secureListener)
+	gMultiServer.AddGRPCServer(constants.SubsystemAdmin, adminServer, adminListener)
+	gMultiServer.AddHTTPServer(constants.SubsystemProm, promServer, promListener)
+	gMultiServer.AddHTTPServer(constants.SubsystemHTTP, insecureServer, insecureListener)
+	gMultiServer.AddHTTPServer(constants.SubsystemHTTPS, secureServer, secureListener)
 
 	gMultiServer.OnReload(mainutil.RotateLogs)
 
@@ -239,6 +222,58 @@ func main() {
 
 	log.Logger.Info().
 		Msg("Exit")
+}
+
+func processFlags(
+	adminListenConfig *mainutil.ListenConfig,
+	adminServerOpts *[]grpc.ServerOption,
+	promListenConfig *mainutil.ListenConfig,
+) {
+	abs, err := roxyutil.ExpandPath(flagConfig)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagConfig).
+			Err(err).
+			Msg("--config: failed to process path")
+	}
+	flagConfig = abs
+
+	err = adminListenConfig.Parse(flagListenAdmin)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemAdmin).
+			Str("input", flagListenAdmin).
+			Err(err).
+			Msg("--listen-admin: failed to parse")
+	}
+
+	*adminServerOpts, err = adminListenConfig.TLS.MakeGRPCServerOptions()
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemAdmin).
+			Interface("config", adminListenConfig.TLS).
+			Err(err).
+			Msg("--listen-admin: failed to MakeGRPCServerOptions")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", constants.SubsystemAdmin).
+		Interface("config", adminListenConfig).
+		Msg("ready")
+
+	err = promListenConfig.Parse(flagListenProm)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemProm).
+			Str("input", flagListenProm).
+			Err(err).
+			Msg("--listen-prom: failed to parse")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", constants.SubsystemProm).
+		Interface("config", promListenConfig).
+		Msg("ready")
 }
 
 type SecureListener struct {

@@ -1,9 +1,12 @@
 package roxyresolver
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/chronos-tachyon/roxy/internal/constants"
 )
 
 // type EventType {{{
@@ -60,7 +63,7 @@ func (t EventType) MarshalJSON() ([]byte, error) {
 }
 
 func (t *EventType) UnmarshalJSON(raw []byte) error {
-	if string(raw) == nullString {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 
@@ -161,7 +164,7 @@ func (t BalancerType) MarshalJSON() ([]byte, error) {
 }
 
 func (t *BalancerType) UnmarshalJSON(raw []byte) error {
-	if string(raw) == nullString {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

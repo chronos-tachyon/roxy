@@ -11,6 +11,7 @@ import (
 	v3 "go.etcd.io/etcd/client/v3"
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -184,7 +185,7 @@ type etcdBuilder struct {
 }
 
 func (b etcdBuilder) Scheme() string {
-	return etcdScheme
+	return constants.SchemeEtcd
 }
 
 func (b etcdBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-)
 
-var nullBytes = []byte("null")
+	"github.com/chronos-tachyon/roxy/internal/constants"
+)
 
 // type State {{{
 
@@ -14,9 +14,18 @@ var nullBytes = []byte("null")
 type State uint8
 
 const (
+	// StateReady marks that Announce() or Close() may be called.
 	StateReady State = iota
+
+	// StateRunning marks that Withdraw() may be called, and that the
+	// announcement may be active.
 	StateRunning
+
+	// StateDead marks that Withdraw() may be called, and that the
+	// announcement has ended due to a context cancellation or the like.
 	StateDead
+
+	// StateClosed marks that no more methods may be called.
 	StateClosed
 )
 
@@ -68,11 +77,17 @@ var _ fmt.Stringer = State(0)
 
 // type Format {{{
 
+// Format selects which server advertisement serialization format to use.
 type Format uint8
 
 const (
+	// RoxyFormat selects Roxy's native JSON format.
 	RoxyFormat Format = iota
+
+	// FinagleFormat selects the Finagle ServerSet JSON format.
 	FinagleFormat
+
+	// GRPCFormat selects the etcd.io gRPC JSON format.
 	GRPCFormat
 )
 
@@ -114,7 +129,7 @@ func (format Format) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON fulfills json.Unmarshaler.
 func (format *Format) UnmarshalJSON(raw []byte) error {
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 	for index, value := range formatJSON {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/chronos-tachyon/roxy/lib/certnames"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
@@ -27,8 +28,8 @@ type ServiceData struct {
 	ExpectedNumClientsPerShard uint32
 	ExpectedNumServersPerShard uint32
 	MaxLoadPerServer           float32
-	clientCNSet                map[string]struct{}
-	serverCNSet                map[string]struct{}
+	AllowedClientNames         certnames.CertNames
+	AllowedServerNames         certnames.CertNames
 }
 
 func NewServiceMap(file MainFile) (*ServiceMap, error) {
@@ -62,8 +63,8 @@ func NewServiceMap(file MainFile) (*ServiceMap, error) {
 			ExpectedNumClientsPerShard: config.ExpectedNumClientsPerShard,
 			ExpectedNumServersPerShard: config.ExpectedNumServersPerShard,
 			MaxLoadPerServer:           config.MaxLoadPerServer,
-			clientCNSet:                makeCNSet(config.AllowedClientCommonNames),
-			serverCNSet:                makeCNSet(config.AllowedServerCommonNames),
+			AllowedClientNames:         config.AllowedClientNames,
+			AllowedServerNames:         config.AllowedServerNames,
 		}
 
 		if !data.IsSharded {
@@ -130,46 +131,6 @@ func (data *ServiceData) ExpectedBalancerCost() float64 {
 	return total
 }
 
-func (data *ServiceData) AllowedClientCommonNames() []string {
-	if data.clientCNSet == nil {
-		return nil
-	}
-	out := make([]string, 0, len(data.clientCNSet))
-	for key := range data.clientCNSet {
-		out = append(out, key)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func (data *ServiceData) AllowedServerCommonNames() []string {
-	if data.serverCNSet == nil {
-		return nil
-	}
-	out := make([]string, 0, len(data.serverCNSet))
-	for key := range data.serverCNSet {
-		out = append(out, key)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func (data *ServiceData) IsAllowedClientCommonName(cn string) bool {
-	if data.clientCNSet == nil {
-		return true
-	}
-	_, found := data.clientCNSet[cn]
-	return found
-}
-
-func (data *ServiceData) IsAllowedServerCommonName(cn string) bool {
-	if data.serverCNSet == nil {
-		return true
-	}
-	_, found := data.serverCNSet[cn]
-	return found
-}
-
 func (list ServiceNameList) Len() int {
 	return len(list)
 }
@@ -188,14 +149,3 @@ func (list ServiceNameList) Sort() {
 }
 
 var _ sort.Interface = ServiceNameList(nil)
-
-func makeCNSet(list []string) map[string]struct{} {
-	if list == nil {
-		return nil
-	}
-	set := make(map[string]struct{}, len(list))
-	for _, item := range list {
-		set[item] = struct{}{}
-	}
-	return set
-}

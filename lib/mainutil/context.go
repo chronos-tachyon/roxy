@@ -37,7 +37,7 @@ func CancelRootContext() {
 type ConnContext struct {
 	Context    context.Context
 	Logger     zerolog.Logger
-	Proto      string
+	Subsystem  string
 	LocalAddr  net.Addr
 	RemoteAddr net.Addr
 }
@@ -65,8 +65,8 @@ func MakeBaseContextFunc() func(net.Listener) context.Context {
 func MakeConnContextFunc(name string) func(context.Context, net.Conn) context.Context {
 	return func(ctx context.Context, c net.Conn) context.Context {
 		cc := &ConnContext{
-			Logger:     log.Logger.With().Str("server", name).Logger(),
-			Proto:      name,
+			Logger:     log.Logger.With().Str("subsystem", name).Logger(),
+			Subsystem:  name,
 			LocalAddr:  c.LocalAddr(),
 			RemoteAddr: c.RemoteAddr(),
 		}

@@ -7,6 +7,7 @@ import (
 
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -16,9 +17,9 @@ func NewIPBuilder(rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder
 }
 
 func NewIPResolver(opts Options) (Resolver, error) {
-	defaultPort := httpPort
+	defaultPort := constants.PortHTTP
 	if opts.IsTLS {
-		defaultPort = httpsPort
+		defaultPort = constants.PortHTTPS
 	}
 
 	tcpAddrs, balancer, serverName, err := ParseIPTarget(opts.Target, defaultPort)
@@ -81,7 +82,7 @@ type ipBuilder struct {
 }
 
 func (b ipBuilder) Scheme() string {
-	return ipScheme
+	return constants.SchemeIP
 }
 
 func (b ipBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
@@ -90,7 +91,7 @@ func (b ipBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcres
 		return nil, err
 	}
 
-	tcpAddrs, _, serverName, err := ParseIPTarget(rt, httpsPort)
+	tcpAddrs, _, serverName, err := ParseIPTarget(rt, constants.PortHTTPS)
 	if err != nil {
 		return nil, err
 	}

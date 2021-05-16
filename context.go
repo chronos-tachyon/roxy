@@ -17,7 +17,7 @@ import (
 type RequestContext struct {
 	Context        context.Context
 	Logger         zerolog.Logger
-	Proto          string
+	Subsystem      string
 	LocalAddr      net.Addr
 	RemoteAddr     net.Addr
 	XID            xid.ID

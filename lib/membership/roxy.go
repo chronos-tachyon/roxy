@@ -9,9 +9,11 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
+// Interface is the minimum interface supported by all advertisement formats.
 type Interface interface {
 	IsAlive() bool
 	NamedPorts() []string
@@ -21,6 +23,9 @@ type Interface interface {
 
 // type Roxy {{{
 
+// Roxy represents a service advertisement in Roxy's native format.
+//
+// See RoxyJSON for details about the JSON serialization format.
 type Roxy struct {
 	Ready           bool
 	IP              net.IP
@@ -85,7 +90,7 @@ func (r *Roxy) NamedAddr(namedPort string) *net.TCPAddr {
 // MarshalJSON fulfills json.Marshaler.
 func (r *Roxy) MarshalJSON() ([]byte, error) {
 	if r == nil {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(r.AsRoxyJSON())
 }
@@ -96,7 +101,7 @@ func (r *Roxy) UnmarshalJSON(raw []byte) error {
 		panic(errors.New("raw is nil"))
 	}
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 
@@ -143,6 +148,7 @@ func (r *Roxy) UnmarshalJSON(raw []byte) error {
 	return err0
 }
 
+// AsRoxyJSON returns the RoxyJSON representation of this server advertisement.
 func (r *Roxy) AsRoxyJSON() *RoxyJSON {
 	if r == nil {
 		return nil
@@ -169,6 +175,7 @@ func (r *Roxy) AsRoxyJSON() *RoxyJSON {
 	return out
 }
 
+// AsServerSet returns the ServerSet representation of this server advertisement.
 func (r *Roxy) AsServerSet() *ServerSet {
 	if r == nil {
 		return nil
@@ -207,6 +214,7 @@ func (r *Roxy) AsServerSet() *ServerSet {
 	return out
 }
 
+// AsGRPC returns the GRPC representation of this server advertisement.
 func (r *Roxy) AsGRPC(namedPort string) *GRPC {
 	if r == nil {
 		return nil
@@ -235,6 +243,7 @@ func (r *Roxy) AsGRPC(namedPort string) *GRPC {
 	return out
 }
 
+// FromRoxyJSON initializes this server advertisement to be a copy of a RoxyJSON.
 func (r *Roxy) FromRoxyJSON(x *RoxyJSON) error {
 	if r == nil {
 		panic(errors.New("*membership.Roxy is nil"))
@@ -276,6 +285,7 @@ func (r *Roxy) FromRoxyJSON(x *RoxyJSON) error {
 	return nil
 }
 
+// FromServerSet initializes this server advertisement to be a copy of a ServerSet.
 func (r *Roxy) FromServerSet(ss *ServerSet) error {
 	if r == nil {
 		panic(errors.New("*membership.Roxy is nil"))
@@ -340,6 +350,7 @@ func (r *Roxy) FromServerSet(ss *ServerSet) error {
 	return nil
 }
 
+// FromGRPC initializes this server advertisement to be a copy of a GRPC.
 func (r *Roxy) FromGRPC(grpc *GRPC) error {
 	if r == nil {
 		panic(errors.New("*membership.Roxy is nil"))
@@ -407,6 +418,10 @@ var _ Interface = (*Roxy)(nil)
 
 // type RoxyJSON {{{
 
+// RoxyJSON is a variant of Roxy, ready for JSON serialization.
+//
+// Compared to Roxy, RoxyJSON serializes IP addresses in the usual string
+// format, rather than representing them as net.IP byte arrays.
 type RoxyJSON struct {
 	Ready           bool              `json:"ready"`
 	IP              string            `json:"ip,omitempty"`

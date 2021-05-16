@@ -14,6 +14,7 @@ import (
 	"github.com/go-zookeeper/zk"
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -344,7 +345,7 @@ type zkBuilder struct {
 }
 
 func (b zkBuilder) Scheme() string {
-	return zkScheme
+	return constants.SchemeZK
 }
 
 func (b zkBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {

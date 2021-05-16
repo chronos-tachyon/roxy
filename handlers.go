@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/chronos-tachyon/roxy/internal/balancedclient"
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/enums"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
@@ -41,13 +42,6 @@ import (
 )
 
 const (
-	schemeHTTP  = "http"
-	schemeHTTPS = "https"
-
-	subsysProm  = "prom"
-	subsysHTTP  = "http"
-	subsysHTTPS = "https"
-
 	problemNone = "none"
 	problem4xx  = "4xx"
 	problem5xx  = "5xx"
@@ -77,7 +71,7 @@ var (
 	promFileCacheCount = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: "roxy",
-			Subsystem: subsysHTTPS,
+			Subsystem: constants.SubsystemHTTPS,
 			Name:      "cache_files",
 			Help:      "number of files in the in-RAM cache",
 		},
@@ -92,7 +86,7 @@ var (
 	promFileCacheBytes = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: "roxy",
-			Subsystem: subsysHTTPS,
+			Subsystem: constants.SubsystemHTTPS,
 			Name:      "cache_bytes",
 			Help:      "number of bytes in the in-RAM cache",
 		},
@@ -106,9 +100,9 @@ var (
 )
 
 var gMetrics = map[string]*Metrics{
-	subsysProm:  NewMetrics(subsysProm),
-	subsysHTTP:  NewMetrics(subsysHTTP),
-	subsysHTTPS: NewMetrics(subsysHTTPS),
+	constants.SubsystemProm:  NewMetrics(constants.SubsystemProm),
+	constants.SubsystemHTTP:  NewMetrics(constants.SubsystemHTTP),
+	constants.SubsystemHTTPS: NewMetrics(constants.SubsystemHTTPS),
 }
 
 func init() {
@@ -134,13 +128,13 @@ type Metrics struct {
 	ResponseDurationByFrontend     *prometheus.HistogramVec
 }
 
-func NewMetrics(proto string) *Metrics {
+func NewMetrics(subsystem string) *Metrics {
 	m := new(Metrics)
 
 	m.PanicCount = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "roxy",
-			Subsystem: proto,
+			Subsystem: subsystem,
 			Name:      "panics_total",
 			Help:      "the number of HTTP requests whose handlers paniced",
 		},
@@ -149,7 +143,7 @@ func NewMetrics(proto string) *Metrics {
 	m.RequestCountByMethod = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "roxy",
-			Subsystem: proto,
+			Subsystem: subsystem,
 			Name:      "requests_total",
 			Help:      "the number of incoming HTTP requests",
 		},
@@ -159,7 +153,7 @@ func NewMetrics(proto string) *Metrics {
 	m.ResponseCountByCode = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "roxy",
-			Subsystem: proto,
+			Subsystem: subsystem,
 			Name:      "responses_total",
 			Help:      "the number of outgoing HTTP responses",
 		},
@@ -169,7 +163,7 @@ func NewMetrics(proto string) *Metrics {
 	m.RequestSize = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "roxy",
-			Subsystem: proto,
+			Subsystem: subsystem,
 			Name:      "request_size_bytes",
 			Help:      "the size of the incoming HTTP request",
 			Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
@@ -179,7 +173,7 @@ func NewMetrics(proto string) *Metrics {
 	m.ResponseSize = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "roxy",
-			Subsystem: proto,
+			Subsystem: subsystem,
 			Name:      "response_size_bytes",
 			Help:      "the size of the outgoing HTTP response",
 			Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
@@ -189,18 +183,18 @@ func NewMetrics(proto string) *Metrics {
 	m.ResponseDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "roxy",
-			Subsystem: proto,
+			Subsystem: subsystem,
 			Name:      "response_duration_seconds",
 			Help:      "the duration of the HTTP request lifetime",
 			Buckets:   prometheus.ExponentialBuckets(0.001, 10, 7),
 		},
 	)
 
-	if proto == subsysHTTPS {
+	if subsystem == constants.SubsystemHTTPS {
 		m.ResponseCountByCodeAndFrontend = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "roxy",
-				Subsystem: proto,
+				Subsystem: subsystem,
 				Name:      "frontend_responses_total",
 				Help:      "the number of outgoing HTTP responses",
 			},
@@ -210,7 +204,7 @@ func NewMetrics(proto string) *Metrics {
 		m.ProblemCountByTypeAndFrontend = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "roxy",
-				Subsystem: proto,
+				Subsystem: subsystem,
 				Name:      "frontend_problems_total",
 				Help:      "the number of failed HTTP responses",
 			},
@@ -220,7 +214,7 @@ func NewMetrics(proto string) *Metrics {
 		m.ResponseSizeByFrontend = prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "roxy",
-				Subsystem: proto,
+				Subsystem: subsystem,
 				Name:      "frontend_response_size_bytes",
 				Help:      "the size of the outgoing HTTP response",
 				Buckets:   prometheus.ExponentialBuckets(1024, 4, 10),
@@ -231,7 +225,7 @@ func NewMetrics(proto string) *Metrics {
 		m.ResponseDurationByFrontend = prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "roxy",
-				Subsystem: proto,
+				Subsystem: subsystem,
 				Name:      "frontend_response_duration_seconds",
 				Help:      "the duration of the HTTP request lifetime",
 				Buckets:   prometheus.ExponentialBuckets(0.001, 10, 7),
@@ -335,12 +329,12 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc := &RequestContext{
 		Logger:     c.Logger(),
-		Proto:      cc.Proto,
+		Subsystem:  cc.Subsystem,
 		LocalAddr:  cc.LocalAddr,
 		RemoteAddr: cc.RemoteAddr,
 		XID:        id,
 		Impl:       impl,
-		Metrics:    gMetrics[cc.Proto],
+		Metrics:    gMetrics[cc.Subsystem],
 		Body:       WrapReader(r.Body),
 		Writer:     WrapWriter(impl, w, r),
 	}
@@ -412,7 +406,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			default:
 				event = event.Interface("panic", x)
 			}
-		} else if rc.Proto == subsysProm {
+		} else if rc.Subsystem == constants.SubsystemProm {
 			event = rc.Logger.Debug()
 		} else {
 			event = rc.Logger.Info()
@@ -517,7 +511,7 @@ func (SecureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc.FrontendKey = "!EOF"
 	rc.Writer.WriteError(http.StatusNotFound)
-	rc.Request.URL.Scheme = schemeHTTPS
+	rc.Request.URL.Scheme = constants.SchemeHTTPS
 	rc.Request.URL.Host = rc.Request.Host
 	rc.Logger.Warn().
 		Str("mutatedURL", rc.Request.URL.String()).
@@ -555,7 +549,7 @@ func (h RedirHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	u := new(url.URL)
 	*u = *rc.Request.URL
-	u.Scheme = schemeHTTPS
+	u.Scheme = constants.SchemeHTTPS
 	u.Host = rc.Request.Host
 
 	var buf strings.Builder
@@ -1229,7 +1223,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
 	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
-	rc.Request.Header.Set("x-forwarded-proto", schemeHTTPS)
+	rc.Request.Header.Set("x-forwarded-proto", constants.SchemeHTTPS)
 	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add(
@@ -1238,7 +1232,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			quoteForwardedAddr(rc.LocalAddr),
 			quoteForwardedAddr(rc.RemoteAddr),
 			rc.Request.Host,
-			schemeHTTPS))
+			constants.SchemeHTTPS))
 
 	if values := rc.Request.Header.Values("x-forwarded-for"); len(values) > 1 {
 		rc.Request.Header.Set("x-forwarded-for", strings.Join(values, ", "))
@@ -1246,10 +1240,10 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	innerURL := new(url.URL)
 	*innerURL = *rc.Request.URL
-	innerURL.Scheme = schemeHTTP
+	innerURL.Scheme = constants.SchemeHTTP
 	innerURL.Host = "example.com"
 	if h.client.IsTLS() {
-		innerURL.Scheme = schemeHTTPS
+		innerURL.Scheme = constants.SchemeHTTPS
 	}
 
 	innerReq, err := http.NewRequestWithContext(
@@ -1338,7 +1332,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
 	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
-	rc.Request.Header.Set("x-forwarded-proto", schemeHTTPS)
+	rc.Request.Header.Set("x-forwarded-proto", constants.SchemeHTTPS)
 	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add(
@@ -1347,7 +1341,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			quoteForwardedAddr(rc.LocalAddr),
 			quoteForwardedAddr(rc.RemoteAddr),
 			rc.Request.Host,
-			schemeHTTPS))
+			constants.SchemeHTTPS))
 
 	var wg sync.WaitGroup
 	defer func() {
@@ -1379,7 +1373,7 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go h.recvThread(rc, sc, &wg)
 
 	kv := make([]*roxypb.KeyValue, 4, 4+len(rc.Request.Header))
-	kv[0] = &roxypb.KeyValue{Key: ":scheme", Value: schemeHTTPS}
+	kv[0] = &roxypb.KeyValue{Key: ":scheme", Value: constants.SchemeHTTPS}
 	kv[1] = &roxypb.KeyValue{Key: ":method", Value: rc.Request.Method}
 	kv[2] = &roxypb.KeyValue{Key: ":authority", Value: rc.Request.Host}
 	kv[3] = &roxypb.KeyValue{Key: ":path", Value: rc.Request.URL.Path}

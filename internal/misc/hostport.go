@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
@@ -109,7 +110,7 @@ func ParsePort(port string) (uint16, error) {
 		return uint16(u64), nil
 	}
 
-	p, err1 := net.LookupPort("tcp", port)
+	p, err1 := net.LookupPort(constants.NetTCP, port)
 	if err1 == nil {
 		return uint16(p), nil
 	}

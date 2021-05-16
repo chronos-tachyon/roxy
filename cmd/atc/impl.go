@@ -12,6 +12,7 @@ import (
 	v3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/roxypb"
@@ -357,7 +358,7 @@ func (impl *Impl) doLoadMainFile() error {
 	for index := uint(0); index < atcLength; index++ {
 		str := impl.cfgMain.Servers[index]
 
-		tcpAddr, err := misc.ParseTCPAddr(str, "2987")
+		tcpAddr, err := misc.ParseTCPAddr(str, constants.PortATC)
 		if err != nil {
 			return err
 		}

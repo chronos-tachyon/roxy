@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -80,7 +81,7 @@ func (rt *RoxyTarget) Parse(str string) error {
 		return roxyutil.BadEndpointError{Endpoint: str, Err: roxyutil.ErrExpectNonEmpty}
 	}
 
-	if str == nullString {
+	if str == constants.NullString {
 		return roxyutil.BadEndpointError{Endpoint: str, Err: roxyutil.ErrFailedToMatch}
 	}
 
@@ -153,19 +154,19 @@ func RoxyTargetFromTarget(target Target) (RoxyTarget, error) {
 func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
 	var zero RoxyTarget
 
-	if rt.Scheme == "" {
-		rt.Scheme = passthroughScheme
+	if rt.Scheme == constants.SchemeEmpty {
+		rt.Scheme = constants.SchemeDNS
 	}
 
 	switch rt.Scheme {
-	case passthroughScheme:
-		host, _, err := misc.SplitHostPort(rt.Endpoint, httpsPort)
+	case constants.SchemePassthrough:
+		host, _, err := misc.SplitHostPort(rt.Endpoint, constants.PortHTTPS)
 		if err != nil {
 			return zero, err
 		}
 		rt.ServerName = host
 
-	case unixScheme:
+	case constants.SchemeUnix:
 		if hasSlash && (rt.Endpoint == "" || (rt.Endpoint[0] != '/' && rt.Endpoint[0] != '@' && rt.Endpoint[0] != '\x00')) {
 			rt.Endpoint = "/" + rt.Endpoint
 		}
@@ -174,13 +175,13 @@ func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
 			return zero, err
 		}
 		if unixAddr.Name != "" && unixAddr.Name[0] == '\x00' {
-			rt.Scheme = unixAbstractScheme
+			rt.Scheme = constants.SchemeUnixAbstract
 			rt.Endpoint = unixAddr.Name[1:]
 		}
 		rt.Authority = ""
 		rt.ServerName = serverName
 
-	case unixAbstractScheme:
+	case constants.SchemeUnixAbstract:
 		_, _, serverName, err := ParseUnixTarget(rt)
 		if err != nil {
 			return zero, err
@@ -188,28 +189,28 @@ func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
 		rt.Authority = ""
 		rt.ServerName = serverName
 
-	case ipScheme:
-		_, _, serverName, err := ParseIPTarget(rt, httpsPort)
+	case constants.SchemeIP:
+		_, _, serverName, err := ParseIPTarget(rt, constants.PortHTTPS)
 		if err != nil {
 			return zero, err
 		}
 		rt.ServerName = serverName
 
-	case dnsScheme:
-		_, _, _, _, _, _, serverName, err := ParseDNSTarget(rt, httpsPort)
+	case constants.SchemeDNS:
+		_, _, _, _, _, _, serverName, err := ParseDNSTarget(rt, constants.PortHTTPS)
 		if err != nil {
 			return zero, err
 		}
 		rt.ServerName = serverName
 
-	case srvScheme:
+	case constants.SchemeSRV:
 		_, _, _, _, _, _, serverName, err := ParseSRVTarget(rt)
 		if err != nil {
 			return zero, err
 		}
 		rt.ServerName = serverName
 
-	case zkScheme:
+	case constants.SchemeZK:
 		if rt.Endpoint == "" || rt.Endpoint[0] != '/' {
 			rt.Endpoint = "/" + rt.Endpoint
 		}
@@ -219,14 +220,14 @@ func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
 		}
 		rt.ServerName = serverName
 
-	case etcdScheme:
+	case constants.SchemeEtcd:
 		_, _, _, serverName, err := ParseEtcdTarget(rt)
 		if err != nil {
 			return zero, err
 		}
 		rt.ServerName = serverName
 
-	case atcScheme:
+	case constants.SchemeATC:
 		_, _, _, _, _, serverName, err := ParseATCTarget(rt)
 		if err != nil {
 			return zero, err

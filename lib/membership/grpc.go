@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
@@ -69,11 +70,12 @@ var _ Interface = (*GRPC)(nil)
 // type GRPCOperation {{{
 
 // GRPCOperation represents the status of the server being advertized.
+type GRPCOperation uint8
+
+// GRPCOperation constants:
 //
 //	GRPCOpAdd     healthy
 //	GRPCOpDelete  not healthy
-type GRPCOperation uint8
-
 const (
 	GRPCOpAdd GRPCOperation = iota
 	GRPCOpDelete
@@ -120,7 +122,7 @@ func (op *GRPCOperation) UnmarshalJSON(raw []byte) error {
 		panic(errors.New("raw is nil"))
 	}
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

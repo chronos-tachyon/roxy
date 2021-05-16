@@ -12,6 +12,7 @@ import (
 
 	v3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -86,7 +87,7 @@ func (ec EtcdConfig) String() string {
 
 func (ec EtcdConfig) MarshalJSON() ([]byte, error) {
 	if !ec.Enabled {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(ec.toAlt())
 }
@@ -99,7 +100,7 @@ func (ec *EtcdConfig) Parse(str string) error {
 		}
 	}()
 
-	if str == "" || str == nullString {
+	if str == "" || str == constants.NullString {
 		return nil
 	}
 
@@ -158,9 +159,9 @@ func (ec *EtcdConfig) Parse(str string) error {
 		}
 	}
 
-	expectScheme := "http"
+	expectScheme := constants.SchemeHTTP
 	if ec.TLS.Enabled {
-		expectScheme = "https"
+		expectScheme = constants.SchemeHTTPS
 	}
 
 	endpointListString, err := roxyutil.ExpandString(pieces[0])
@@ -185,7 +186,7 @@ func (ec *EtcdConfig) Parse(str string) error {
 			return fmt.Errorf("expected scheme %q, got scheme %q in URL %q", expectScheme, u.Scheme, u.String())
 		}
 		if u.Port() == "" {
-			u.Host = net.JoinHostPort(u.Hostname(), "2379")
+			u.Host = net.JoinHostPort(u.Hostname(), constants.PortEtcd)
 		}
 		if u.User != nil || u.Path != "" || u.RawQuery != "" || u.RawFragment != "" {
 			return fmt.Errorf("URL %q contains forbidden components", u.String())
@@ -212,7 +213,7 @@ func (ec *EtcdConfig) UnmarshalJSON(raw []byte) error {
 		}
 	}()
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
@@ -71,73 +72,22 @@ func main() {
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
-	expanded, err := roxyutil.ExpandPath(flagConfig)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagConfig).
-			Err(err).
-			Msg("--config: failed to process path")
-	}
-	flagConfig = expanded
-
 	var etcdConfig mainutil.EtcdConfig
-	err = etcdConfig.Parse(flagEtcd)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagEtcd).
-			Err(err).
-			Msg("--etcd: failed to parse")
-	}
-
 	var adminListenConfig mainutil.ListenConfig
-	err = adminListenConfig.Parse(flagListenAdmin)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagListenAdmin).
-			Err(err).
-			Msg("--listen-admin: failed to process path")
-	}
-
+	var adminServerOpts []grpc.ServerOption
 	var promListenConfig mainutil.ListenConfig
-	err = promListenConfig.Parse(flagListenProm)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagListenProm).
-			Err(err).
-			Msg("--listen-prom: failed to parse")
-	}
-
-	var atcListenConfig mainutil.ListenConfig
-	err = atcListenConfig.Parse(flagListenATC)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagListenATC).
-			Err(err).
-			Msg("--listen-atc: failed to process path")
-	}
-
-	if !atcListenConfig.Enabled {
-		log.Logger.Fatal().
-			Str("input", flagListenATC).
-			Msg("--listen-atc: required flag")
-	}
-
-	if net := atcListenConfig.Network; net != "tcp" && net != "tcp4" && net != "tcp6" {
-		log.Logger.Fatal().
-			Str("input", flagListenATC).
-			Str("expected", "tcp").
-			Str("actual", net).
-			Msg("--listen-atc: TCP required")
-	}
-
-	atcAddr, err := misc.ParseTCPAddr(atcListenConfig.Address, "2987")
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", atcListenConfig.Address).
-			Err(err).
-			Msg("--listen-atc: failed to parse TCP address")
-	}
-	atcListenConfig.Address = atcAddr.String()
+	var grpcListenConfig mainutil.ListenConfig
+	var grpcServerOpts []grpc.ServerOption
+	var grpcAddr net.TCPAddr
+	processFlags(
+		&etcdConfig,
+		&adminListenConfig,
+		&adminServerOpts,
+		&promListenConfig,
+		&grpcListenConfig,
+		&grpcServerOpts,
+		&grpcAddr,
+	)
 
 	etcd, err := etcdConfig.Connect(ctx)
 	if err != nil {
@@ -151,7 +101,7 @@ func main() {
 	}()
 
 	var ref Ref
-	ref.Init(flagConfig, atcAddr, etcd)
+	ref.Init(flagConfig, &grpcAddr, etcd)
 
 	err = ref.Load(ctx)
 	if err != nil {
@@ -180,7 +130,7 @@ func main() {
 		admin: true,
 	}
 
-	adminServer := grpc.NewServer()
+	adminServer := grpc.NewServer(adminServerOpts...)
 	grpc_health_v1.RegisterHealthServer(adminServer, &gHealthServer)
 	roxypb.RegisterAdminServer(adminServer, AdminServer{})
 	roxypb.RegisterAirTrafficControlServer(adminServer, &adminATCServer)
@@ -201,18 +151,18 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 		BaseContext:       mainutil.MakeBaseContextFunc(),
-		ConnContext:       mainutil.MakeConnContextFunc("prom"),
+		ConnContext:       mainutil.MakeConnContextFunc(constants.SubsystemProm),
 	}
 
-	atcServer := grpc.NewServer()
-	grpc_health_v1.RegisterHealthServer(atcServer, &gHealthServer)
-	roxypb.RegisterAirTrafficControlServer(atcServer, &mainATCServer)
+	grpcServer := grpc.NewServer(grpcServerOpts...)
+	grpc_health_v1.RegisterHealthServer(grpcServer, &gHealthServer)
+	roxypb.RegisterAirTrafficControlServer(grpcServer, &mainATCServer)
 
 	var adminListener net.Listener
-	adminListener, err = adminListenConfig.Listen(ctx)
+	adminListener, err = adminListenConfig.ListenNoTLS(ctx)
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "admin").
+			Str("subsystem", constants.SubsystemAdmin).
 			Interface("config", adminListenConfig).
 			Err(err).
 			Msg("--listen-admin: failed to Listen")
@@ -222,25 +172,25 @@ func main() {
 	promListener, err = promListenConfig.Listen(ctx)
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "prom").
+			Str("subsystem", constants.SubsystemProm).
 			Interface("config", promListenConfig).
 			Err(err).
 			Msg("--listen-prom: failed to Listen")
 	}
 
-	var atcListener net.Listener
-	atcListener, err = atcListenConfig.Listen(ctx)
+	var grpcListener net.Listener
+	grpcListener, err = grpcListenConfig.ListenNoTLS(ctx)
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "atc").
-			Interface("config", atcListenConfig).
+			Str("subsystem", constants.SubsystemGRPC).
+			Interface("config", grpcListenConfig).
 			Err(err).
 			Msg("--listen-atc: failed to Listen")
 	}
 
-	gMultiServer.AddGRPCServer("admin", adminServer, adminListener)
-	gMultiServer.AddHTTPServer("prom", promServer, promListener)
-	gMultiServer.AddGRPCServer("atc", atcServer, atcListener)
+	gMultiServer.AddGRPCServer(constants.SubsystemAdmin, adminServer, adminListener)
+	gMultiServer.AddHTTPServer(constants.SubsystemProm, promServer, promListener)
+	gMultiServer.AddGRPCServer(constants.SubsystemGRPC, grpcServer, grpcListener)
 
 	gMultiServer.OnReload(mainutil.RotateLogs)
 
@@ -259,4 +209,123 @@ func main() {
 
 	log.Logger.Info().
 		Msg("Exit")
+}
+
+func processFlags(
+	etcdConfig *mainutil.EtcdConfig,
+	adminListenConfig *mainutil.ListenConfig,
+	adminServerOpts *[]grpc.ServerOption,
+	promListenConfig *mainutil.ListenConfig,
+	grpcListenConfig *mainutil.ListenConfig,
+	grpcServerOpts *[]grpc.ServerOption,
+	grpcAddr *net.TCPAddr,
+) {
+	expanded, err := roxyutil.ExpandPath(flagConfig)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagConfig).
+			Err(err).
+			Msg("--config: failed to process path")
+	}
+	flagConfig = expanded
+
+	err = etcdConfig.Parse(flagEtcd)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagEtcd).
+			Err(err).
+			Msg("--etcd: failed to parse")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", "etcd").
+		Interface("config", etcdConfig).
+		Msg("ready")
+
+	err = adminListenConfig.Parse(flagListenAdmin)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemAdmin).
+			Str("input", flagListenAdmin).
+			Err(err).
+			Msg("--listen-admin: failed to parse config")
+	}
+
+	*adminServerOpts, err = adminListenConfig.TLS.MakeGRPCServerOptions()
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemAdmin).
+			Interface("config", adminListenConfig.TLS).
+			Err(err).
+			Msg("--listen-admin: failed to MakeGRPCServerOptions")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", constants.SubsystemAdmin).
+		Interface("config", adminListenConfig).
+		Msg("ready")
+
+	err = promListenConfig.Parse(flagListenProm)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemProm).
+			Str("input", flagListenProm).
+			Err(err).
+			Msg("--listen-prom: failed to parse config")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", constants.SubsystemProm).
+		Interface("config", promListenConfig).
+		Msg("ready")
+
+	err = grpcListenConfig.Parse(flagListenATC)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemGRPC).
+			Str("input", flagListenATC).
+			Err(err).
+			Msg("--listen-atc: failed to parse config")
+	}
+
+	if !grpcListenConfig.Enabled {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemGRPC).
+			Str("input", flagListenATC).
+			Msg("--listen-atc: required flag")
+	}
+
+	if !constants.IsNetTCP(grpcListenConfig.Network) {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemGRPC).
+			Str("input", flagListenATC).
+			Str("expected", constants.NetTCP).
+			Str("actual", grpcListenConfig.Network).
+			Msg("--listen-atc: TCP required")
+	}
+
+	addr, err := misc.ParseTCPAddr(grpcListenConfig.Address, constants.PortATC)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemGRPC).
+			Str("input", grpcListenConfig.Address).
+			Err(err).
+			Msg("--listen-atc: failed to parse TCP address")
+	}
+	grpcListenConfig.Address = addr.String()
+	*grpcAddr = *addr
+
+	*grpcServerOpts, err = grpcListenConfig.TLS.MakeGRPCServerOptions()
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemGRPC).
+			Interface("config", grpcListenConfig.TLS).
+			Err(err).
+			Msg("--listen-atc: failed to MakeGRPCServerOptions")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", constants.SubsystemGRPC).
+		Interface("config", grpcListenConfig).
+		Msg("ready")
 }

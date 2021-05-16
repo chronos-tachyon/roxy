@@ -9,25 +9,29 @@ import (
 	"io/ioutil"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/certnames"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 type TLSServerConfig struct {
-	Enabled     bool
-	Cert        string
-	Key         string
-	MutualTLS   bool
-	ClientCA    string
-	CommonNames []string
+	Enabled      bool
+	Cert         string
+	Key          string
+	MutualTLS    bool
+	ClientCA     string
+	AllowedNames certnames.CertNames
 }
 
 type tscJSON struct {
-	Cert        string   `json:"cert,omitempty"`
-	Key         string   `json:"key,omitempty"`
-	MutualTLS   bool     `json:"mTLS,omitempty"`
-	ClientCA    string   `json:"clientCA,omitempty"`
-	CommonNames []string `json:"commonNames,omitempty"`
+	Cert         string              `json:"cert,omitempty"`
+	Key          string              `json:"key,omitempty"`
+	MutualTLS    bool                `json:"mTLS,omitempty"`
+	ClientCA     string              `json:"clientCA,omitempty"`
+	AllowedNames certnames.CertNames `json:"allowedNames,omitempty"`
 }
 
 func (tsc TLSServerConfig) AppendTo(out *strings.Builder) {
@@ -48,10 +52,8 @@ func (tsc TLSServerConfig) AppendTo(out *strings.Builder) {
 			out.WriteString(",ca=")
 			out.WriteString(tsc.ClientCA)
 		}
-		if tsc.CommonNames != nil {
-			out.WriteString(",cn=")
-			appendCommonNameList(out, tsc.CommonNames)
-		}
+		out.WriteString(",allow=")
+		tsc.AllowedNames.AppendTo(out)
 	}
 }
 
@@ -68,28 +70,29 @@ func (tsc TLSServerConfig) String() string {
 
 func (tsc TLSServerConfig) MarshalJSON() ([]byte, error) {
 	if !tsc.Enabled {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(tsc.toAlt())
 }
 
 func (tsc *TLSServerConfig) Parse(str string) error {
+	*tsc = TLSServerConfig{}
+
+	if str == "" || str == constants.NullString {
+		return nil
+	}
+
+	err := misc.StrictUnmarshalJSON([]byte(str), tsc)
+	if err == nil {
+		return nil
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
 			*tsc = TLSServerConfig{}
 		}
 	}()
-
-	if str == "" || str == nullString {
-		return nil
-	}
-
-	err := misc.StrictUnmarshalJSON([]byte(str), tsc)
-	if err == nil {
-		wantZero = false
-		return nil
-	}
 
 	pieces := strings.Split(str, ",")
 
@@ -101,6 +104,7 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 		return nil
 	}
 
+	sawAllow := false
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "cert="):
@@ -122,11 +126,12 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 		case strings.HasPrefix(item, "ca="):
 			tsc.ClientCA = item[3:]
 
-		case strings.HasPrefix(item, "commonNames="):
-			tsc.CommonNames = parseCommonNameList(item[12:])
-
-		case strings.HasPrefix(item, "cn="):
-			tsc.CommonNames = parseCommonNameList(item[3:])
+		case strings.HasPrefix(item, "allow="):
+			sawAllow = true
+			err = tsc.AllowedNames.Parse(item[6:])
+			if err != nil {
+				return err
+			}
 
 		default:
 			return fmt.Errorf("unknown option %q", item)
@@ -134,6 +139,10 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 	}
 
 	tsc.Enabled = true
+	if tsc.MutualTLS && !sawAllow {
+		_ = tsc.AllowedNames.Parse(certnames.ANY)
+	}
+
 	tmp, err := tsc.postprocess()
 	if err != nil {
 		return err
@@ -152,7 +161,7 @@ func (tsc *TLSServerConfig) UnmarshalJSON(raw []byte) error {
 		}
 	}()
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 
@@ -216,20 +225,33 @@ func (tsc TLSServerConfig) MakeTLS() (*tls.Config, error) {
 		}
 
 		out.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			if tsc.CommonNames == nil {
+			cert := verifiedChains[0][0]
+			if tsc.AllowedNames.Check(cert) {
 				return nil
 			}
-			actualCN := verifiedChains[0][0].Subject.CommonName
-			for _, cn := range tsc.CommonNames {
-				if actualCN == cn {
-					return nil
-				}
-			}
-			return fmt.Errorf("expected subject CommonName to be one of %q, got subject CommonName %q", tsc.CommonNames, actualCN)
+			return fmt.Errorf("expected %s, got Subject DN %q", tsc.AllowedNames.String(), cert.Subject.String())
 		}
 	}
 
 	out.NextProtos = []string{"h2", "http/1.1"}
+	return out, nil
+}
+
+func (tsc TLSServerConfig) MakeGRPCServerOptions(opts ...grpc.ServerOption) ([]grpc.ServerOption, error) {
+	if !tsc.Enabled {
+		return opts, nil
+	}
+
+	tlsConfig, err := tsc.MakeTLS()
+	if err != nil {
+		return nil, err
+	}
+
+	tlsConfig.NextProtos = []string{"h2"}
+
+	out := make([]grpc.ServerOption, 1+len(opts))
+	out[0] = grpc.Creds(credentials.NewTLS(tlsConfig))
+	copy(out[1:], opts)
 	return out, nil
 }
 
@@ -238,11 +260,11 @@ func (tsc TLSServerConfig) toAlt() *tscJSON {
 		return nil
 	}
 	return &tscJSON{
-		Cert:        tsc.Cert,
-		Key:         tsc.Key,
-		MutualTLS:   tsc.MutualTLS,
-		ClientCA:    tsc.ClientCA,
-		CommonNames: tsc.CommonNames,
+		Cert:         tsc.Cert,
+		Key:          tsc.Key,
+		MutualTLS:    tsc.MutualTLS,
+		ClientCA:     tsc.ClientCA,
+		AllowedNames: tsc.AllowedNames,
 	}
 }
 
@@ -251,12 +273,12 @@ func (alt *tscJSON) toStd() TLSServerConfig {
 		return TLSServerConfig{}
 	}
 	return TLSServerConfig{
-		Enabled:     true,
-		Cert:        alt.Cert,
-		Key:         alt.Key,
-		MutualTLS:   alt.MutualTLS,
-		ClientCA:    alt.ClientCA,
-		CommonNames: alt.CommonNames,
+		Enabled:      true,
+		Cert:         alt.Cert,
+		Key:          alt.Key,
+		MutualTLS:    alt.MutualTLS,
+		ClientCA:     alt.ClientCA,
+		AllowedNames: alt.AllowedNames,
 	}
 }
 
@@ -291,7 +313,7 @@ func (tsc TLSServerConfig) postprocess() (out TLSServerConfig, err error) {
 
 	if !tsc.MutualTLS {
 		tsc.ClientCA = ""
-		tsc.CommonNames = nil
+		_ = tsc.AllowedNames.Parse(certnames.ANY)
 	}
 
 	if tsc.ClientCA != "" {
@@ -303,28 +325,4 @@ func (tsc TLSServerConfig) postprocess() (out TLSServerConfig, err error) {
 	}
 
 	return tsc, nil
-}
-
-func parseCommonNameList(str string) []string {
-	pieces := strings.Split(str, ":")
-	out := make([]string, 0, len(pieces))
-	for _, item := range pieces {
-		if item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func appendCommonNameList(out *strings.Builder, list []string) {
-	if len(list) == 0 {
-		out.WriteString(":")
-		return
-	}
-	for i, value := range list {
-		if i != 0 {
-			out.WriteString(":")
-		}
-		out.WriteString(value)
-	}
 }

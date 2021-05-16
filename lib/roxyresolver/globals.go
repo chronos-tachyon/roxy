@@ -13,23 +13,7 @@ const (
 	minWeight = 1.0 / float32(65536.0)
 	maxWeight = float32(65536.0)
 
-	nullString = "null"
-
-	passthroughScheme  = "passthrough"
-	unixScheme         = "unix"
-	unixAbstractScheme = "unix-abstract"
-	ipScheme           = "ip"
-	dnsScheme          = "dns"
-	srvScheme          = "srv"
-	zkScheme           = "zk"
-	etcdScheme         = "etcd"
-	atcScheme          = "atc"
-
 	atcBalancerName = "atc_lb"
-
-	dnsPort   = "53"
-	httpPort  = "80"
-	httpsPort = "443"
 )
 
 var (

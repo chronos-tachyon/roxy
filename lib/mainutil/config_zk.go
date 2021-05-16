@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-zookeeper/zk"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -93,7 +94,7 @@ func (zc ZKConfig) String() string {
 
 func (zc ZKConfig) MarshalJSON() ([]byte, error) {
 	if !zc.Enabled {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(zc.toAlt())
 }
@@ -106,7 +107,7 @@ func (zc *ZKConfig) Parse(str string) error {
 		}
 	}()
 
-	if str == "" || str == nullString {
+	if str == "" || str == constants.NullString {
 		return nil
 	}
 
@@ -133,7 +134,7 @@ func (zc *ZKConfig) Parse(str string) error {
 		if server == "" {
 			continue
 		}
-		host, port, err := misc.SplitHostPort(server, "2181")
+		host, port, err := misc.SplitHostPort(server, constants.PortZK)
 		if err != nil {
 			return err
 		}
@@ -205,7 +206,7 @@ func (zc *ZKConfig) UnmarshalJSON(raw []byte) error {
 		}
 	}()
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

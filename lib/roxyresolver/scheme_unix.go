@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
@@ -33,7 +34,7 @@ func NewUnixResolver(opts Options) (Resolver, error) {
 	// so we rely on the standard gRPC resolver for those schemes.
 
 	data := Resolved{
-		Unique:     "unix:" + unixAddr.String(),
+		Unique:     constants.NetUnix + ":" + unixAddr.String(),
 		ServerName: serverName,
 		Addr:       unixAddr,
 		Address:    resAddr,
@@ -105,7 +106,7 @@ func ParseUnixTarget(rt RoxyTarget) (unixAddr *net.UnixAddr, balancer BalancerTy
 	}
 
 	unixAddr = &net.UnixAddr{
-		Net:  "unix",
+		Net:  constants.NetUnix,
 		Name: unixPath,
 	}
 

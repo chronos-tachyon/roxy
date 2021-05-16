@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
@@ -31,52 +32,52 @@ func TestNewUnixResolver(t *testing.T) {
 		{
 			name:   "filesystem-1",
 			target: "unix:/path/to/socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "/path/to/socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "/path/to/socket"},
 		},
 		{
 			name:   "filesystem-2",
 			target: "unix:///path/to/socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "/path/to/socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "/path/to/socket"},
 		},
 		{
 			name:   "filesystem-3",
 			target: "unix://localhost/path/to/socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "/path/to/socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "/path/to/socket"},
 		},
 		{
 			name:   "abstract-1",
 			target: "unix:@abstract-socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "\x00abstract-socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-socket"},
 		},
 		{
 			name:   "abstract-2",
 			target: "unix:\x00abstract-socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "\x00abstract-socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-socket"},
 		},
 		{
 			name:   "abstract-3",
 			target: "unix:///@abstract-socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "\x00abstract-socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-socket"},
 		},
 		{
 			name:   "abstract-4",
 			target: "unix:///\x00abstract-socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "\x00abstract-socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-socket"},
 		},
 		{
 			name:   "abstract-5",
 			target: "unix-abstract:abstract-socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "\x00abstract-socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-socket"},
 		},
 		{
 			name:   "abstract-6",
 			target: "unix-abstract:///abstract-socket",
-			addr:   &net.UnixAddr{Net: "unix", Name: "\x00abstract-socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-socket"},
 		},
 		{
 			name:   "with-balancer",
 			target: "unix:/path/to/socket?balancer=rr",
-			addr:   &net.UnixAddr{Net: "unix", Name: "/path/to/socket"},
+			addr:   &net.UnixAddr{Net: constants.NetUnix, Name: "/path/to/socket"},
 		},
 	}
 

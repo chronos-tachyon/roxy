@@ -7,6 +7,8 @@ import (
 	"net"
 
 	grpcresolver "google.golang.org/grpc/resolver"
+
+	"github.com/chronos-tachyon/roxy/internal/constants"
 )
 
 type (
@@ -52,21 +54,21 @@ type Options struct {
 
 func New(opts Options) (Resolver, error) {
 	switch opts.Target.Scheme {
-	case unixScheme:
+	case constants.SchemeUnix:
 		fallthrough
-	case unixAbstractScheme:
+	case constants.SchemeUnixAbstract:
 		return NewUnixResolver(opts)
-	case ipScheme:
+	case constants.SchemeIP:
 		return NewIPResolver(opts)
-	case dnsScheme:
+	case constants.SchemeDNS:
 		return NewDNSResolver(opts)
-	case srvScheme:
+	case constants.SchemeSRV:
 		return NewSRVResolver(opts)
-	case zkScheme:
+	case constants.SchemeZK:
 		return NewZKResolver(opts)
-	case etcdScheme:
+	case constants.SchemeEtcd:
 		return NewEtcdResolver(opts)
-	case atcScheme:
+	case constants.SchemeATC:
 		return NewATCResolver(opts)
 	default:
 		return nil, fmt.Errorf("Target.Scheme %q is not supported", opts.Target.Scheme)

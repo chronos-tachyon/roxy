@@ -1,3 +1,7 @@
+v0.4.5
+  * Implement advanced X.509 client certificate checking
+  * Do auth checking in ATC RPCs
+
 v0.4.4
   * Rename Roxy Prometheus metrics to meet naming best practices
   * Add stub Prometheus metrics server to ATC

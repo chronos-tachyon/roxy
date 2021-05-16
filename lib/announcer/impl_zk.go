@@ -14,6 +14,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// NewZK creates a new ZooKeeper announcer.
 func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Interface, error) {
 	if zkconn == nil {
 		panic(errors.New("*zk.Conn is nil"))

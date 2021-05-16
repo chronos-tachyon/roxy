@@ -67,7 +67,7 @@ func (m *MultiServer) AddHTTPServer(name string, server *http.Server, listen net
 		m.closeShutdownCh()
 		if isRealShutdownError(err) {
 			log.Logger.Error().
-				Str("server", name).
+				Str("subsystem", name).
 				Err(err).
 				Msg("failed to Serve")
 		}
@@ -84,7 +84,7 @@ func (m *MultiServer) AddHTTPServer(name string, server *http.Server, listen net
 		}
 		if isRealShutdownError(err) {
 			log.Logger.Error().
-				Str("server", name).
+				Str("subsystem", name).
 				Err(err).
 				Msg("failed to " + action)
 			return err
@@ -105,7 +105,7 @@ func (m *MultiServer) AddGRPCServer(name string, server *grpc.Server, listen net
 		m.closeShutdownCh()
 		if isRealShutdownError(err) {
 			log.Logger.Error().
-				Str("server", name).
+				Str("subsystem", name).
 				Err(err).
 				Msg("failed to Serve")
 		}

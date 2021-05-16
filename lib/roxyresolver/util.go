@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
@@ -44,7 +45,7 @@ func parseNetResolver(str string) (*net.Resolver, error) {
 		return &net.Resolver{}, nil
 	}
 
-	tcpAddr, err := misc.ParseTCPAddr(str, dnsPort)
+	tcpAddr, err := misc.ParseTCPAddr(str, constants.PortDNS)
 	if err != nil {
 		return nil, err
 	}

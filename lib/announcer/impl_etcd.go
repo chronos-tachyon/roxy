@@ -15,6 +15,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// NewEtcd creates a new etcd.io announcer.
 func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (Interface, error) {
 	if etcd == nil {
 		panic(errors.New("*v3.Client is nil"))

@@ -10,14 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-)
-
-const (
-	netDefault = ""
-	netUnix    = "unix"
-	netTCP     = "tcp"
 )
 
 type ListenConfig struct {
@@ -35,7 +30,7 @@ type lcJSON struct {
 
 func (lc ListenConfig) AppendTo(out *strings.Builder) {
 	out.WriteString(lc.Address)
-	if lc.Network != "tcp" {
+	if lc.Network != constants.NetTCP {
 		out.WriteString(";net=")
 		out.WriteString(lc.Network)
 	}
@@ -58,7 +53,7 @@ func (lc ListenConfig) String() string {
 
 func (lc ListenConfig) MarshalJSON() ([]byte, error) {
 	if !lc.Enabled {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(lc.toAlt())
 }
@@ -71,7 +66,7 @@ func (lc *ListenConfig) Parse(str string) error {
 		}
 	}()
 
-	if str == "" || str == nullString {
+	if str == "" || str == constants.NullString {
 		return nil
 	}
 
@@ -120,7 +115,7 @@ func (lc *ListenConfig) UnmarshalJSON(raw []byte) error {
 		}
 	}()
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 
@@ -147,7 +142,7 @@ func (lc *ListenConfig) UnmarshalJSON(raw []byte) error {
 
 func (lc ListenConfig) Listen(ctx context.Context) (net.Listener, error) {
 	if !lc.Enabled {
-		return dummyListener{ch: make(chan struct{})}, nil
+		return newDummyListener(), nil
 	}
 
 	tlsConfig, err := lc.TLS.MakeTLS()
@@ -163,6 +158,19 @@ func (lc ListenConfig) Listen(ctx context.Context) (net.Listener, error) {
 
 	if tlsConfig != nil {
 		l = tls.NewListener(l, tlsConfig)
+	}
+
+	return l, nil
+}
+
+func (lc ListenConfig) ListenNoTLS(ctx context.Context) (net.Listener, error) {
+	if !lc.Enabled {
+		return newDummyListener(), nil
+	}
+
+	l, err := net.Listen(lc.Network, lc.Address)
+	if err != nil {
+		return nil, err
 	}
 
 	return l, nil
@@ -203,31 +211,31 @@ func (lc ListenConfig) postprocess() (out ListenConfig, err error) {
 		return zero, fmt.Errorf("invalid address %q: %w", lc.Address, roxyutil.ErrExpectNonEmpty)
 	}
 
-	maybeUnix := (lc.Network == netDefault) || strings.HasPrefix(lc.Network, netUnix)
+	maybeUnix := (lc.Network == constants.NetEmpty) || constants.IsNetUnix(lc.Network)
 	if maybeUnix {
 		if lc.Address[0] == '/' || lc.Address[0] == '\x00' {
-			if lc.Network == netDefault {
-				lc.Network = netUnix
+			if lc.Network == constants.NetEmpty {
+				lc.Network = constants.NetUnix
 			}
 		} else if lc.Address[0] == '@' {
 			lc.Address = "\x00" + lc.Address[1:]
-			if lc.Network == netDefault {
-				lc.Network = netUnix
+			if lc.Network == constants.NetEmpty {
+				lc.Network = constants.NetUnix
 			}
-		} else if lc.Network != netDefault || strings.Contains(lc.Address, "/") {
+		} else if lc.Network != constants.NetEmpty || strings.Contains(lc.Address, "/") {
 			abs, err := filepath.Abs(lc.Address)
 			if err != nil {
 				return zero, err
 			}
 			lc.Address = abs
-			if lc.Network == netDefault {
-				lc.Network = netUnix
+			if lc.Network == constants.NetEmpty {
+				lc.Network = constants.NetUnix
 			}
 		}
 	}
 
-	if lc.Network == netDefault {
-		lc.Network = netTCP
+	if lc.Network == constants.NetEmpty {
+		lc.Network = constants.NetTCP
 	}
 
 	return lc, nil
@@ -251,6 +259,10 @@ func unescapeListenAddress(addr string) string {
 
 type dummyListener struct {
 	ch chan struct{}
+}
+
+func newDummyListener() net.Listener {
+	return dummyListener{ch: make(chan struct{})}
 }
 
 func (l dummyListener) Addr() net.Addr {

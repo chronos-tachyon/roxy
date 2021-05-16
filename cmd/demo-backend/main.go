@@ -24,7 +24,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
@@ -81,19 +83,26 @@ func main() {
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
-	expanded, err := roxyutil.ExpandPath(flagShakespeareFile)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagShakespeareFile).
-			Err(err).
-			Msg("--shakespeare-file: failed to process path")
-	}
-	flagShakespeareFile = expanded
+	var httpListenConfig mainutil.ListenConfig
+	var grpcListenConfig mainutil.ListenConfig
+	var grpcServerOpts []grpc.ServerOption
+	var zac mainutil.ZKAnnounceConfig
+	var eac mainutil.EtcdAnnounceConfig
+	var aac mainutil.ATCAnnounceConfig
+	processFlags(
+		&httpListenConfig,
+		&grpcListenConfig,
+		&grpcServerOpts,
+		&zac,
+		&eac,
+		&aac,
+	)
 
 	var corpus []byte
 	if flagShakespeareFile == "" {
 		corpus = []byte("Hello, world!\r\n")
 	} else {
+		var err error
 		corpus, err = ioutil.ReadFile(flagShakespeareFile)
 		if err != nil {
 			log.Logger.Fatal().
@@ -101,51 +110,6 @@ func main() {
 				Err(err).
 				Msg("--shakespeare-file: failed to read file")
 		}
-	}
-
-	var httpListenConfig mainutil.ListenConfig
-	err = httpListenConfig.Parse(flagListenHTTP)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagListenHTTP).
-			Err(err).
-			Msg("--listen-http: failed to parse config")
-	}
-
-	var grpcListenConfig mainutil.ListenConfig
-	err = grpcListenConfig.Parse(flagListenGRPC)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagListenGRPC).
-			Err(err).
-			Msg("--listen-grpc: failed to parse config")
-	}
-
-	var zac mainutil.ZKAnnounceConfig
-	err = zac.Parse(flagAnnounceZK)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagAnnounceZK).
-			Err(err).
-			Msg("--announce-zk: failed to parse")
-	}
-
-	var eac mainutil.EtcdAnnounceConfig
-	err = eac.Parse(flagAnnounceEtcd)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagAnnounceEtcd).
-			Err(err).
-			Msg("--announce-etcd: failed to parse etcd config")
-	}
-
-	var aac mainutil.ATCAnnounceConfig
-	err = aac.Parse(flagAnnounceATC)
-	if err != nil {
-		log.Logger.Fatal().
-			Str("input", flagAnnounceATC).
-			Err(err).
-			Msg("--announce-atc: failed to parse ATC config")
 	}
 
 	ann := new(announcer.Announcer)
@@ -159,6 +123,7 @@ func main() {
 	zkconn, err := zac.Connect(ctx)
 	if err != nil {
 		log.Logger.Fatal().
+			Str("subsystem", "zk").
 			Interface("config", zac).
 			Err(err).
 			Msg("--zk: failed to connect to ZooKeeper")
@@ -171,6 +136,7 @@ func main() {
 
 		if err := zac.AddTo(zkconn, ann); err != nil {
 			log.Logger.Fatal().
+				Str("subsystem", "zk").
 				Interface("config", zac).
 				Err(err).
 				Msg("--announce-zk: failed to announce to ZooKeeper")
@@ -180,6 +146,7 @@ func main() {
 	etcd, err := eac.Connect(ctx)
 	if err != nil {
 		log.Logger.Fatal().
+			Str("subsystem", "etcd").
 			Interface("config", eac).
 			Err(err).
 			Msg("--announce-etcd: failed to connect to etcd")
@@ -194,6 +161,7 @@ func main() {
 
 		if err := eac.AddTo(etcd, ann); err != nil {
 			log.Logger.Fatal().
+				Str("subsystem", "etcd").
 				Interface("config", eac).
 				Err(err).
 				Msg("--announce-etcd: failed to announce to etcd")
@@ -203,6 +171,7 @@ func main() {
 	atcClient, err := aac.NewClient(ctx)
 	if err != nil {
 		log.Logger.Fatal().
+			Str("subsystem", "atc").
 			Interface("config", aac).
 			Err(err).
 			Msg("--announce-atc: failed to connect to ATC")
@@ -217,6 +186,7 @@ func main() {
 
 		if err := aac.AddTo(atcClient, nil, ann); err != nil {
 			log.Logger.Fatal().
+				Str("subsystem", "atc").
 				Interface("config", aac).
 				Err(err).
 				Msg("--announce-atc: failed to announce to ATC")
@@ -230,29 +200,30 @@ func main() {
 		},
 	}
 
+	grpcServer := grpc.NewServer(grpcServerOpts...)
+	grpc_health_v1.RegisterHealthServer(grpcServer, &gHealthServer)
+	roxypb.RegisterWebServerServer(grpcServer, &webServerServer{corpus: corpus})
+
 	httpListener, err := httpListenConfig.Listen(ctx)
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "http").
+			Str("subsystem", constants.SubsystemHTTP).
 			Interface("config", httpListenConfig).
 			Err(err).
 			Msg("failed to Listen")
 	}
-	gMultiServer.AddHTTPServer("http", httpServer, httpListener)
 
-	grpcServer := grpc.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, &gHealthServer)
-	roxypb.RegisterWebServerServer(grpcServer, &webServerServer{corpus: corpus})
-
-	grpcListener, err := grpcListenConfig.Listen(ctx)
+	grpcListener, err := grpcListenConfig.ListenNoTLS(ctx)
 	if err != nil {
 		log.Logger.Fatal().
-			Str("server", "grpc").
+			Str("subsystem", constants.SubsystemGRPC).
 			Interface("config", grpcListenConfig).
 			Err(err).
 			Msg("failed to Listen")
 	}
-	gMultiServer.AddGRPCServer("grpc", grpcServer, grpcListener)
+
+	gMultiServer.AddHTTPServer(constants.SubsystemHTTP, httpServer, httpListener)
+	gMultiServer.AddGRPCServer(constants.SubsystemGRPC, grpcServer, grpcListener)
 
 	gMultiServer.OnRun(func() {
 		var r membership.Roxy
@@ -262,13 +233,13 @@ func main() {
 			r.IP = tcpAddr.IP
 			r.Zone = tcpAddr.Zone
 			r.PrimaryPort = uint16(tcpAddr.Port)
-			r.AdditionalPorts["http"] = uint16(tcpAddr.Port)
+			r.AdditionalPorts[constants.SubsystemHTTP] = uint16(tcpAddr.Port)
 		}
 		if tcpAddr, ok := grpcListener.Addr().(*net.TCPAddr); ok {
 			r.IP = tcpAddr.IP
 			r.Zone = tcpAddr.Zone
 			r.PrimaryPort = uint16(tcpAddr.Port)
-			r.AdditionalPorts["grpc"] = uint16(tcpAddr.Port)
+			r.AdditionalPorts[constants.SubsystemGRPC] = uint16(tcpAddr.Port)
 		}
 		if err := ann.Announce(ctx, &r); err != nil {
 			log.Logger.Fatal().
@@ -310,11 +281,117 @@ func main() {
 		Msg("Exit")
 }
 
+func processFlags(
+	httpListenConfig *mainutil.ListenConfig,
+	grpcListenConfig *mainutil.ListenConfig,
+	grpcServerOpts *[]grpc.ServerOption,
+	zac *mainutil.ZKAnnounceConfig,
+	eac *mainutil.EtcdAnnounceConfig,
+	aac *mainutil.ATCAnnounceConfig,
+) {
+	expanded, err := roxyutil.ExpandPath(flagShakespeareFile)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("input", flagShakespeareFile).
+			Err(err).
+			Msg("--shakespeare-file: failed to process path")
+	}
+	flagShakespeareFile = expanded
+
+	err = httpListenConfig.Parse(flagListenHTTP)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemHTTP).
+			Str("input", flagListenHTTP).
+			Err(err).
+			Msg("--listen-http: failed to parse config")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", constants.SubsystemHTTP).
+		Interface("config", httpListenConfig).
+		Msg("ready")
+
+	err = grpcListenConfig.Parse(flagListenGRPC)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemGRPC).
+			Str("input", flagListenGRPC).
+			Err(err).
+			Msg("--listen-grpc: failed to parse config")
+	}
+
+	*grpcServerOpts, err = grpcListenConfig.TLS.MakeGRPCServerOptions()
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", constants.SubsystemGRPC).
+			Interface("config", grpcListenConfig.TLS).
+			Err(err).
+			Msg("--listen-grpc: failed to MakeGRPCServerOptions")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", constants.SubsystemGRPC).
+		Interface("config", grpcListenConfig).
+		Msg("ready")
+
+	err = zac.Parse(flagAnnounceZK)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", "zk").
+			Str("input", flagAnnounceZK).
+			Err(err).
+			Msg("--announce-zk: failed to parse config")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", "zk").
+		Interface("config", zac).
+		Msg("ready")
+
+	err = eac.Parse(flagAnnounceEtcd)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", "etcd").
+			Str("input", flagAnnounceEtcd).
+			Err(err).
+			Msg("--announce-etcd: failed to parse config")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", "etcd").
+		Interface("config", eac).
+		Msg("ready")
+
+	err = aac.Parse(flagAnnounceATC)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("subsystem", "atc").
+			Str("input", flagAnnounceATC).
+			Err(err).
+			Msg("--announce-atc: failed to parse config")
+	}
+
+	log.Logger.Trace().
+		Str("subsystem", "atc").
+		Interface("config", aac).
+		Msg("ready")
+}
+
 type demoHandler struct {
 	corpus []byte
 }
 
 func (h demoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Logger.Debug().
+		Str("httpHost", r.Host).
+		Str("httpMethod", r.Method).
+		Str("httpPath", r.URL.Path).
+		Msg("HTTP")
+
+	atcclient.AddLoad(1.0)
+	defer atcclient.SubLoad(1.0)
+
 	headerNames := make([]string, 0, len(r.Header))
 	for key := range r.Header {
 		headerNames = append(headerNames, strings.ToLower(key))
@@ -356,6 +433,9 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 		Str("rpcMethod", "Serve").
 		Str("rpcInterface", "primary").
 		Msg("RPC")
+
+	atcclient.AddLoad(1.0)
+	defer atcclient.SubLoad(1.0)
 
 	hIn := make([]*roxypb.KeyValue, 0, 32)
 	bIn := []byte(nil)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-zookeeper/zk"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -58,7 +59,7 @@ func (zac ZKAnnounceConfig) String() string {
 
 func (zac ZKAnnounceConfig) MarshalJSON() ([]byte, error) {
 	if !zac.Enabled {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(zac.toAlt())
 }
@@ -71,7 +72,7 @@ func (zac *ZKAnnounceConfig) Parse(str string) error {
 		}
 	}()
 
-	if str == "" || str == nullString {
+	if str == "" || str == constants.NullString {
 		return nil
 	}
 
@@ -142,7 +143,7 @@ func (zac *ZKAnnounceConfig) UnmarshalJSON(raw []byte) error {
 		}
 	}()
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

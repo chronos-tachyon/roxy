@@ -10,6 +10,7 @@ import (
 
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
@@ -26,9 +27,9 @@ func NewDNSResolver(opts Options) (Resolver, error) {
 		panic(errors.New("context.Context is nil"))
 	}
 
-	defaultPort := httpPort
+	defaultPort := constants.PortHTTP
 	if opts.IsTLS {
-		defaultPort = httpsPort
+		defaultPort = constants.PortHTTPS
 	}
 
 	res, host, port, balancer, pollInterval, cdInterval, serverName, err := ParseDNSTarget(opts.Target, defaultPort)
@@ -110,9 +111,9 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, port string, serverName string) PollingResolveFunc {
 	return func() ([]Resolved, error) {
 		// Resolve the port number.
-		portNum, err := res.LookupPort(ctx, "tcp", port)
+		portNum, err := res.LookupPort(ctx, constants.NetTCP, port)
 		if err != nil {
-			return nil, fmt.Errorf("LookupPort(%q, %q) failed: %w", "tcp", port, err)
+			return nil, fmt.Errorf("LookupPort(%q, %q) failed: %w", constants.NetTCP, port, err)
 		}
 
 		// Resolve the A/AAAA records.
@@ -156,7 +157,7 @@ type dnsBuilder struct {
 }
 
 func (b dnsBuilder) Scheme() string {
-	return dnsScheme
+	return constants.SchemeDNS
 }
 
 func (b dnsBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
@@ -165,7 +166,7 @@ func (b dnsBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 		return nil, err
 	}
 
-	res, host, port, _, pollInterval, cdInterval, serverName, err := ParseDNSTarget(rt, httpsPort)
+	res, host, port, _, pollInterval, cdInterval, serverName, err := ParseDNSTarget(rt, constants.PortHTTPS)
 	if err != nil {
 		return nil, err
 	}

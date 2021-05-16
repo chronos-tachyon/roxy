@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/chronos-tachyon/roxy/internal/constants"
 )
 
 func sdNotify(payload string) {
@@ -26,7 +28,7 @@ func sdNotify(payload string) {
 	}
 
 	unixAddr := &net.UnixAddr{
-		Net:  "unixgram",
+		Net:  constants.NetUnixgram,
 		Name: realName,
 	}
 

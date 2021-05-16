@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 )
@@ -48,7 +49,7 @@ func (gcc GRPCClientConfig) String() string {
 
 func (gcc GRPCClientConfig) MarshalJSON() ([]byte, error) {
 	if !gcc.Enabled {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(gcc.toAlt())
 }
@@ -61,7 +62,7 @@ func (gcc *GRPCClientConfig) Parse(str string) error {
 		}
 	}()
 
-	if str == "" || str == nullString {
+	if str == "" || str == constants.NullString {
 		return nil
 	}
 
@@ -110,7 +111,7 @@ func (gcc *GRPCClientConfig) UnmarshalJSON(raw []byte) error {
 		}
 	}()
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
@@ -54,7 +55,7 @@ func (aac ATCAnnounceConfig) String() string {
 
 func (aac ATCAnnounceConfig) MarshalJSON() ([]byte, error) {
 	if !aac.Enabled {
-		return nullBytes, nil
+		return constants.NullBytes, nil
 	}
 	return json.Marshal(aac.toAlt())
 }
@@ -67,7 +68,7 @@ func (aac *ATCAnnounceConfig) Parse(str string) error {
 		}
 	}()
 
-	if str == "" || str == nullString {
+	if str == "" || str == constants.NullString {
 		return nil
 	}
 
@@ -144,7 +145,7 @@ func (aac *ATCAnnounceConfig) UnmarshalJSON(raw []byte) error {
 		}
 	}()
 
-	if bytes.Equal(raw, nullBytes) {
+	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
 	}
 

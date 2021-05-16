@@ -1,7 +1,5 @@
 package membership
 
-var nullBytes = []byte("null")
-
 type enumData struct {
 	GoName string
 	Name   string

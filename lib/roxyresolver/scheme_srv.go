@@ -11,6 +11,7 @@ import (
 
 	grpcresolver "google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
@@ -103,7 +104,7 @@ func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service stri
 }
 
 func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, service string, serverName string) PollingResolveFunc {
-	proto := "tcp"
+	proto := constants.NetTCP
 	if service == "" {
 		proto = ""
 	}
@@ -174,7 +175,7 @@ type srvBuilder struct {
 }
 
 func (b srvBuilder) Scheme() string {
-	return srvScheme
+	return constants.SchemeSRV
 }
 
 func (b srvBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
