@@ -31,7 +31,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 const maxBodyChunk = 1 << 20 // 1 MiB
@@ -184,7 +184,7 @@ func main() {
 
 		ctx = roxyresolver.WithATCClient(ctx, atcClient)
 
-		if err := aac.AddTo(atcClient, nil, ann); err != nil {
+		if err := aac.AddTo(atcClient, ann); err != nil {
 			log.Logger.Fatal().
 				Str("subsystem", "atc").
 				Interface("config", aac).
@@ -193,16 +193,25 @@ func main() {
 		}
 	}
 
+	interceptor := atcclient.InterceptorFactory{
+		DefaultCostPerQuery:   1,
+		DefaultCostPerRequest: 1,
+	}
+
+	var httpHandler http.Handler
+	httpHandler = demoHandler{corpus: corpus}
+	httpHandler = interceptor.Handler(httpHandler)
 	httpServer := &http.Server{
-		Handler: demoHandler{corpus: corpus},
+		Handler: httpHandler,
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
 	}
 
+	grpcServerOpts = interceptor.ServerOptions(grpcServerOpts...)
 	grpcServer := grpc.NewServer(grpcServerOpts...)
 	grpc_health_v1.RegisterHealthServer(grpcServer, &gHealthServer)
-	roxypb.RegisterWebServerServer(grpcServer, &webServerServer{corpus: corpus})
+	roxy_v0.RegisterWebServer(grpcServer, &webServerServer{corpus: corpus})
 
 	httpListener, err := httpListenConfig.Listen(ctx)
 	if err != nil {
@@ -389,8 +398,7 @@ func (h demoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Str("httpPath", r.URL.Path).
 		Msg("HTTP")
 
-	atcclient.AddLoad(1.0)
-	defer atcclient.SubLoad(1.0)
+	atcclient.Spend(1)
 
 	headerNames := make([]string, 0, len(r.Header))
 	for key := range r.Header {
@@ -423,21 +431,18 @@ func (h demoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 var _ http.Handler = demoHandler{}
 
 type webServerServer struct {
-	roxypb.UnimplementedWebServerServer
+	roxy_v0.UnimplementedWebServer
 	corpus []byte
 }
 
-func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
+func (s *webServerServer) Serve(ws roxy_v0.Web_ServeServer) (err error) {
 	log.Logger.Debug().
-		Str("rpcService", "roxy.WebServer").
+		Str("rpcService", "roxy.v0.Web").
 		Str("rpcMethod", "Serve").
 		Str("rpcInterface", "primary").
 		Msg("RPC")
 
-	atcclient.AddLoad(1.0)
-	defer atcclient.SubLoad(1.0)
-
-	hIn := make([]*roxypb.KeyValue, 0, 32)
+	hIn := make([]*roxy_v0.KeyValue, 0, 32)
 	bIn := []byte(nil)
 	schemeIn := ""
 	methodIn := ""
@@ -445,7 +450,7 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 	pathIn := ""
 
 	for {
-		var msg *roxypb.WebMessage
+		var msg *roxy_v0.WebMessage
 		msg, err = ws.Recv()
 		if err == io.EOF {
 			err = nil
@@ -490,29 +495,29 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 	_, _ = os.Stdout.Write(buf.Bytes())
 
 	bOut := []byte(nil)
-	hOut := make([]*roxypb.KeyValue, 1, 32)
-	hOut[0] = &roxypb.KeyValue{Key: ":status", Value: "200"}
+	hOut := make([]*roxy_v0.KeyValue, 1, 32)
+	hOut[0] = &roxy_v0.KeyValue{Key: ":status", Value: "200"}
 
 	defer func() {
 		if err == nil {
-			hOut = append(hOut, &roxypb.KeyValue{Key: "content-length", Value: strconv.Itoa(len(bOut))})
+			hOut = append(hOut, &roxy_v0.KeyValue{Key: "content-length", Value: strconv.Itoa(len(bOut))})
 			if methodIn == http.MethodHead {
 				bOut = nil
 			}
 			if len(bOut) < maxBodyChunk {
-				err = ws.Send(&roxypb.WebMessage{
+				err = ws.Send(&roxy_v0.WebMessage{
 					Headers:   hOut,
 					BodyChunk: bOut,
 				})
 			} else {
-				err = ws.Send(&roxypb.WebMessage{Headers: hOut})
+				err = ws.Send(&roxy_v0.WebMessage{Headers: hOut})
 				i, j := 0, len(bOut)
 				for err == nil && i < j {
 					k := i + maxBodyChunk
 					if k > j {
 						k = j
 					}
-					err = ws.Send(&roxypb.WebMessage{BodyChunk: bOut[i:k]})
+					err = ws.Send(&roxy_v0.WebMessage{BodyChunk: bOut[i:k]})
 					i = k
 				}
 			}
@@ -533,22 +538,22 @@ func (s *webServerServer) Serve(ws roxypb.WebServer_ServeServer) (err error) {
 
 	if methodIn == http.MethodOptions {
 		hOut[0].Value = "204"
-		hOut = append(hOut, &roxypb.KeyValue{Key: "allow", Value: "OPTIONS, GET, HEAD"})
+		hOut = append(hOut, &roxy_v0.KeyValue{Key: "allow", Value: "OPTIONS, GET, HEAD"})
 		return
 	}
 
 	if methodIn != http.MethodGet && methodIn != http.MethodPost {
 		hOut[0].Value = "405"
-		hOut = append(hOut, &roxypb.KeyValue{Key: "allow", Value: "OPTIONS, GET, HEAD"})
+		hOut = append(hOut, &roxy_v0.KeyValue{Key: "allow", Value: "OPTIONS, GET, HEAD"})
 		return
 	}
 
 	bOut = s.corpus
-	hOut = append(hOut, &roxypb.KeyValue{Key: "content-type", Value: "text/plain; charset=utf-8"})
+	hOut = append(hOut, &roxy_v0.KeyValue{Key: "content-type", Value: "text/plain; charset=utf-8"})
 	return
 }
 
-type kvList []*roxypb.KeyValue
+type kvList []*roxy_v0.KeyValue
 
 var specialHeaders = map[string]int{
 	":scheme":    -4,

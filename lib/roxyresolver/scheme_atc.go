@@ -14,7 +14,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 func NewATCBuilder(ctx context.Context, rng *rand.Rand, client *atcclient.ATCClient) grpcresolver.Builder {
@@ -107,7 +107,7 @@ func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balance
 
 func MakeATCResolveFunc(client *atcclient.ATCClient, lbName, lbLocation, lbUnique string, dsc bool, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
-		cancelFn, eventCh, errCh, err := client.ClientAssign(ctx, &roxypb.ClientAssignRequest{
+		cancelFn, eventCh, errCh, err := client.ClientAssign(ctx, &roxy_v0.ClientAssignRequest_First{
 			ServiceName: lbName,
 			ShardId:     0,
 			Location:    lbLocation,
@@ -182,7 +182,7 @@ var _ grpcresolver.Builder = atcBuilder{}
 
 // }}}
 
-func mapATCEventsToEvents(serverName string, byUnique map[string]Resolved, in []*roxypb.Event) []Event {
+func mapATCEventsToEvents(serverName string, byUnique map[string]Resolved, in []*roxy_v0.Event) []Event {
 	out := make([]Event, 0, len(in))
 	for _, event := range in {
 		out = mapATCEventToEvents(out, serverName, byUnique, event)
@@ -190,9 +190,9 @@ func mapATCEventsToEvents(serverName string, byUnique map[string]Resolved, in []
 	return out
 }
 
-func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Resolved, event *roxypb.Event) []Event {
+func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Resolved, event *roxy_v0.Event) []Event {
 	switch event.EventType {
-	case roxypb.Event_INSERT_IP:
+	case roxy_v0.Event_INSERT_IP:
 		tcpAddr := &net.TCPAddr{
 			IP:   net.IP(event.Ip),
 			Port: int(event.Port),
@@ -230,7 +230,7 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 			Data: data,
 		})
 
-	case roxypb.Event_DELETE_IP:
+	case roxy_v0.Event_DELETE_IP:
 		delete(byUnique, event.Unique)
 
 		out = append(out, Event{
@@ -238,7 +238,7 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 			Key:  event.Unique,
 		})
 
-	case roxypb.Event_UPDATE_WEIGHT:
+	case roxy_v0.Event_UPDATE_WEIGHT:
 		old := byUnique[event.Unique]
 
 		data := Resolved{
@@ -262,7 +262,7 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 			Data: data,
 		})
 
-	case roxypb.Event_NEW_SERVICE_CONFIG:
+	case roxy_v0.Event_NEW_SERVICE_CONFIG:
 		out = append(out, Event{
 			Type:              NewServiceConfigEvent,
 			ServiceConfigJSON: event.ServiceConfigJson,

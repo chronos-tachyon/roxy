@@ -8,10 +8,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 )
 
-func New(res roxyresolver.Resolver, dialer *net.Dialer, tlsConfig *tls.Config) (*BalancedClient, error) {
+func New(
+	res roxyresolver.Resolver,
+	interceptor atcclient.InterceptorFactory,
+	dialer *net.Dialer,
+	tlsConfig *tls.Config,
+) (*BalancedClient, error) {
 	if res == nil {
 		panic(fmt.Errorf("Resolver is nil"))
 	}
@@ -36,22 +42,28 @@ func New(res roxyresolver.Resolver, dialer *net.Dialer, tlsConfig *tls.Config) (
 		return socket, err
 	}
 
+	checkRedirect := func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	var roundTripper http.RoundTripper
+	roundTripper = &http.Transport{
+		DialContext:           dialFunc,
+		DialTLSContext:        dialFunc,
+		ForceAttemptHTTP2:     true,
+		DisableCompression:    true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	roundTripper = interceptor.RoundTripper(roundTripper)
+
 	bc := &BalancedClient{
 		res: res,
 		client: &http.Client{
-			Transport: &http.Transport{
-				DialContext:           dialFunc,
-				DialTLSContext:        dialFunc,
-				ForceAttemptHTTP2:     true,
-				DisableCompression:    true,
-				MaxIdleConns:          100,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-			},
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
+			Transport:     roundTripper,
+			CheckRedirect: checkRedirect,
 		},
 		isTLS: (tlsConfig != nil),
 	}

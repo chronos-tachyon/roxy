@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-option go_package = "github.com/chronos-tachyon/roxy/roxypb";
+option go_package = "github.com/chronos-tachyon/roxy/proto/roxy_v0";
 
-package roxy;
+package roxy.v0;
 
-service WebServer {
+service Web {
   rpc Serve (stream WebMessage) returns (stream WebMessage) {}
 }
 
@@ -31,13 +31,21 @@ message LookupRequest {
 }
 
 message LookupResponse {
-  bool is_sharded = 1;
-  uint32 num_shards = 2;
+  message Dynamic {
+    uint32 current_num_servers = 1;
+    uint32 current_num_clients = 2;
+    double current_cps_supplied = 3;
+    double current_cps_demanded = 4;
+  }
+  repeated string allowed_client_names = 1;
+  repeated string allowed_server_names = 2;
   uint32 expected_num_clients_per_shard = 3;
   uint32 expected_num_servers_per_shard = 4;
-  float max_load_per_server = 5;
-  repeated string allowed_client_names = 6;
-  repeated string allowed_server_names = 7;
+  bool is_sharded = 5;
+  uint32 num_shards = 6;
+  double avg_supplied_cost_per_second_per_server = 7;
+  double avg_demanded_cost_per_query = 8;
+  Dynamic dynamic = 32;
 }
 
 message FindRequest {
@@ -50,16 +58,21 @@ message FindResponse {
 }
 
 message ServerAnnounceRequest {
-  string service_name = 1;
-  uint32 shard_id = 2;
-  string location = 3;
-  string unique = 4;
-  string server_name = 5;
-  bytes ip = 6;
-  string zone = 7;
-  uint32 port = 8;
-  bool has_shard_id = 15;
-  float load = 16;
+  message First {
+    string service_name = 1;
+    uint32 shard_id = 2;
+    string location = 3;
+    string unique = 4;
+    string server_name = 5;
+    bytes ip = 6;
+    string zone = 7;
+    uint32 port = 8;
+    uint32 supplied_cost_per_second = 14;
+    bool has_shard_id = 15;
+  }
+  First first = 1;
+  uint64 cost_counter = 2;
+  bool is_serving = 3;
 }
 
 message ServerAnnounceResponse {
@@ -67,11 +80,16 @@ message ServerAnnounceResponse {
 }
 
 message ClientAssignRequest {
-  string service_name = 1;
-  uint32 shard_id = 2;
-  string location = 3;
-  string unique = 4;
-  bool has_shard_id = 15;
+  message First {
+    string service_name = 1;
+    uint32 shard_id = 2;
+    string location = 3;
+    string unique = 4;
+    bool has_shard_id = 15;
+  }
+  First first = 1;
+  uint64 cost_counter = 2;
+  double demanded_cost_per_second_estimate = 3;
 }
 
 message ClientAssignResponse {
@@ -92,6 +110,7 @@ message Event {
     DELETE_IP = 2;
     UPDATE_WEIGHT = 3;
     NEW_SERVICE_CONFIG = 4;
+    DELETE_ALL_IPS = 5;
   }
   Type event_type = 1;
   string location = 2;

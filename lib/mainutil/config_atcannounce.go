@@ -170,8 +170,8 @@ func (aac *ATCAnnounceConfig) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func (aac ATCAnnounceConfig) AddTo(client *atcclient.ATCClient, loadFn atcclient.LoadFunc, a *announcer.Announcer) error {
-	impl, err := announcer.NewATC(client, aac.ServiceName, aac.Location, aac.Unique, aac.NamedPort, loadFn)
+func (aac ATCAnnounceConfig) AddTo(client *atcclient.ATCClient, a *announcer.Announcer) error {
+	impl, err := announcer.NewATC(client, aac.ServiceName, aac.Location, aac.Unique, aac.NamedPort)
 	if err == nil {
 		a.Add(impl)
 	}

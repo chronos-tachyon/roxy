@@ -23,8 +23,8 @@
 //	shutdown             tell ATC to exit
 //	healthcheck name     check the health of the named subsystem(*)
 //	set-health name y/n  set the health of the named subsystem
-//	lookup service       perform a /roxy.AirTrafficControl/Lookup RPC
-//	find service shard   perform a /roxy.AirTrafficControl/Find RPC
+//	lookup service       perform a /roxy.v0.AirTrafficControl/Lookup RPC
+//	find service shard   perform a /roxy.v0.AirTrafficControl/Find RPC
 //
 //	(*) At startup, the only available subsystem is the empty string, "".
 //          The "set-health" command can create new named subsystems.
@@ -42,7 +42,7 @@ import (
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 const helpText = `atcctl [<flags>] <cmd> [<args>...]
@@ -135,8 +135,8 @@ func main() {
 	}()
 
 	health := grpc_health_v1.NewHealthClient(cc)
-	admin := roxypb.NewAdminClient(cc)
-	atc := roxypb.NewAirTrafficControlClient(cc)
+	admin := roxy_v0.NewAdminClient(cc)
+	atc := roxy_v0.NewAirTrafficControlClient(cc)
 
 	event := log.Logger.Info()
 
@@ -149,33 +149,41 @@ func main() {
 		resp, err := health.Check(ctx, req)
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "grpc.health.v1.Health").
+				Str("rpcMethod", "Check").
 				Err(err).
-				Msg("call to /grpc.health.v1.Health/Check failed")
+				Msg("RPC failed")
 		}
 		event = event.Str("status", resp.Status.String())
 
 	case "ping":
-		_, err := admin.Ping(ctx, &roxypb.PingRequest{})
+		_, err := admin.Ping(ctx, &roxy_v0.PingRequest{})
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "Ping").
 				Err(err).
-				Msg("call to /roxy.Admin/Ping failed")
+				Msg("RPC failed")
 		}
 
 	case "reload":
-		_, err := admin.Reload(ctx, &roxypb.ReloadRequest{})
+		_, err := admin.Reload(ctx, &roxy_v0.ReloadRequest{})
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "Reload").
 				Err(err).
-				Msg("call to /roxy.Admin/Reload failed")
+				Msg("RPC failed")
 		}
 
 	case "shutdown":
-		_, err := admin.Shutdown(ctx, &roxypb.ShutdownRequest{})
+		_, err := admin.Shutdown(ctx, &roxy_v0.ShutdownRequest{})
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "Shutdown").
 				Err(err).
-				Msg("call to /roxy.Admin/Shutdown failed")
+				Msg("RPC failed")
 		}
 
 	case "set-health":
@@ -187,28 +195,33 @@ func main() {
 				Err(err).
 				Msg("invalid boolean")
 		}
-		req := &roxypb.SetHealthRequest{
+		req := &roxy_v0.SetHealthRequest{
 			SubsystemName: subsystemName,
 			IsHealthy:     isHealthy,
 		}
 		_, err = admin.SetHealth(ctx, req)
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "SetHealth").
+				Str("subsystemName", subsystemName).
 				Err(err).
-				Msg("call to /roxy.Admin/SetHealth failed")
+				Msg("RPC failed")
 		}
 
 	case "lookup":
 		serviceName := getopt.Arg(1)
-		req := &roxypb.LookupRequest{
+		req := &roxy_v0.LookupRequest{
 			ServiceName: serviceName,
 		}
 		resp, err := atc.Lookup(ctx, req)
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.AirTrafficControl").
+				Str("rpcMethod", "Lookup").
 				Str("serviceName", serviceName).
 				Err(err).
-				Msg("call to /roxy.AirTrafficControl/Lookup failed")
+				Msg("RPC failed")
 		}
 		event = event.Interface("data", resp)
 
@@ -221,16 +234,19 @@ func main() {
 				Err(err).
 				Msg("failed to parse argument as uint32")
 		}
-		req := &roxypb.FindRequest{
+		req := &roxy_v0.FindRequest{
 			ServiceName: serviceName,
 			ShardId:     uint32(shardID),
 		}
 		resp, err := atc.Find(ctx, req)
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.AirTrafficControl").
+				Str("rpcMethod", "Find").
 				Str("serviceName", serviceName).
+				Uint64("shardID", shardID).
 				Err(err).
-				Msg("call to /roxy.AirTrafficControl/Find failed")
+				Msg("RPC failed")
 		}
 		event = event.Interface("data", resp.GoAway)
 

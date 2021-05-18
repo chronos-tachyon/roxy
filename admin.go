@@ -7,26 +7,26 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 type AdminServer struct {
-	roxypb.UnimplementedAdminServer
+	roxy_v0.UnimplementedAdminServer
 }
 
-func (AdminServer) Ping(ctx context.Context, req *roxypb.PingRequest) (*roxypb.PingResponse, error) {
+func (AdminServer) Ping(ctx context.Context, req *roxy_v0.PingRequest) (*roxy_v0.PingResponse, error) {
 	log.Logger.Info().
-		Str("rpcService", "roxy.Admin").
+		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "Ping").
 		Str("rpcInterface", "admin").
 		Msg("RPC")
 
-	return &roxypb.PingResponse{}, nil
+	return &roxy_v0.PingResponse{}, nil
 }
 
-func (AdminServer) Reload(ctx context.Context, req *roxypb.ReloadRequest) (*roxypb.ReloadResponse, error) {
+func (AdminServer) Reload(ctx context.Context, req *roxy_v0.ReloadRequest) (*roxy_v0.ReloadResponse, error) {
 	log.Logger.Info().
-		Str("rpcService", "roxy.Admin").
+		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "Reload").
 		Str("rpcInterface", "admin").
 		Msg("RPC")
@@ -34,12 +34,12 @@ func (AdminServer) Reload(ctx context.Context, req *roxypb.ReloadRequest) (*roxy
 	if err := gMultiServer.Reload(); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &roxypb.ReloadResponse{}, nil
+	return &roxy_v0.ReloadResponse{}, nil
 }
 
-func (AdminServer) Shutdown(ctx context.Context, req *roxypb.ShutdownRequest) (*roxypb.ShutdownResponse, error) {
+func (AdminServer) Shutdown(ctx context.Context, req *roxy_v0.ShutdownRequest) (*roxy_v0.ShutdownResponse, error) {
 	log.Logger.Info().
-		Str("rpcService", "roxy.Admin").
+		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "Shutdown").
 		Str("rpcInterface", "admin").
 		Msg("RPC")
@@ -47,12 +47,12 @@ func (AdminServer) Shutdown(ctx context.Context, req *roxypb.ShutdownRequest) (*
 	if err := gMultiServer.Shutdown(true); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &roxypb.ShutdownResponse{}, nil
+	return &roxy_v0.ShutdownResponse{}, nil
 }
 
-func (AdminServer) SetHealth(ctx context.Context, req *roxypb.SetHealthRequest) (*roxypb.SetHealthResponse, error) {
+func (AdminServer) SetHealth(ctx context.Context, req *roxy_v0.SetHealthRequest) (*roxy_v0.SetHealthResponse, error) {
 	log.Logger.Info().
-		Str("rpcService", "roxy.Admin").
+		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "SetHealth").
 		Str("rpcInterface", "admin").
 		Str("subsystem", req.SubsystemName).
@@ -60,5 +60,5 @@ func (AdminServer) SetHealth(ctx context.Context, req *roxypb.SetHealthRequest) 
 		Msg("RPC")
 
 	gHealthServer.Set(req.SubsystemName, req.IsHealthy)
-	return &roxypb.SetHealthResponse{}, nil
+	return &roxy_v0.SetHealthResponse{}, nil
 }

@@ -15,13 +15,14 @@ type MainFile struct {
 }
 
 type ServiceConfig struct {
-	IsSharded                  bool                `json:"isSharded"`
-	NumShards                  uint32              `json:"numShards"`
-	MaxLoadPerServer           float32             `json:"maxLoadPerServer"`
-	ExpectedNumClientsPerShard uint32              `json:"expectedNumClientsPerShard"`
-	ExpectedNumServersPerShard uint32              `json:"expectedNumServersPerShard"`
 	AllowedClientNames         certnames.CertNames `json:"allowedClientNames"`
 	AllowedServerNames         certnames.CertNames `json:"allowedServerNames"`
+	ExpectedNumClientsPerShard uint32              `json:"expectedNumClientsPerShard"`
+	ExpectedNumServersPerShard uint32              `json:"expectedNumServersPerShard"`
+	IsSharded                  bool                `json:"isSharded"`
+	NumShards                  uint32              `json:"numShards"`
+	AvgSuppliedCPSPerServer    float64             `json:"avgSuppliedCPSPerServer"`
+	AvgDemandedCPQ             float64             `json:"avgDemandedCPQ"`
 }
 
 type CostFile []CostConfig

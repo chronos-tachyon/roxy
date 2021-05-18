@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/chronos-tachyon/roxy/internal/enums"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 // type fileInfoList {{{
@@ -175,7 +175,7 @@ func hexToBase64(in string) string {
 	return base64.StdEncoding.EncodeToString(raw)
 }
 
-func appendHeadersToKV(kv []*roxypb.KeyValue, h http.Header) []*roxypb.KeyValue {
+func appendHeadersToKV(kv []*roxy_v0.KeyValue, h http.Header) []*roxy_v0.KeyValue {
 	list := make([]string, 0, len(h))
 	valueMap := make(map[string][]string, len(h))
 	for key, values := range h {
@@ -186,7 +186,7 @@ func appendHeadersToKV(kv []*roxypb.KeyValue, h http.Header) []*roxypb.KeyValue 
 	sort.Strings(list)
 	for _, name := range list {
 		for _, value := range valueMap[name] {
-			kv = append(kv, &roxypb.KeyValue{Key: name, Value: value})
+			kv = append(kv, &roxy_v0.KeyValue{Key: name, Value: value})
 		}
 	}
 	return kv

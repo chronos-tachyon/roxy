@@ -11,11 +11,11 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 // NewATC creates a new Roxy Air Traffic Control announcer.
-func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPort string, loadFn atcclient.LoadFunc) (Interface, error) {
+func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPort string) (Interface, error) {
 	if client == nil {
 		panic(errors.New("*atcclient.ATCClient is nil"))
 	}
@@ -39,7 +39,6 @@ func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPor
 		location:    location,
 		unique:      unique,
 		namedPort:   namedPort,
-		loadFn:      loadFn,
 		state:       StateReady,
 	}
 	impl.cv = sync.NewCond(&impl.mu)
@@ -52,7 +51,6 @@ type atcImpl struct {
 	location    string
 	unique      string
 	namedPort   string
-	loadFn      atcclient.LoadFunc
 
 	mu       sync.Mutex
 	cv       *sync.Cond
@@ -74,7 +72,7 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 
 	cancelFn, errCh, err := impl.client.ServerAnnounce(
 		ctx,
-		&roxypb.ServerAnnounceRequest{
+		&roxy_v0.ServerAnnounceRequest_First{
 			ServiceName: impl.serviceName,
 			ShardId:     r.ShardID,
 			Location:    impl.location,
@@ -85,7 +83,6 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 			Port:        uint32(tcpAddr.Port),
 			HasShardId:  r.HasShardID,
 		},
-		impl.loadFn,
 	)
 	if err != nil {
 		return err

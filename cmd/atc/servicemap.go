@@ -23,13 +23,14 @@ type ServiceMap struct {
 }
 
 type ServiceData struct {
-	IsSharded                  bool
-	NumShards                  uint32
-	ExpectedNumClientsPerShard uint32
-	ExpectedNumServersPerShard uint32
-	MaxLoadPerServer           float32
 	AllowedClientNames         certnames.CertNames
 	AllowedServerNames         certnames.CertNames
+	ExpectedNumClientsPerShard uint32
+	ExpectedNumServersPerShard uint32
+	IsSharded                  bool
+	NumShards                  uint32
+	AvgSuppliedCPSPerServer    float64
+	AvgDemandedCPQ             float64
 }
 
 func NewServiceMap(file MainFile) (*ServiceMap, error) {
@@ -47,24 +48,16 @@ func NewServiceMap(file MainFile) (*ServiceMap, error) {
 		if config.IsSharded && config.NumShards > MaxNumShards {
 			return nil, fmt.Errorf("Service %q: NumShards %d > %d", name, config.NumShards, MaxNumShards)
 		}
-		if config.ExpectedNumClientsPerShard < 1 {
-			return nil, fmt.Errorf("Service %q: ExpectedNumClientsPerShard %d < 1", name, config.ExpectedNumClientsPerShard)
-		}
-		if config.ExpectedNumServersPerShard < 1 {
-			return nil, fmt.Errorf("Service %q: ExpectedNumServersPerShard %d < 1", name, config.ExpectedNumServersPerShard)
-		}
-		if config.MaxLoadPerServer <= 0.0 {
-			return nil, fmt.Errorf("Service %q: MaxLoadPerServer %f <= 0.0", name, config.MaxLoadPerServer)
-		}
 
 		data := &ServiceData{
-			IsSharded:                  config.IsSharded,
-			NumShards:                  config.NumShards,
-			ExpectedNumClientsPerShard: config.ExpectedNumClientsPerShard,
-			ExpectedNumServersPerShard: config.ExpectedNumServersPerShard,
-			MaxLoadPerServer:           config.MaxLoadPerServer,
 			AllowedClientNames:         config.AllowedClientNames,
 			AllowedServerNames:         config.AllowedServerNames,
+			ExpectedNumClientsPerShard: config.ExpectedNumClientsPerShard,
+			ExpectedNumServersPerShard: config.ExpectedNumServersPerShard,
+			IsSharded:                  config.IsSharded,
+			NumShards:                  config.NumShards,
+			AvgSuppliedCPSPerServer:    config.AvgSuppliedCPSPerServer,
+			AvgDemandedCPQ:             config.AvgDemandedCPQ,
 		}
 
 		if !data.IsSharded {

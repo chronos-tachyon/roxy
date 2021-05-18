@@ -39,7 +39,7 @@ import (
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 const helpText = `roxyctl [<flags>] <cmd> [<arg>...]
@@ -127,7 +127,7 @@ func main() {
 	}()
 
 	health := grpc_health_v1.NewHealthClient(cc)
-	admin := roxypb.NewAdminClient(cc)
+	admin := roxy_v0.NewAdminClient(cc)
 
 	event := log.Logger.Info()
 
@@ -140,33 +140,41 @@ func main() {
 		resp, err := health.Check(ctx, req)
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "grpc.health.v1.Health").
+				Str("rpcMethod", "Check").
 				Err(err).
-				Msg("call to /grpc.health.v1.Health/Check failed")
+				Msg("RPC failed")
 		}
 		event = event.Str("status", resp.Status.String())
 
 	case "ping":
-		_, err := admin.Ping(ctx, &roxypb.PingRequest{})
+		_, err := admin.Ping(ctx, &roxy_v0.PingRequest{})
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "Ping").
 				Err(err).
-				Msg("call to /roxy.Admin/Ping failed")
+				Msg("RPC failed")
 		}
 
 	case "reload":
-		_, err := admin.Reload(ctx, &roxypb.ReloadRequest{})
+		_, err := admin.Reload(ctx, &roxy_v0.ReloadRequest{})
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "Reload").
 				Err(err).
-				Msg("call to /roxy.Admin/Reload failed")
+				Msg("RPC failed")
 		}
 
 	case "shutdown":
-		_, err := admin.Shutdown(ctx, &roxypb.ShutdownRequest{})
+		_, err := admin.Shutdown(ctx, &roxy_v0.ShutdownRequest{})
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "Shutdown").
 				Err(err).
-				Msg("call to /roxy.Admin/Shutdown failed")
+				Msg("RPC failed")
 		}
 
 	case "set-health":
@@ -178,15 +186,18 @@ func main() {
 				Err(err).
 				Msg("invalid boolean")
 		}
-		req := &roxypb.SetHealthRequest{
+		req := &roxy_v0.SetHealthRequest{
 			SubsystemName: subsystemName,
 			IsHealthy:     isHealthy,
 		}
 		_, err = admin.SetHealth(ctx, req)
 		if err != nil {
 			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "SetHealth").
+				Str("subsystemName", subsystemName).
 				Err(err).
-				Msg("call to /roxy.Admin/SetHealth failed")
+				Msg("RPC failed")
 		}
 
 	default:

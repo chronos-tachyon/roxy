@@ -11,18 +11,18 @@ import (
 
 	"github.com/chronos-tachyon/roxy/lib/certnames"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 type ATCServer struct {
-	roxypb.UnimplementedAirTrafficControlServer
+	roxy_v0.UnimplementedAirTrafficControlServer
 	ref   *Ref
 	admin bool
 }
 
-func (s *ATCServer) Lookup(ctx context.Context, req *roxypb.LookupRequest) (*roxypb.LookupResponse, error) {
+func (s *ATCServer) Lookup(ctx context.Context, req *roxy_v0.LookupRequest) (*roxy_v0.LookupResponse, error) {
 	log.Logger.Debug().
-		Str("rpcService", "roxy.AirTrafficControl").
+		Str("rpcService", "roxy.v0.AirTrafficControl").
 		Str("rpcMethod", "Lookup").
 		Str("rpcInterface", rpcInterfaceName(s.admin)).
 		Msg("RPC")
@@ -33,21 +33,22 @@ func (s *ATCServer) Lookup(ctx context.Context, req *roxypb.LookupRequest) (*rox
 	if svc == nil {
 		return nil, status.Errorf(codes.NotFound, "service name %q not found", req.ServiceName)
 	}
-	resp := &roxypb.LookupResponse{
-		IsSharded:                  svc.IsSharded,
-		NumShards:                  svc.NumShards,
-		MaxLoadPerServer:           svc.MaxLoadPerServer,
-		ExpectedNumClientsPerShard: svc.ExpectedNumClientsPerShard,
-		ExpectedNumServersPerShard: svc.ExpectedNumServersPerShard,
-		AllowedClientNames:         svc.AllowedClientNames.List(),
-		AllowedServerNames:         svc.AllowedServerNames.List(),
+	resp := &roxy_v0.LookupResponse{
+		AllowedClientNames:                svc.AllowedClientNames.List(),
+		AllowedServerNames:                svc.AllowedServerNames.List(),
+		ExpectedNumClientsPerShard:        svc.ExpectedNumClientsPerShard,
+		ExpectedNumServersPerShard:        svc.ExpectedNumServersPerShard,
+		IsSharded:                         svc.IsSharded,
+		NumShards:                         svc.NumShards,
+		AvgSuppliedCostPerSecondPerServer: svc.AvgSuppliedCPSPerServer,
+		AvgDemandedCostPerQuery:           svc.AvgDemandedCPQ,
 	}
 	return resp, nil
 }
 
-func (s *ATCServer) Find(ctx context.Context, req *roxypb.FindRequest) (*roxypb.FindResponse, error) {
+func (s *ATCServer) Find(ctx context.Context, req *roxy_v0.FindRequest) (*roxy_v0.FindResponse, error) {
 	log.Logger.Debug().
-		Str("rpcService", "roxy.AirTrafficControl").
+		Str("rpcService", "roxy.v0.AirTrafficControl").
 		Str("rpcMethod", "Find").
 		Str("rpcInterface", rpcInterfaceName(s.admin)).
 		Msg("RPC")
@@ -61,13 +62,13 @@ func (s *ATCServer) Find(ctx context.Context, req *roxypb.FindRequest) (*roxypb.
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "key %#v not found", key)
 	}
-	resp := &roxypb.FindResponse{
+	resp := &roxy_v0.FindResponse{
 		GoAway: peer.GoAway(),
 	}
 	return resp, nil
 }
 
-func (s *ATCServer) ServerAnnounce(sas roxypb.AirTrafficControl_ServerAnnounceServer) error {
+func (s *ATCServer) ServerAnnounce(sas roxy_v0.AirTrafficControl_ServerAnnounceServer) error {
 	if s.admin {
 		return status.Error(codes.PermissionDenied, "method ServerAnnounce not permitted over Admin interface")
 	}
@@ -79,36 +80,41 @@ func (s *ATCServer) ServerAnnounce(sas roxypb.AirTrafficControl_ServerAnnounceSe
 		return err
 	}
 
-	serviceName := ServiceName(req.ServiceName)
+	if req.First == nil {
+		return status.Error(codes.InvalidArgument, "first is absent")
+	}
+
+	first := req.First
+	serviceName := ServiceName(first.ServiceName)
 
 	svc := impl.ServiceMap().Get(serviceName)
 	if svc == nil {
-		return status.Errorf(codes.NotFound, "unknown service name %q", req.ServiceName)
+		return status.Errorf(codes.NotFound, "unknown service name %q", first.ServiceName)
 	}
-	if svc.IsSharded && !req.HasShardId {
+	if svc.IsSharded && !first.HasShardId {
 		return status.Error(codes.InvalidArgument, "service is sharded, but no shard_id was provided")
 	}
-	if !svc.IsSharded && req.HasShardId {
+	if !svc.IsSharded && first.HasShardId {
 		return status.Error(codes.InvalidArgument, "service is not sharded, but a shard_id was provided")
 	}
-	if svc.IsSharded && req.HasShardId && req.ShardId >= svc.NumShards {
-		return status.Errorf(codes.NotFound, "shard_id %d was not found (range 0..%d)", req.ShardId, svc.NumShards-1)
+	if svc.IsSharded && first.HasShardId && first.ShardId >= svc.NumShards {
+		return status.Errorf(codes.NotFound, "shard_id %d was not found (range 0..%d)", first.ShardId, svc.NumShards-1)
 	}
 
-	err = roxyutil.ValidateATCLocation(req.Location)
+	err = roxyutil.ValidateATCLocation(first.Location)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	err = roxyutil.ValidateATCUnique(req.Unique)
+	err = roxyutil.ValidateATCUnique(first.Unique)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	if len(req.Ip) != 4 && len(req.Ip) != 16 {
+	if len(first.Ip) != 4 && len(first.Ip) != 16 {
 		return status.Error(codes.InvalidArgument, "invalid IP address")
 	}
-	if req.Port >= 65536 {
+	if first.Port >= 65536 {
 		return status.Error(codes.InvalidArgument, "invalid TCP port")
 	}
 
@@ -118,7 +124,7 @@ func (s *ATCServer) ServerAnnounce(sas roxypb.AirTrafficControl_ServerAnnounceSe
 	}
 
 	log.Logger.Debug().
-		Str("rpcService", "roxy.AirTrafficControl").
+		Str("rpcService", "roxy.v0.AirTrafficControl").
 		Str("rpcMethod", "ServerAnnounce").
 		Str("rpcInterface", "primary").
 		Msg("RPC")
@@ -126,7 +132,7 @@ func (s *ATCServer) ServerAnnounce(sas roxypb.AirTrafficControl_ServerAnnounceSe
 	return status.Errorf(codes.Unimplemented, "method ServerAnnounce not implemented")
 }
 
-func (s *ATCServer) ClientAssign(cas roxypb.AirTrafficControl_ClientAssignServer) error {
+func (s *ATCServer) ClientAssign(cas roxy_v0.AirTrafficControl_ClientAssignServer) error {
 	if s.admin {
 		return status.Error(codes.PermissionDenied, "method ClientAssign not permitted over Admin interface")
 	}
@@ -138,28 +144,33 @@ func (s *ATCServer) ClientAssign(cas roxypb.AirTrafficControl_ClientAssignServer
 		return err
 	}
 
-	serviceName := ServiceName(req.ServiceName)
+	if req.First == nil {
+		return status.Error(codes.InvalidArgument, "first is absent")
+	}
+
+	first := req.First
+	serviceName := ServiceName(first.ServiceName)
 
 	svc := impl.ServiceMap().Get(serviceName)
 	if svc == nil {
-		return status.Errorf(codes.NotFound, "unknown service name %q", req.ServiceName)
+		return status.Errorf(codes.NotFound, "unknown service name %q", first.ServiceName)
 	}
-	if svc.IsSharded && !req.HasShardId {
+	if svc.IsSharded && !first.HasShardId {
 		return status.Error(codes.InvalidArgument, "service is sharded, but no shard_id was provided")
 	}
-	if !svc.IsSharded && req.HasShardId {
+	if !svc.IsSharded && first.HasShardId {
 		return status.Error(codes.InvalidArgument, "service is not sharded, but a shard_id was provided")
 	}
-	if svc.IsSharded && req.HasShardId && req.ShardId >= svc.NumShards {
-		return status.Errorf(codes.NotFound, "shard_id %d was not found (range 0..%d)", req.ShardId, svc.NumShards-1)
+	if svc.IsSharded && first.HasShardId && first.ShardId >= svc.NumShards {
+		return status.Errorf(codes.NotFound, "shard_id %d was not found (range 0..%d)", first.ShardId, svc.NumShards-1)
 	}
 
-	err = roxyutil.ValidateATCLocation(req.Location)
+	err = roxyutil.ValidateATCLocation(first.Location)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	err = roxyutil.ValidateATCUnique(req.Unique)
+	err = roxyutil.ValidateATCUnique(first.Unique)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -170,7 +181,7 @@ func (s *ATCServer) ClientAssign(cas roxypb.AirTrafficControl_ClientAssignServer
 	}
 
 	log.Logger.Debug().
-		Str("rpcService", "roxy.AirTrafficControl").
+		Str("rpcService", "roxy.v0.AirTrafficControl").
 		Str("rpcMethod", "ClientAssign").
 		Str("rpcInterface", "primary").
 		Msg("RPC")

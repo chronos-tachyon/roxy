@@ -21,7 +21,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 const defaultConfigFile = "/etc/opt/atc/config.json"
@@ -132,8 +132,8 @@ func main() {
 
 	adminServer := grpc.NewServer(adminServerOpts...)
 	grpc_health_v1.RegisterHealthServer(adminServer, &gHealthServer)
-	roxypb.RegisterAdminServer(adminServer, AdminServer{})
-	roxypb.RegisterAirTrafficControlServer(adminServer, &adminATCServer)
+	roxy_v0.RegisterAdminServer(adminServer, AdminServer{})
+	roxy_v0.RegisterAirTrafficControlServer(adminServer, &adminATCServer)
 
 	promHandler := promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
@@ -156,7 +156,7 @@ func main() {
 
 	grpcServer := grpc.NewServer(grpcServerOpts...)
 	grpc_health_v1.RegisterHealthServer(grpcServer, &gHealthServer)
-	roxypb.RegisterAirTrafficControlServer(grpcServer, &mainATCServer)
+	roxy_v0.RegisterAirTrafficControlServer(grpcServer, &mainATCServer)
 
 	var adminListener net.Listener
 	adminListener, err = adminListenConfig.ListenNoTLS(ctx)

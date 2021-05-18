@@ -15,7 +15,7 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 const MaxNumATCs = uint(1 << 16)
@@ -463,8 +463,8 @@ func (impl *Impl) doComputeRanges() error {
 	return nil
 }
 
-func (peer *PeerData) GoAway() *roxypb.GoAway {
-	return &roxypb.GoAway{
+func (peer *PeerData) GoAway() *roxy_v0.GoAway {
+	return &roxy_v0.GoAway{
 		Ip:   []byte(peer.Addr.IP),
 		Zone: peer.Addr.Zone,
 		Port: uint32(peer.Addr.Port),

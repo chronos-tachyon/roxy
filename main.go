@@ -24,7 +24,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 var (
@@ -106,7 +106,7 @@ func main() {
 
 	adminServer := grpc.NewServer(adminServerOpts...)
 	grpc_health_v1.RegisterHealthServer(adminServer, &gHealthServer)
-	roxypb.RegisterAdminServer(adminServer, AdminServer{})
+	roxy_v0.RegisterAdminServer(adminServer, AdminServer{})
 
 	var promHandler http.Handler
 	promHandler = promhttp.HandlerFor(

@@ -35,10 +35,11 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/balancedclient"
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
-	"github.com/chronos-tachyon/roxy/roxypb"
+	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
 const (
@@ -1323,7 +1324,8 @@ var _ http.Handler = (*HTTPBackendHandler)(nil)
 // type GRPCBackendHandler {{{
 
 type GRPCBackendHandler struct {
-	cc *grpc.ClientConn
+	cc  *grpc.ClientConn
+	web roxy_v0.WebClient
 }
 
 func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1352,13 +1354,14 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wg.Wait()
 	}()
 
-	webclient := roxypb.NewWebServerClient(h.cc)
-	sc, err := webclient.Serve(ctx)
+	sc, err := h.web.Serve(ctx)
 	if err != nil {
 		rc.Writer.WriteError(http.StatusServiceUnavailable)
 		rc.Logger.Error().
+			Str("rpcService", "roxy.v0.Web").
+			Str("rpcMethod", "Serve").
 			Err(err).
-			Msg("failed to call /roxy.WebServer/Serve")
+			Msg("RPC failed")
 		return
 	}
 
@@ -1372,17 +1375,19 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go h.recvThread(rc, sc, &wg)
 
-	kv := make([]*roxypb.KeyValue, 4, 4+len(rc.Request.Header))
-	kv[0] = &roxypb.KeyValue{Key: ":scheme", Value: constants.SchemeHTTPS}
-	kv[1] = &roxypb.KeyValue{Key: ":method", Value: rc.Request.Method}
-	kv[2] = &roxypb.KeyValue{Key: ":authority", Value: rc.Request.Host}
-	kv[3] = &roxypb.KeyValue{Key: ":path", Value: rc.Request.URL.Path}
+	kv := make([]*roxy_v0.KeyValue, 4, 4+len(rc.Request.Header))
+	kv[0] = &roxy_v0.KeyValue{Key: ":scheme", Value: constants.SchemeHTTPS}
+	kv[1] = &roxy_v0.KeyValue{Key: ":method", Value: rc.Request.Method}
+	kv[2] = &roxy_v0.KeyValue{Key: ":authority", Value: rc.Request.Host}
+	kv[3] = &roxy_v0.KeyValue{Key: ":path", Value: rc.Request.URL.Path}
 	kv = appendHeadersToKV(kv, rc.Request.Header)
-	err = sc.Send(&roxypb.WebMessage{Headers: kv})
+	err = sc.Send(&roxy_v0.WebMessage{Headers: kv})
 	if err != nil {
 		rc.Logger.Error().
+			Str("rpcService", "roxy.v0.Web").
+			Str("rpcMethod", "Serve").
 			Err(err).
-			Msg("/roxy.WebServer/Serve: Send failed")
+			Msg("RPC Send failed")
 		return
 	}
 
@@ -1390,11 +1395,13 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for {
 		n, err := io.ReadFull(rc.Body, buf)
 		if n > 0 {
-			err2 := sc.Send(&roxypb.WebMessage{BodyChunk: buf[:n]})
+			err2 := sc.Send(&roxy_v0.WebMessage{BodyChunk: buf[:n]})
 			if err2 != nil {
 				rc.Logger.Error().
+					Str("rpcService", "roxy.v0.Web").
+					Str("rpcMethod", "Serve").
 					Err(err).
-					Msg("/roxy.WebServer/Serve: Send failed")
+					Msg("RPC Send failed")
 				return
 			}
 		}
@@ -1416,14 +1423,16 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Msg("failed to Close request body")
 	}
 
-	kv = make([]*roxypb.KeyValue, 0, len(rc.Request.Trailer))
+	kv = make([]*roxy_v0.KeyValue, 0, len(rc.Request.Trailer))
 	kv = appendHeadersToKV(kv, rc.Request.Trailer)
 	if len(kv) != 0 {
-		err = sc.Send(&roxypb.WebMessage{Trailers: kv})
+		err = sc.Send(&roxy_v0.WebMessage{Trailers: kv})
 		if err != nil {
 			rc.Logger.Error().
+				Str("rpcService", "roxy.v0.Web").
+				Str("rpcMethod", "Serve").
 				Err(err).
-				Msg("/roxy.WebServer/Serve: Send failed")
+				Msg("RPC Send failed")
 			return
 		}
 	}
@@ -1432,13 +1441,15 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = sc.CloseSend()
 	if err != nil {
 		rc.Logger.Warn().
+			Str("rpcService", "roxy.v0.Web").
+			Str("rpcMethod", "Serve").
 			Err(err).
-			Msg("/roxy.WebServer/Server: CloseSend failed")
+			Msg("RPC CloseSend failed")
 		return
 	}
 }
 
-func (h *GRPCBackendHandler) recvThread(rc *RequestContext, sc roxypb.WebServer_ServeClient, wg *sync.WaitGroup) {
+func (h *GRPCBackendHandler) recvThread(rc *RequestContext, sc roxy_v0.Web_ServeClient, wg *sync.WaitGroup) {
 	needWriteHeader := true
 	defer func() {
 		if needWriteHeader {
@@ -1457,8 +1468,10 @@ Loop:
 			needWriteHeader = false
 			rc.Writer.WriteError(http.StatusInternalServerError)
 			rc.Logger.Error().
+				Str("rpcService", "roxy.v0.Web").
+				Str("rpcMethod", "Serve").
 				Err(err).
-				Msg("/roxy.WebServer/Serve: Recv failed")
+				Msg("RPC Recv failed")
 			return
 		}
 
@@ -1479,9 +1492,11 @@ Loop:
 				if err != nil {
 					statusCode = http.StatusInternalServerError
 					rc.Logger.Warn().
-						Str("arg", status).
+						Str("rpcService", "roxy.v0.Web").
+						Str("rpcMethod", "Serve").
+						Str("input", status).
 						Err(err).
-						Msg("/roxy.WebServer/Serve: failed to parse \":status\" pseudo-header")
+						Msg("RPC Recv: failed to parse \":status\" pseudo-header")
 				}
 			}
 			needWriteHeader = false
@@ -1519,8 +1534,10 @@ Loop:
 		}
 		if err != nil {
 			rc.Logger.Error().
+				Str("rpcService", "roxy.v0.Web").
+				Str("rpcMethod", "Serve").
 				Err(err).
-				Msg("/roxy.WebServer/Serve: Recv failed")
+				Msg("RPC Recv failed")
 			return
 		}
 	}
@@ -1625,7 +1642,12 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *FrontendConfig) (htt
 		return nil, err
 	}
 
-	bc, err := balancedclient.New(res, &gDialer, tlsConfig)
+	interceptor := atcclient.InterceptorFactory{
+		DefaultCostPerQuery:   1,
+		DefaultCostPerRequest: 1,
+	}
+
+	bc, err := balancedclient.New(res, interceptor, &gDialer, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1635,10 +1657,17 @@ func CompileHTTPBackendHandler(impl *Impl, key string, cfg *FrontendConfig) (htt
 func CompileGRPCBackendHandler(impl *Impl, key string, cfg *FrontendConfig) (http.Handler, error) {
 	gcc := cfg.Client
 
-	cc, err := gcc.Dial(impl.ctx)
+	interceptor := atcclient.InterceptorFactory{
+		DefaultCostPerQuery:   1,
+		DefaultCostPerRequest: 1,
+	}
+
+	cc, err := gcc.Dial(impl.ctx, interceptor.DialOptions()...)
 	if err != nil {
 		return nil, err
 	}
 
-	return &GRPCBackendHandler{cc}, nil
+	web := roxy_v0.NewWebClient(cc)
+
+	return &GRPCBackendHandler{cc, web}, nil
 }
