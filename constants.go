@@ -2,6 +2,8 @@ package main
 
 import (
 	_ "embed"
+
+	"github.com/chronos-tachyon/roxy/internal/constants"
 )
 
 const (
@@ -13,8 +15,8 @@ const (
 	xattrSha256sum = "user.sha256sum"
 	xattrEtag      = "user.etag"
 
-	defaultContentType = "text/html; charset=utf-8"
-	defaultContentLang = "en"
+	defaultContentType = constants.ContentTypeTextHTML
+	defaultContentLang = constants.ContentLangEN
 	defaultContentEnc  = ""
 
 	defaultConfigFile    = "/etc/opt/roxy/config.json"

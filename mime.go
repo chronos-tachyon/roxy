@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
+
+	"github.com/chronos-tachyon/roxy/internal/constants"
 )
 
 type MimeRule struct {
@@ -32,7 +34,7 @@ func CompileMimeRule(cfg *MimeRuleConfig) (*MimeRule, error) {
 }
 
 func DetectMimeProperties(impl *Impl, logger zerolog.Logger, filesystem http.FileSystem, path string) (contentType string, contentLang string, contentEnc string) {
-	contentType = "application/octet-stream"
+	contentType = constants.ContentTypeAppOctetStream
 	contentLang = ""
 	contentEnc = ""
 

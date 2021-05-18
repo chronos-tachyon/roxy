@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/enums"
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
@@ -72,59 +73,59 @@ func simplifyHTTPMethod(str string) string {
 	case http.MethodDelete:
 		return http.MethodDelete
 	default:
-		return "OTHER"
+		return constants.MethodOTHER
 	}
 }
 
 func simplifyHTTPStatusCode(statusCode int) string {
 	switch statusCode {
 	case 100:
-		return "100"
+		return constants.Status100
 	case 101:
-		return "101"
+		return constants.Status101
 	case 0, 200:
-		return "200"
+		return constants.Status200
 	case 204:
-		return "204"
+		return constants.Status204
 	case 206:
-		return "206"
+		return constants.Status206
 	case 301:
-		return "301"
+		return constants.Status301
 	case 302:
-		return "302"
+		return constants.Status302
 	case 304:
-		return "304"
+		return constants.Status304
 	case 307:
-		return "307"
+		return constants.Status307
 	case 308:
-		return "308"
+		return constants.Status308
 	case 400:
-		return "400"
+		return constants.Status400
 	case 401:
-		return "401"
+		return constants.Status401
 	case 403:
-		return "403"
+		return constants.Status403
 	case 404:
-		return "404"
+		return constants.Status404
 	case 405:
-		return "405"
+		return constants.Status405
 	case 500:
-		return "500"
+		return constants.Status500
 	case 503:
-		return "503"
+		return constants.Status503
 	}
 
 	switch {
 	case statusCode < 200:
-		return "1xx"
+		return constants.Status1XX
 	case statusCode < 300:
-		return "2xx"
+		return constants.Status2XX
 	case statusCode < 400:
-		return "3xx"
+		return constants.Status3XX
 	case statusCode < 500:
-		return "4xx"
+		return constants.Status4XX
 	default:
-		return "5xx"
+		return constants.Status5XX
 	}
 }
 
@@ -255,11 +256,11 @@ func readLinkAt(dir http.File, name string) (string, error) {
 }
 
 func setDigestHeader(h http.Header, algo enums.DigestType, b64 string) {
-	h.Add("digest", fmt.Sprintf("%s=%s", algo, b64))
+	h.Add(constants.HeaderDigest, fmt.Sprintf("%s=%s", algo, b64))
 }
 
 func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
-	if h.Get("etag") != "" {
+	if h.Get(constants.HeaderETag) != "" {
 		return
 	}
 
@@ -272,7 +273,7 @@ func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
 		sumSHA256  string
 	)
 
-	for _, row := range h.Values("digest") {
+	for _, row := range h.Values(constants.HeaderDigest) {
 		switch {
 		case strings.HasPrefix(row, "md5="):
 			haveMD5 = true
@@ -287,21 +288,21 @@ func setETagHeader(h http.Header, prefix string, lastMod time.Time) {
 	}
 
 	if haveSHA256 {
-		h.Set("etag", strconv.Quote(prefix+"Z."+sumSHA256[:16]))
+		h.Set(constants.HeaderETag, strconv.Quote(prefix+"Z."+sumSHA256[:16]))
 		return
 	}
 
 	if haveSHA1 {
-		h.Set("etag", strconv.Quote(prefix+"Y."+sumSHA1[:16]))
+		h.Set(constants.HeaderETag, strconv.Quote(prefix+"Y."+sumSHA1[:16]))
 		return
 	}
 
 	if haveMD5 {
-		h.Set("etag", strconv.Quote(prefix+"X."+sumMD5[:16]))
+		h.Set(constants.HeaderETag, strconv.Quote(prefix+"X."+sumMD5[:16]))
 		return
 	}
 
-	h.Set("etag", fmt.Sprintf("W/%q", lastMod.UTC().Format("2006.01.02.15.04.05")))
+	h.Set(constants.HeaderETag, fmt.Sprintf("W/%q", lastMod.UTC().Format("2006.01.02.15.04.05")))
 }
 
 func addrWithNoPort(addr net.Addr) string {

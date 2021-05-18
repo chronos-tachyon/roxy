@@ -12,6 +12,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/chronos-tachyon/roxy/internal/constants"
 )
 
 // type WrappedReader {{{
@@ -226,8 +228,8 @@ func (bw *basicWrappedWriter) WriteRedirect(statusCode int, urlstr string) {
 
 	hdrs := bw.Header()
 	purgeContentHeaders(hdrs)
-	hdrs.Set("location", hexEscapeNonASCII(urlstr))
-	hdrs.Set("cache-control", "max-age=86400")
+	hdrs.Set(constants.HeaderLocation, hexEscapeNonASCII(urlstr))
+	hdrs.Set(constants.HeaderCacheControl, constants.CacheControl1Day)
 
 	if bw.request.Method == http.MethodHead || bw.request.Method == http.MethodGet {
 		key := fmt.Sprintf("%03d", statusCode)
@@ -243,7 +245,7 @@ func (bw *basicWrappedWriter) WriteRedirect(statusCode int, urlstr string) {
 		return
 	}
 
-	hdrs.Set("content-length", "0")
+	hdrs.Set(constants.HeaderContentLen, "0")
 	bw.WriteHeader(statusCode)
 }
 
@@ -263,7 +265,10 @@ func (bw *basicWrappedWriter) WriteError(statusCode int) {
 
 	hdrs := bw.Header()
 	purgeContentHeaders(hdrs)
-	hdrs.Set("cache-control", "no-cache")
+	hdrs.Set(constants.HeaderCacheControl, constants.CacheControl1Day)
+	if statusCode >= 500 {
+		hdrs.Set(constants.HeaderCacheControl, constants.CacheControlNoCache)
+	}
 
 	key := fmt.Sprintf("%03d", statusCode)
 	page, found := bw.impl.pages[key]
@@ -378,11 +383,11 @@ func purgeContentHeaders(hdrs http.Header) {
 	for key := range hdrs {
 		lc := strings.ToLower(key)
 		switch {
-		case lc == "digest":
+		case lc == constants.HeaderDigest:
 			delete(hdrs, key)
-		case lc == "etag":
+		case lc == constants.HeaderETag:
 			delete(hdrs, key)
-		case lc == "last-modified":
+		case lc == constants.HeaderLastModified:
 			delete(hdrs, key)
 		case strings.HasPrefix(lc, "content-"):
 			delete(hdrs, key)
@@ -411,14 +416,14 @@ func writeErrorPage(bw *basicWrappedWriter, page pageData, statusCode int, u *ur
 	rendered := buf.Bytes()
 
 	hdrs := bw.Header()
-	hdrs.Set("content-type", page.contentType)
+	hdrs.Set(constants.HeaderContentType, page.contentType)
 	if page.contentLang != "" {
-		hdrs.Set("content-language", page.contentLang)
+		hdrs.Set(constants.HeaderContentLang, page.contentLang)
 	}
 	if page.contentEnc != "" {
-		hdrs.Set("content-encoding", page.contentEnc)
+		hdrs.Set(constants.HeaderContentEnc, page.contentEnc)
 	}
-	hdrs.Set("content-length", strconv.Itoa(len(rendered)))
+	hdrs.Set(constants.HeaderContentLen, strconv.Itoa(len(rendered)))
 	bw.WriteHeader(statusCode)
 	_, _ = bw.Write(rendered)
 }

@@ -303,13 +303,13 @@ type RootHandler struct {
 func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := xid.New()
 	idStr := id.String()
-	r.Header.Set("xid", idStr)
-	w.Header().Set("xid", idStr)
-	w.Header().Set("server", "roxy/"+mainutil.RoxyVersion())
-	w.Header().Set("content-security-policy", "default-src 'self';")
-	w.Header().Set("strict-transport-security", "max-age=86400")
-	w.Header().Set("x-content-type-options", "nosniff")
-	w.Header().Set("x-xss-protection", "1; mode=block")
+	r.Header.Set(constants.HeaderXID, idStr)
+	w.Header().Set(constants.HeaderXID, idStr)
+	w.Header().Set(constants.HeaderServer, "roxy/"+mainutil.RoxyVersion())
+	w.Header().Set(constants.HeaderCSP, "default-src 'self';")
+	w.Header().Set(constants.HeaderHSTS, "max-age=86400")
+	w.Header().Set(constants.HeaderXCTO, "nosniff")
+	w.Header().Set(constants.HeaderXXSSP, "1; mode=block")
 
 	ctx := r.Context()
 	cc := mainutil.GetConnContext(ctx)
@@ -321,10 +321,10 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c = c.Str("method", r.Method)
 	c = c.Str("host", r.Host)
 	c = c.Str("url", r.URL.String())
-	if value := r.Header.Get("user-agent"); value != "" {
+	if value := r.Header.Get(constants.HeaderUserAgent); value != "" {
 		c = c.Str("userAgent", value)
 	}
-	if value := r.Header.Get("referer"); value != "" {
+	if value := r.Header.Get(constants.HeaderReferer); value != "" {
 		c = c.Str("referer", value)
 	}
 
@@ -414,10 +414,10 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		event = event.Dur("elapsed", elapsed)
 		event = event.Int("status", rc.Writer.Status())
-		if location := rc.Writer.Header().Get("location"); location != "" {
+		if location := rc.Writer.Header().Get(constants.HeaderLocation); location != "" {
 			event = event.Str("location", location)
 		}
-		if contentType := rc.Writer.Header().Get("content-type"); contentType != "" {
+		if contentType := rc.Writer.Header().Get(constants.HeaderContentType); contentType != "" {
 			event = event.Str("contentType", contentType)
 		}
 		event = event.Int64("bytesRead", rc.Body.BytesRead())
@@ -593,17 +593,17 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rc := GetRequestContext(r.Context())
 
 	hdrs := rc.Writer.Header()
-	hdrs.Set("cache-control", "public, max-age=86400, must-revalidate")
+	hdrs.Set(constants.HeaderCacheControl, constants.CacheControlPublic1Day)
 
 	if rc.Request.Method == http.MethodOptions {
-		hdrs.Set("allow", "OPTIONS, GET, HEAD")
+		hdrs.Set(constants.HeaderAllow, constants.AllowGET)
 		rc.Writer.WriteHeader(http.StatusNoContent)
 		return
 	}
 
 	if rc.Request.Method != http.MethodHead && rc.Request.Method != http.MethodGet {
-		hdrs.Set("allow", "OPTIONS, GET, HEAD")
-		hdrs.Del("cache-control")
+		hdrs.Set(constants.HeaderAllow, constants.AllowGET)
+		hdrs.Del(constants.HeaderCacheControl)
 		rc.Writer.WriteError(http.StatusMethodNotAllowed)
 		return
 	}
@@ -702,20 +702,20 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 	)
 
 	contentType, contentLang, contentEnc := DetectMimeProperties(rc.Impl, rc.Logger, h.fs, rc.Request.URL.Path)
-	hdrs.Set("content-type", contentType)
+	hdrs.Set(constants.HeaderContentType, contentType)
 	if contentLang != "" {
-		hdrs.Set("content-language", contentLang)
+		hdrs.Set(constants.HeaderContentLang, contentLang)
 	}
 	if contentEnc != "" {
-		hdrs.Set("content-encoding", contentEnc)
+		hdrs.Set(constants.HeaderContentEnc, contentEnc)
 	}
 
-	if contentType == "application/javascript" || contentType == "text/javascript" || strings.HasPrefix(contentType, "text/javascript;") {
+	if contentType == constants.ContentTypeAppJS || contentType == constants.ContentTypeTextJS || strings.HasPrefix(contentType, constants.ContentTypeTextJS+";") {
 		mapFilePath := rc.Request.URL.Path + ".map"
 		mapFile, err := h.fs.Open(mapFilePath)
 		if err == nil {
 			_ = mapFile.Close()
-			hdrs.Set("sourcemap", mapFilePath)
+			hdrs.Set(constants.HeaderSourceMap, mapFilePath)
 		}
 	}
 
@@ -813,7 +813,7 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 
 		if raw, err := readXattr(f, xattrEtag); err == nil {
 			etag := string(raw)
-			hdrs.Set("etag", etag)
+			hdrs.Set(constants.HeaderETag, etag)
 		}
 
 		if !haveMD5 && !haveSHA1 && !haveSHA256 && fi.Size() <= maxComputeDigestSize {
@@ -855,7 +855,7 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 	}
 
 	setETagHeader(hdrs, "", fi.ModTime())
-	hdrs.Set("content-length", strconv.FormatInt(size, 10))
+	hdrs.Set(constants.HeaderContentLen, strconv.FormatInt(size, 10))
 
 	rc.Logger.Debug().
 		Bool("cachePossible", cachePossible).
@@ -1181,12 +1181,12 @@ func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.File
 	sha1sum := base64.StdEncoding.EncodeToString(sha1raw[:])
 	sha256sum := base64.StdEncoding.EncodeToString(sha256raw[:])
 
-	hdrs.Set("content-type", page.contentType)
+	hdrs.Set(constants.HeaderContentType, page.contentType)
 	if page.contentLang != "" {
-		hdrs.Set("content-language", page.contentLang)
+		hdrs.Set(constants.HeaderContentLang, page.contentLang)
 	}
 	if page.contentEnc != "" {
-		hdrs.Set("content-encoding", page.contentEnc)
+		hdrs.Set(constants.HeaderContentEnc, page.contentEnc)
 	}
 	setDigestHeader(hdrs, enums.DigestMD5, md5sum)
 	setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
@@ -1222,21 +1222,21 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
-	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
-	rc.Request.Header.Set("x-forwarded-proto", constants.SchemeHTTPS)
-	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
-	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Set(constants.HeaderRoxyFrontend, rc.RoxyFrontend())
+	rc.Request.Header.Set(constants.HeaderXFwdHost, rc.Request.Host)
+	rc.Request.Header.Set(constants.HeaderXFwdProto, constants.SchemeHTTPS)
+	rc.Request.Header.Set(constants.HeaderXFwdIP, addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Add(constants.HeaderXFwdFor, addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add(
-		"forwarded",
+		constants.HeaderForwarded,
 		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
 			quoteForwardedAddr(rc.LocalAddr),
 			quoteForwardedAddr(rc.RemoteAddr),
 			rc.Request.Host,
 			constants.SchemeHTTPS))
 
-	if values := rc.Request.Header.Values("x-forwarded-for"); len(values) > 1 {
-		rc.Request.Header.Set("x-forwarded-for", strings.Join(values, ", "))
+	if values := rc.Request.Header.Values(constants.HeaderXFwdFor); len(values) > 1 {
+		rc.Request.Header.Set(constants.HeaderXFwdFor, strings.Join(values, ", "))
 	}
 
 	innerURL := new(url.URL)
@@ -1332,13 +1332,13 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rc := GetRequestContext(ctx)
 
-	rc.Request.Header.Set("roxy-frontend", rc.RoxyFrontend())
-	rc.Request.Header.Set("x-forwarded-host", rc.Request.Host)
-	rc.Request.Header.Set("x-forwarded-proto", constants.SchemeHTTPS)
-	rc.Request.Header.Set("x-forwarded-ip", addrWithNoPort(rc.RemoteAddr))
-	rc.Request.Header.Add("x-forwarded-for", addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Set(constants.HeaderRoxyFrontend, rc.RoxyFrontend())
+	rc.Request.Header.Set(constants.HeaderXFwdHost, rc.Request.Host)
+	rc.Request.Header.Set(constants.HeaderXFwdProto, constants.SchemeHTTPS)
+	rc.Request.Header.Set(constants.HeaderXFwdIP, addrWithNoPort(rc.RemoteAddr))
+	rc.Request.Header.Add(constants.HeaderXFwdFor, addrWithNoPort(rc.RemoteAddr))
 	rc.Request.Header.Add(
-		"forwarded",
+		constants.HeaderForwarded,
 		fmt.Sprintf("by=%s;for=%s;host=%s;proto=%s",
 			quoteForwardedAddr(rc.LocalAddr),
 			quoteForwardedAddr(rc.RemoteAddr),
@@ -1376,10 +1376,10 @@ func (h *GRPCBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go h.recvThread(rc, sc, &wg)
 
 	kv := make([]*roxy_v0.KeyValue, 4, 4+len(rc.Request.Header))
-	kv[0] = &roxy_v0.KeyValue{Key: ":scheme", Value: constants.SchemeHTTPS}
-	kv[1] = &roxy_v0.KeyValue{Key: ":method", Value: rc.Request.Method}
-	kv[2] = &roxy_v0.KeyValue{Key: ":authority", Value: rc.Request.Host}
-	kv[3] = &roxy_v0.KeyValue{Key: ":path", Value: rc.Request.URL.Path}
+	kv[0] = &roxy_v0.KeyValue{Key: constants.PseudoHeaderScheme, Value: constants.SchemeHTTPS}
+	kv[1] = &roxy_v0.KeyValue{Key: constants.PseudoHeaderMethod, Value: rc.Request.Method}
+	kv[2] = &roxy_v0.KeyValue{Key: constants.PseudoHeaderAuthority, Value: rc.Request.Host}
+	kv[3] = &roxy_v0.KeyValue{Key: constants.PseudoHeaderPath, Value: rc.Request.URL.Path}
 	kv = appendHeadersToKV(kv, rc.Request.Header)
 	err = sc.Send(&roxy_v0.WebMessage{Headers: kv})
 	if err != nil {
@@ -1480,7 +1480,7 @@ Loop:
 			status := ""
 			for _, kv := range resp.Headers {
 				switch kv.Key {
-				case ":status":
+				case constants.PseudoHeaderStatus:
 					status = kv.Value
 				default:
 					hdrs.Add(kv.Key, kv.Value)

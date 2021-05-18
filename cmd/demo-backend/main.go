@@ -422,8 +422,8 @@ func (h demoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = os.Stdout.Write(buf.Bytes())
 
 	hdrs := w.Header()
-	hdrs.Set("content-type", "text/plain; charset=utf-8")
-	hdrs.Set("content-length", strconv.Itoa(len(h.corpus)))
+	hdrs.Set(constants.HeaderContentType, constants.ContentTypeTextPlain)
+	hdrs.Set(constants.HeaderContentLen, strconv.Itoa(len(h.corpus)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(h.corpus)
 }
@@ -465,13 +465,13 @@ func (s *webServerServer) Serve(ws roxy_v0.Web_ServeServer) (err error) {
 		if len(msg.Headers) != 0 {
 			for _, kv := range msg.Headers {
 				switch kv.Key {
-				case ":scheme":
+				case constants.PseudoHeaderScheme:
 					schemeIn = kv.Value
-				case ":method":
+				case constants.PseudoHeaderMethod:
 					methodIn = kv.Value
-				case ":authority":
+				case constants.PseudoHeaderAuthority:
 					hostIn = kv.Value
-				case ":path":
+				case constants.PseudoHeaderPath:
 					pathIn = kv.Value
 				default:
 					hIn = append(hIn, kv)
@@ -496,11 +496,17 @@ func (s *webServerServer) Serve(ws roxy_v0.Web_ServeServer) (err error) {
 
 	bOut := []byte(nil)
 	hOut := make([]*roxy_v0.KeyValue, 1, 32)
-	hOut[0] = &roxy_v0.KeyValue{Key: ":status", Value: "200"}
+	hOut[0] = &roxy_v0.KeyValue{
+		Key:   constants.PseudoHeaderStatus,
+		Value: constants.Status200,
+	}
 
 	defer func() {
 		if err == nil {
-			hOut = append(hOut, &roxy_v0.KeyValue{Key: "content-length", Value: strconv.Itoa(len(bOut))})
+			hOut = append(hOut, &roxy_v0.KeyValue{
+				Key:   constants.HeaderContentLen,
+				Value: strconv.Itoa(len(bOut)),
+			})
 			if methodIn == http.MethodHead {
 				bOut = nil
 			}
@@ -538,28 +544,38 @@ func (s *webServerServer) Serve(ws roxy_v0.Web_ServeServer) (err error) {
 
 	if methodIn == http.MethodOptions {
 		hOut[0].Value = "204"
-		hOut = append(hOut, &roxy_v0.KeyValue{Key: "allow", Value: "OPTIONS, GET, HEAD"})
+		hOut = append(hOut, &roxy_v0.KeyValue{
+			Key:   constants.HeaderAllow,
+			Value: constants.AllowGET,
+		})
 		return
 	}
 
 	if methodIn != http.MethodGet && methodIn != http.MethodPost {
 		hOut[0].Value = "405"
-		hOut = append(hOut, &roxy_v0.KeyValue{Key: "allow", Value: "OPTIONS, GET, HEAD"})
+		hOut = append(hOut, &roxy_v0.KeyValue{
+			Key:   constants.HeaderAllow,
+			Value: constants.AllowGET,
+		})
 		return
 	}
 
 	bOut = s.corpus
-	hOut = append(hOut, &roxy_v0.KeyValue{Key: "content-type", Value: "text/plain; charset=utf-8"})
+	hOut = append(hOut, &roxy_v0.KeyValue{
+		Key:   constants.HeaderContentType,
+		Value: constants.ContentTypeTextPlain,
+	})
 	return
 }
 
 type kvList []*roxy_v0.KeyValue
 
 var specialHeaders = map[string]int{
-	":scheme":    -4,
-	":method":    -3,
-	":authority": -2,
-	":path":      -1,
+	constants.PseudoHeaderScheme:    -5,
+	constants.PseudoHeaderMethod:    -4,
+	constants.PseudoHeaderAuthority: -3,
+	constants.PseudoHeaderPath:      -2,
+	constants.PseudoHeaderStatus:    -1,
 }
 
 func (list kvList) Len() int {
