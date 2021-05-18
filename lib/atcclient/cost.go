@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+// CostInterval is the span of time over which the average cost-per-second is
+// computed, for estimating future cost spend.
 const CostInterval = 60 * time.Second
 
 var (
@@ -21,11 +23,16 @@ type costSample struct {
 	c uint64
 }
 
+// CostData represents a snapshot of this Go process's cost expenditures.
+//
+// (For clients, this represents demand created by outgoing requests.
+// For servers, this represents supply consumed by incoming requests.)
 type CostData struct {
 	Counter   uint64
 	PerSecond float64
 }
 
+// GetCostData captures a CostData snapshot.
 func GetCostData() CostData {
 	var out CostData
 
@@ -37,6 +44,12 @@ func GetCostData() CostData {
 	return out
 }
 
+// Spend records that a query just happened and the cost value of that query.
+//
+// (For clients, this represents demand created by outgoing requests.
+// For servers, this represents supply consumed by incoming requests.)
+//
+// The cost must be a number between 0 and 65536, inclusive.
 func Spend(cost uint) {
 	if cost > 65536 {
 		panic(fmt.Errorf("cost %d is out of range", cost))

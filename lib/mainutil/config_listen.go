@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"path/filepath"
 	"strings"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
@@ -223,7 +222,7 @@ func (lc ListenConfig) postprocess() (out ListenConfig, err error) {
 				lc.Network = constants.NetUnix
 			}
 		} else if lc.Network != constants.NetEmpty || strings.Contains(lc.Address, "/") {
-			abs, err := filepath.Abs(lc.Address)
+			abs, err := roxyutil.PathAbs(lc.Address)
 			if err != nil {
 				return zero, err
 			}

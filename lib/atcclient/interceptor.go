@@ -11,6 +11,8 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// InterceptorFactory creates gRPC Interceptors (and other wrapper types) for
+// capturing cost-adjusted query-per-second data.
 type InterceptorFactory struct {
 	DefaultCostPerQuery    uint32
 	DefaultCostPerRequest  uint32
@@ -18,6 +20,9 @@ type InterceptorFactory struct {
 	ByFullMethod           map[string]InterceptorPerMethod
 }
 
+// InterceptorPerMethod is the cost adjustments for a specific gRPC method.
+// Client-side SendMsg and server-side RecvMsg events will be routed through
+// AdjustFunc, if non-nil.
 type InterceptorPerMethod struct {
 	CostPerQuery    uint32
 	CostPerRequest  uint32
@@ -25,8 +30,14 @@ type InterceptorPerMethod struct {
 	AdjustFunc      InterceptorAdjustFunc
 }
 
+// InterceptorAdjustFunc is a closure that is permitted to peek at the contents
+// of the gRPC request body.
 type InterceptorAdjustFunc func(oldCost uint32, request interface{}) uint32
 
+// Cost returns the cost factors for the named method.
+//
+// The method should be in gRPC "full method" syntax, i.e. a URL path like
+// "/package.of.Service/Method".
 func (factory InterceptorFactory) Cost(method string) (costPerQuery, costPerReq, costPerResp uint32, adjustFn InterceptorAdjustFunc) {
 	costPerQuery = factory.DefaultCostPerQuery
 	costPerReq = factory.DefaultCostPerRequest
@@ -40,6 +51,7 @@ func (factory InterceptorFactory) Cost(method string) (costPerQuery, costPerReq,
 	return
 }
 
+// DialOptions returns the DialOptions for installing client-side gRPC interceptors.
 func (factory InterceptorFactory) DialOptions(more ...grpc.DialOption) []grpc.DialOption {
 	out := make([]grpc.DialOption, 2+len(more))
 	out[0] = grpc.WithUnaryInterceptor(factory.UnaryClientInterceptor())
@@ -48,6 +60,7 @@ func (factory InterceptorFactory) DialOptions(more ...grpc.DialOption) []grpc.Di
 	return out
 }
 
+// ServerOptions returns the ServerOptions for installing server-side gRPC interceptors.
 func (factory InterceptorFactory) ServerOptions(more ...grpc.ServerOption) []grpc.ServerOption {
 	out := make([]grpc.ServerOption, 2+len(more))
 	out[0] = grpc.UnaryInterceptor(factory.UnaryServerInterceptor())
@@ -56,14 +69,25 @@ func (factory InterceptorFactory) ServerOptions(more ...grpc.ServerOption) []grp
 	return out
 }
 
+// RoundTripper wraps an http.RoundTripper to install client-side HTTP cost instrumentation.
+//
+// The HTTP requests are treated as if they are unitary gRPC calls, with a
+// "full method" name of "/your/url/here@VERB" for HTTP method "VERB", and a
+// request type of *http.Request.
+//
+// (The query string is not included in the "full method" name.)
 func (factory InterceptorFactory) RoundTripper(inner http.RoundTripper) http.RoundTripper {
 	return interceptorRoundTripper{factory, inner}
 }
 
+// Handler wraps an http.Handler to install server-side HTTP cost instrumentation.
+//
+// See RoundTripper for details of how HTTP requests are mapped to gRPC calls.
 func (factory InterceptorFactory) Handler(inner http.Handler) http.Handler {
 	return interceptorHandler{factory, inner}
 }
 
+// UnaryClientInterceptor returns a gRPC UnaryClientInterceptor.
 func (factory InterceptorFactory) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(
 		ctx context.Context,
@@ -87,6 +111,7 @@ func (factory InterceptorFactory) UnaryClientInterceptor() grpc.UnaryClientInter
 	}
 }
 
+// StreamClientInterceptor returns a gRPC StreamClientInterceptor.
 func (factory InterceptorFactory) StreamClientInterceptor() grpc.StreamClientInterceptor {
 	return func(
 		ctx context.Context,
@@ -112,6 +137,7 @@ func (factory InterceptorFactory) StreamClientInterceptor() grpc.StreamClientInt
 	}
 }
 
+// UnaryServerInterceptor returns a gRPC UnaryServerInterceptor.
 func (factory InterceptorFactory) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
@@ -132,6 +158,7 @@ func (factory InterceptorFactory) UnaryServerInterceptor() grpc.UnaryServerInter
 	}
 }
 
+// StreamServerInterceptor returns a gRPC StreamServerInterceptor.
 func (factory InterceptorFactory) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(
 		srv interface{},
@@ -272,7 +299,10 @@ type interceptorRoundTripper struct {
 
 func (t interceptorRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	method := fmt.Sprint(path.Clean(r.URL.Path), "@", r.Method)
-	costPerQuery, _, _, _ := t.factory.Cost(method)
+	costPerQuery, _, _, adjustFn := t.factory.Cost(method)
+	if adjustFn != nil {
+		costPerQuery = adjustFn(costPerQuery, r)
+	}
 	Spend(uint(costPerQuery))
 	log.Logger.Trace().
 		Str("method", method).
@@ -294,7 +324,10 @@ type interceptorHandler struct {
 
 func (h interceptorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	method := fmt.Sprint(path.Clean(r.URL.Path), "@", r.Method)
-	costPerQuery, _, _, _ := h.factory.Cost(method)
+	costPerQuery, _, _, adjustFn := h.factory.Cost(method)
+	if adjustFn != nil {
+		costPerQuery = adjustFn(costPerQuery, r)
+	}
 	Spend(uint(costPerQuery))
 	log.Logger.Trace().
 		Str("method", method).

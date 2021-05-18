@@ -59,12 +59,12 @@ const (
 	SubsystemGRPC  = "grpc"
 )
 
-// HTTP methods
+// HTTP methods.
 const (
 	MethodOTHER = "OTHER"
 )
 
-// HTTP status codes (as strings)
+// HTTP status codes (as strings).
 const (
 	Status1XX = "1XX"
 	Status100 = "100"
@@ -90,7 +90,7 @@ const (
 	Status503 = "503"
 )
 
-// HTTP headers
+// HTTP headers.
 const (
 	HeaderAllow        = "allow"
 	HeaderCacheControl = "cache-control"
@@ -120,7 +120,7 @@ const (
 	HeaderXID          = "xid"
 )
 
-// HTTP/2 pseudo-headers
+// HTTP/2 pseudo-headers.
 const (
 	PseudoHeaderScheme    = ":scheme"
 	PseudoHeaderMethod    = ":method"
@@ -129,14 +129,14 @@ const (
 	PseudoHeaderStatus    = ":status"
 )
 
-// Cache-Control header values
+// Cache-Control header values.
 const (
 	CacheControlNoCache    = "no-cache"
 	CacheControl1Day       = "max-age=86400, must-revalidate"
 	CacheControlPublic1Day = "public, max-age=86400, must-revalidate"
 )
 
-// Content-Type header values
+// Content-Type header values.
 const (
 	ContentTypeTextPlain      = "text/plain; charset=utf-8"
 	ContentTypeTextHTML       = "text/html; charset=utf-8"
@@ -145,13 +145,13 @@ const (
 	ContentTypeTextJS         = "text/javascript"
 )
 
-// Content-Language header values
+// Content-Language header values.
 const (
 	ContentLangEN   = "en"
 	ContentLangENUS = "en-US"
 )
 
-// Allow header values
+// Allow header values.
 const (
 	AllowGET     = "OPTIONS, GET, HEAD"
 	AllowGETPOST = "OPTIONS, GET, HEAD, POST"

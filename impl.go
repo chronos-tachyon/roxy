@@ -181,7 +181,7 @@ func (impl *Impl) loadMimeRules() error {
 		mimeFileJSON, err = ioutil.ReadFile(mimeFile)
 		if errors.Is(err, fs.ErrNotExist) {
 			mimeFile = "<internal>"
-			mimeFileJSON = []byte(dist.DefaultMimeJSON)
+			mimeFileJSON = dist.DefaultMimeJSON()
 			err = nil
 		}
 		if err != nil {

@@ -18,7 +18,7 @@ func ExpandString(in string) (string, error) {
 	expanded := os.Expand(in, func(name string) string {
 		value, found := os.LookupEnv(name)
 		if !found {
-			err := BadEnvVarError{Var: name}
+			err := EnvVarNotFoundError{Var: name}
 			errs.Errors = append(errs.Errors, err)
 		}
 		return value
@@ -51,25 +51,25 @@ func ExpandPath(in string) (string, error) {
 			userName = expanded[1:]
 		}
 
+		err = nil
+
 		var u *user.User
 		if userName == "" {
 			if value, found := os.LookupEnv("HOME"); found {
 				u = &user.User{HomeDir: value}
-				err = nil
-			} else {
-				u, err = user.Current()
-				if err != nil {
-					u = &user.User{HomeDir: "/home/self"}
-				}
 			}
-		} else {
-			u, err = user.Lookup(userName)
-			if err != nil {
+		}
+		if u == nil {
+			u, err = LookupUserByName(userName)
+		}
+		if u == nil {
+			if userName == "" {
+				u = &user.User{HomeDir: "/home/self"}
+			} else {
 				u = &user.User{HomeDir: filepath.Join("/home", userName)}
 			}
 		}
 		if err != nil {
-			err = FailedUserNameLookupError{Name: userName, Err: err}
 			errs.Errors = append(errs.Errors, err)
 		}
 		homeDir := u.HomeDir
@@ -77,9 +77,8 @@ func ExpandPath(in string) (string, error) {
 	}
 
 	if expanded != "" && expanded[0] != '\x00' && expanded[0] != '@' && !regexp.MustCompile(`^[0-9A-Za-z+-]+:`).MatchString(expanded) {
-		abs, err := filepath.Abs(expanded)
+		abs, err := PathAbs(expanded)
 		if err != nil {
-			err = FailedPathAbsError{Path: expanded, Err: err}
 			errs.Errors = append(errs.Errors, err)
 			abs = expanded
 		}
