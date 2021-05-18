@@ -7,17 +7,18 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/membership"
 )
 
-// type BadStatusError {{{
+// type StatusError {{{
 
-type BadStatusError struct {
+// StatusError represents a server that is in a bad state.
+type StatusError struct {
 	Status membership.ServerSetStatus
 }
 
-func (err BadStatusError) Error() string {
+func (err StatusError) Error() string {
 	return fmt.Sprintf("status is %v", err.Status)
 }
 
-func (err BadStatusError) Is(other error) bool {
+func (err StatusError) Is(other error) bool {
 	switch other {
 	case err:
 		return true
@@ -28,7 +29,7 @@ func (err BadStatusError) Is(other error) bool {
 	}
 }
 
-var _ error = BadStatusError{}
+var _ error = StatusError{}
 
 // }}}
 

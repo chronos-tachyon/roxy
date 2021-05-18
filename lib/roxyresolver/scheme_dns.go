@@ -57,21 +57,21 @@ func NewDNSResolver(opts Options) (Resolver, error) {
 func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host string, port string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
 	res, err = parseNetResolver(rt.Authority)
 	if err != nil {
-		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: err}
+		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: err}
 		return
 	}
 
 	hostPort := rt.Endpoint
 	if hostPort == "" {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
 	host, port, err = misc.SplitHostPort(hostPort, defaultPort)
 	if err != nil {
-		err = roxyutil.BadEndpointError{
+		err = roxyutil.EndpointError{
 			Endpoint: rt.Endpoint,
-			Err:      roxyutil.BadHostPortError{HostPort: hostPort, Err: err},
+			Err:      roxyutil.HostPortError{HostPort: hostPort, Err: err},
 		}
 		return
 	}
@@ -79,7 +79,7 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
@@ -87,7 +87,7 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 	if str := rt.Query.Get("pollInterval"); str != "" {
 		pollInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "pollInterval", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "pollInterval", Value: str, Err: err}
 			return
 		}
 	}
@@ -95,7 +95,7 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 	if str := rt.Query.Get("cooldownInterval"); str != "" {
 		cdInterval, err = time.ParseDuration(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "cooldownInterval", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "cooldownInterval", Value: str, Err: err}
 			return
 		}
 	}

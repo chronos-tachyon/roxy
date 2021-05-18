@@ -160,7 +160,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-authority-is-not-empty",
 			target: "unix://example.com/path/to/socket",
 			errfn: func(err error) bool {
-				var xerr roxyutil.BadAuthorityError
+				var xerr roxyutil.AuthorityError
 				if errors.As(err, &xerr) {
 					return xerr.Err == roxyutil.ErrExpectEmptyOrLocalhost
 				}
@@ -171,7 +171,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-endpoint-is-empty-1",
 			target: "unix:",
 			errfn: func(err error) bool {
-				var xerr roxyutil.BadEndpointError
+				var xerr roxyutil.EndpointError
 				if errors.As(err, &xerr) {
 					return xerr.Err == roxyutil.ErrExpectNonEmpty
 				}
@@ -182,7 +182,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-endpoint-is-empty-2",
 			target: "unix://localhost",
 			errfn: func(err error) bool {
-				var xerr roxyutil.BadEndpointError
+				var xerr roxyutil.EndpointError
 				if errors.As(err, &xerr) {
 					return xerr.Err == roxyutil.ErrExpectNonEmpty
 				}
@@ -193,7 +193,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-path-is-empty",
 			target: "unix:?foo=bar",
 			errfn: func(err error) bool {
-				var xerr roxyutil.BadEndpointError
+				var xerr roxyutil.EndpointError
 				if errors.As(err, &xerr) {
 					return xerr.Err == roxyutil.ErrExpectNonEmpty
 				}
@@ -204,7 +204,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-bad-query",
 			target: "unix:/path/to/socket?foo=%",
 			errfn: func(err error) bool {
-				var xerr roxyutil.BadQueryStringError
+				var xerr roxyutil.QueryStringError
 				return errors.As(err, &xerr)
 			},
 		},
@@ -212,7 +212,7 @@ func TestNewUnixResolver(t *testing.T) {
 			name:   "err-bad-balancer",
 			target: "unix:/path/to/socket?balancer=bogus",
 			errfn: func(err error) bool {
-				var xerr roxyutil.BadQueryParamError
+				var xerr roxyutil.QueryParamError
 				if errors.As(err, &xerr) {
 					return xerr.Name == "balancer" && xerr.Value == "bogus"
 				}

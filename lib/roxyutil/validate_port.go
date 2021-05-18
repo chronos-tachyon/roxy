@@ -4,15 +4,15 @@ package roxyutil
 // a membership.Roxy or membership.ServerSet address advertisement.
 func ValidateNamedPort(str string) error {
 	if str == "" {
-		return BadPortError{
+		return PortError{
 			Port: str,
 			Err:  ErrExpectNonEmpty,
 		}
 	}
 	if !reSSPort.MatchString(str) {
-		return BadPortError{
+		return PortError{
 			Port: str,
-			Err: FailedMatchError{
+			Err: RegexpMatchError{
 				Input:   str,
 				Pattern: reSSPort,
 			},

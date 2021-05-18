@@ -4,15 +4,15 @@ package roxyutil
 // Name for the Air Traffic Control service.
 func ValidateATCServiceName(str string) error {
 	if str == "" {
-		return BadATCServiceNameError{
+		return ATCServiceNameError{
 			ServiceName: str,
 			Err:         ErrExpectNonEmpty,
 		}
 	}
 	if !reATCService.MatchString(str) {
-		return BadATCServiceNameError{
+		return ATCServiceNameError{
 			ServiceName: str,
-			Err: FailedMatchError{
+			Err: RegexpMatchError{
 				Input:   str,
 				Pattern: reATCService,
 			},
@@ -28,9 +28,9 @@ func ValidateATCLocation(str string) error {
 		return nil
 	}
 	if !reATCLocation.MatchString(str) {
-		return BadATCLocationError{
+		return ATCLocationError{
 			Location: str,
-			Err: FailedMatchError{
+			Err: RegexpMatchError{
 				Input:   str,
 				Pattern: reATCLocation,
 			},
@@ -43,15 +43,15 @@ func ValidateATCLocation(str string) error {
 // the Air Traffic Control service.
 func ValidateATCUnique(str string) error {
 	if str == "" {
-		return BadATCUniqueError{
+		return ATCUniqueError{
 			Unique: str,
 			Err:    ErrExpectNonEmpty,
 		}
 	}
 	if !reATCUnique.MatchString(str) {
-		return BadATCUniqueError{
+		return ATCUniqueError{
 			Unique: str,
-			Err: FailedMatchError{
+			Err: RegexpMatchError{
 				Input:   str,
 				Pattern: reATCUnique,
 			},

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -78,14 +77,14 @@ func (rt *RoxyTarget) Parse(str string) error {
 	}()
 
 	if str == "" {
-		return roxyutil.BadEndpointError{Endpoint: str, Err: roxyutil.ErrExpectNonEmpty}
+		return roxyutil.EndpointError{Endpoint: str, Err: roxyutil.ErrExpectNonEmpty}
 	}
 
 	if str == constants.NullString {
-		return roxyutil.BadEndpointError{Endpoint: str, Err: roxyutil.ErrFailedToMatch}
+		return roxyutil.EndpointError{Endpoint: str, Err: roxyutil.ErrFailedToMatch}
 	}
 
-	match := regexp.MustCompile(`^([0-9A-Za-z+-]+):`).FindStringSubmatch(str)
+	match := reTargetScheme.FindStringSubmatch(str)
 	if match != nil {
 		rt.Scheme = match[1]
 		n := len(match[0])
@@ -112,7 +111,7 @@ func (rt *RoxyTarget) Parse(str string) error {
 		var err error
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
-			return roxyutil.BadQueryStringError{QueryString: qs, Err: err}
+			return roxyutil.QueryStringError{QueryString: qs, Err: err}
 		}
 	}
 
@@ -139,7 +138,7 @@ func RoxyTargetFromTarget(target Target) (RoxyTarget, error) {
 		var err error
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
-			return zero, roxyutil.BadQueryStringError{QueryString: qs, Err: err}
+			return zero, roxyutil.QueryStringError{QueryString: qs, Err: err}
 		}
 	}
 

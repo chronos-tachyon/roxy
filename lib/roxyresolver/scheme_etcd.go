@@ -51,13 +51,13 @@ func NewEtcdResolver(opts Options) (Resolver, error) {
 
 func ParseEtcdTarget(rt RoxyTarget) (etcdPath string, etcdPort string, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
-		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
+		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
 	pathAndPort := rt.Endpoint
 	if pathAndPort == "" {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
@@ -73,13 +73,13 @@ func ParseEtcdTarget(rt RoxyTarget) (etcdPath string, etcdPort string, balancer 
 	}
 	err = roxyutil.ValidateEtcdPath(etcdPath)
 	if err != nil {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 	if hasPort {
 		err = roxyutil.ValidateNamedPort(etcdPort)
 		if err != nil {
-			err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+			err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 			return
 		}
 	}
@@ -87,7 +87,7 @@ func ParseEtcdTarget(rt RoxyTarget) (etcdPath string, etcdPort string, balancer 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}

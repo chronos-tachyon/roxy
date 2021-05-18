@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	multierror "github.com/hashicorp/go-multierror"
@@ -18,7 +17,7 @@ func ExpandString(in string) (string, error) {
 	expanded := os.Expand(in, func(name string) string {
 		value, found := os.LookupEnv(name)
 		if !found {
-			err := EnvVarNotFoundError{Var: name}
+			err := EnvVarLookupError{Var: name, Err: ErrNotExist}
 			errs.Errors = append(errs.Errors, err)
 		}
 		return value
@@ -51,32 +50,26 @@ func ExpandPath(in string) (string, error) {
 			userName = expanded[1:]
 		}
 
-		err = nil
-
-		var u *user.User
-		if userName == "" {
-			if value, found := os.LookupEnv("HOME"); found {
-				u = &user.User{HomeDir: value}
-			}
-		}
-		if u == nil {
+		var homeDir string
+		if value, found := os.LookupEnv("HOME"); found && userName == "" {
+			homeDir = value
+		} else {
+			var u *user.User
 			u, err = LookupUserByName(userName)
-		}
-		if u == nil {
-			if userName == "" {
-				u = &user.User{HomeDir: "/home/self"}
+			if err == nil {
+				homeDir = u.HomeDir
+			} else if userName == "" {
+				homeDir = "/home/self"
+				errs.Errors = append(errs.Errors, err)
 			} else {
-				u = &user.User{HomeDir: filepath.Join("/home", userName)}
+				homeDir = filepath.Join("/home", userName)
+				errs.Errors = append(errs.Errors, err)
 			}
 		}
-		if err != nil {
-			errs.Errors = append(errs.Errors, err)
-		}
-		homeDir := u.HomeDir
 		expanded = filepath.Join(homeDir, rest)
 	}
 
-	if expanded != "" && expanded[0] != '\x00' && expanded[0] != '@' && !regexp.MustCompile(`^[0-9A-Za-z+-]+:`).MatchString(expanded) {
+	if expanded != "" && expanded[0] != '\x00' && expanded[0] != '@' && !reURLScheme.MatchString(expanded) {
 		abs, err := PathAbs(expanded)
 		if err != nil {
 			errs.Errors = append(errs.Errors, err)

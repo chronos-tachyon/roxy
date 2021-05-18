@@ -14,7 +14,7 @@ import (
 // defaultPort is used instead.
 func SplitHostPort(str, defaultPort string) (host string, port string, err error) {
 	if str == "" {
-		return "", "", roxyutil.BadHostPortError{HostPort: str, Err: roxyutil.ErrExpectNonEmpty}
+		return "", "", roxyutil.HostPortError{HostPort: str, Err: roxyutil.ErrExpectNonEmpty}
 	}
 
 	host, port, err = net.SplitHostPort(str)
@@ -25,10 +25,10 @@ func SplitHostPort(str, defaultPort string) (host string, port string, err error
 		}
 	}
 	if err != nil {
-		return "", "", roxyutil.BadHostPortError{HostPort: str, Err: err}
+		return "", "", roxyutil.HostPortError{HostPort: str, Err: err}
 	}
 	if host == "" {
-		return "", "", roxyutil.BadHostError{Host: host, Err: roxyutil.ErrExpectNonEmpty}
+		return "", "", roxyutil.HostError{Host: host, Err: roxyutil.ErrExpectNonEmpty}
 	}
 	return host, port, nil
 }
@@ -88,14 +88,14 @@ func ParseIPAndZone(host string) (net.IP, string, error) {
 // ParseIP parses an IP address.
 func ParseIP(host string) (net.IP, error) {
 	if host == "" {
-		return nil, roxyutil.BadHostError{Host: host, Err: roxyutil.ErrExpectNonEmpty}
+		return nil, roxyutil.HostError{Host: host, Err: roxyutil.ErrExpectNonEmpty}
 	}
 	if strings.EqualFold(host, "localhost") {
 		host = "127.0.0.1"
 	}
 	ip := net.ParseIP(host)
 	if ip == nil {
-		return nil, roxyutil.BadHostError{Host: host, Err: roxyutil.BadIPError{IP: host}}
+		return nil, roxyutil.HostError{Host: host, Err: roxyutil.IPError{IP: host, Err: roxyutil.ErrFailedToMatch}}
 	}
 	if ipv4 := ip.To4(); ipv4 != nil {
 		ip = ipv4
@@ -115,5 +115,5 @@ func ParsePort(port string) (uint16, error) {
 		return uint16(p), nil
 	}
 
-	return 0, roxyutil.BadPortError{Port: "port", Err: err0, NamedOK: true}
+	return 0, roxyutil.PortError{Port: "port", Err: err0, NamedOK: true}
 }

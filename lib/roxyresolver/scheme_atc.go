@@ -52,18 +52,18 @@ func NewATCResolver(opts Options) (Resolver, error) {
 
 func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balancer BalancerType, isDSC bool, serverName string, err error) {
 	if rt.Authority != "" {
-		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
+		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
 	lbName = rt.Endpoint
 	if lbName == "" {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 	err = roxyutil.ValidateATCServiceName(lbName)
 	if err != nil {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 
@@ -73,21 +73,21 @@ func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balance
 	}
 	err = roxyutil.ValidateATCLocation(lbLocation)
 	if err != nil {
-		err = roxyutil.BadQueryParamError{Name: "location", Value: lbLocation, Err: err}
+		err = roxyutil.QueryParamError{Name: "location", Value: lbLocation, Err: err}
 		return
 	}
 
 	lbUnique = rt.Query.Get("unique")
 	err = roxyutil.ValidateATCUnique(lbUnique)
 	if err != nil {
-		err = roxyutil.BadQueryParamError{Name: "unique", Value: lbUnique, Err: err}
+		err = roxyutil.QueryParamError{Name: "unique", Value: lbUnique, Err: err}
 		return
 	}
 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}
@@ -95,7 +95,7 @@ func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balance
 	if str := rt.Query.Get("disableServiceConfig"); str != "" {
 		isDSC, err = misc.ParseBool(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "disableServiceConfig", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "disableServiceConfig", Value: str, Err: err}
 			return
 		}
 	}

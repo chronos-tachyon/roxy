@@ -22,7 +22,7 @@ func parseMembershipData(namedPort string, serverName string, pathKey string, by
 	}
 
 	if !r.Ready {
-		var err error = BadStatusError{membership.StatusDead}
+		var err error = StatusError{membership.StatusDead}
 		err = fmt.Errorf("%s: %w", pathKey, err)
 		return Event{
 			Type: BadDataEvent,

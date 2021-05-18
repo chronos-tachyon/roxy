@@ -34,5 +34,5 @@ func ParseBool(str string) (bool, error) {
 			return value, nil
 		}
 	}
-	return false, roxyutil.BoolParseError{Input: str}
+	return false, roxyutil.BoolError{Input: str, Err: roxyutil.ErrFailedToMatch}
 }

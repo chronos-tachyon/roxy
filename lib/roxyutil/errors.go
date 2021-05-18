@@ -1,6 +1,7 @@
 package roxyutil
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,293 +13,359 @@ import (
 
 // ErrNoHealthyBackends signals that a roxyresolver.Resolver was unable to find
 // any healthy servers to talk to.
-var ErrNoHealthyBackends = errors.New("no healthy backends")
+var ErrNoHealthyBackends = noHealthyBackendsError(0)
 
-// These are error constants returned by various Roxy libraries.
+// ErrNotExist signals that something does not exist.
+var ErrNotExist = notExistError(0)
+
+// ErrFailedToMatch et al signal that input parsing has failed.
 var (
-	ErrExpectEmpty            = errors.New("expected empty string")
-	ErrExpectEmptyOrLocalhost = errors.New("expected empty string or \"localhost\"")
-	ErrExpectNonEmpty         = errors.New("expected non-empty string")
-	ErrExpectOneSlash         = errors.New("expected one '/', found 2 or more")
-	ErrExpectLeadingSlash     = errors.New("expected path to start with '/'")
-	ErrExpectTrailingSlash    = errors.New("expected path to end with '/'")
-	ErrExpectNoEndSlash       = errors.New("did not expect path to end with '/'")
-	ErrExpectNoDoubleSlash    = errors.New("did not expect path to contain '//'")
-	ErrExpectNoDot            = errors.New("did not expect path to contain '/./'")
-	ErrExpectNoDotDot         = errors.New("did not expect path to contain '/../'")
-	ErrFailedToMatch          = errors.New("failed to match expected pattern")
+	ErrFailedToMatch          = inputError("failed to match expected pattern")
+	ErrExpectEmpty            = inputError("expected empty string")
+	ErrExpectEmptyOrLocalhost = inputError("expected empty string or \"localhost\"")
+	ErrExpectNonEmpty         = inputError("expected non-empty string")
+	ErrExpectOneSlash         = inputError("expected one '/', found 2 or more")
+	ErrExpectLeadingSlash     = inputError("expected path to start with '/'")
+	ErrExpectTrailingSlash    = inputError("expected path to end with '/'")
+	ErrExpectNoEndSlash       = inputError("did not expect path to end with '/'")
+	ErrExpectNoDoubleSlash    = inputError("did not expect path to contain '//'")
+	ErrExpectNoDot            = inputError("did not expect path to contain '/./'")
+	ErrExpectNoDotDot         = inputError("did not expect path to contain '/../'")
 )
 
-// type FailedMatchError {{{
+type grpcStatusError interface {
+	error
+	GRPCStatus() *status.Status
+}
 
-// FailedMatchError represents failure to match a regular expression.
-type FailedMatchError struct {
+type grpcStatusCodeError interface {
+	error
+	GRPCStatusCode() codes.Code
+}
+
+// type noHealthyBackendsError {{{
+
+// noHealthyBackendsError represents failure to locate something.
+type noHealthyBackendsError int
+
+// Error fulfills the error interface.
+func (err noHealthyBackendsError) Error() string {
+	return "no healthy backends"
+}
+
+// GRPCStatusCode returns the GRPC status code.
+func (err noHealthyBackendsError) GRPCStatusCode() codes.Code {
+	return codes.Unavailable
+}
+
+var _ error = noHealthyBackendsError(0)
+
+// }}}
+
+// type notExistError {{{
+
+// notExistError represents failure to locate something.
+type notExistError int
+
+// Error fulfills the error interface.
+func (err notExistError) Error() string {
+	return "does not exist"
+}
+
+// Is returns true for fs.ErrNotExist.
+func (err notExistError) Is(other error) bool {
+	return other == fs.ErrNotExist
+}
+
+// GRPCStatusCode returns the GRPC status code.
+func (err notExistError) GRPCStatusCode() codes.Code {
+	return codes.NotFound
+}
+
+var _ error = notExistError(0)
+
+// }}}
+
+// type inputError {{{
+
+// inputError represents failure to parse an input.
+type inputError string
+
+// Error fulfills the error interface.
+func (err inputError) Error() string {
+	return string(err)
+}
+
+// GRPCStatusCode returns the GRPC status code.
+func (err inputError) GRPCStatusCode() codes.Code {
+	return codes.InvalidArgument
+}
+
+var _ error = inputError("")
+var _ grpcStatusCodeError = inputError("")
+
+// }}}
+
+// type RegexpMatchError {{{
+
+// RegexpMatchError represents failure to match a regular expression.
+type RegexpMatchError struct {
 	Input   string
 	Pattern *regexp.Regexp
 }
 
 // Error fulfills the error interface.
-func (err FailedMatchError) Error() string {
+func (err RegexpMatchError) Error() string {
 	return fmt.Sprintf("input %q failed to match pattern /%s/", err.Input, err.Pattern.String())
 }
 
-var _ error = FailedMatchError{}
+// GRPCStatusCode returns the GRPC status code.
+func (err RegexpMatchError) GRPCStatusCode() codes.Code {
+	return codes.InvalidArgument
+}
+
+var _ error = RegexpMatchError{}
 
 // }}}
 
-// type BoolParseError {{{
+// type BoolError {{{
 
-// BoolParseError represents failure to parse the string representation of a
+// BoolError represents failure to parse the string representation of a
 // boolean value.
-type BoolParseError struct {
+type BoolError struct {
 	Input string
+	Err   error
 }
 
 // Error fulfills the error interface.
-func (err BoolParseError) Error() string {
-	return fmt.Sprintf("input %q does not resemble a boolean value", err.Input)
+func (err BoolError) Error() string {
+	return fmt.Sprintf("invalid boolean value %q: %v", err.Input, err.Err)
 }
 
-var _ error = BoolParseError{}
+// Unwrap returns the underlying cause of this error.
+func (err BoolError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = BoolError{}
 
 // }}}
 
-// type NotFoundError {{{
+// type SchemeError {{{
 
-// NotFoundError represents failure to find something.
-type NotFoundError struct {
-	Key string
-}
-
-// Error fulfills the error interface.
-func (err NotFoundError) Error() string {
-	return fmt.Sprintf("not found: %q", err.Key)
-}
-
-// GRPCStatus returns this error's representation as a gRPC Status.  It is
-// detected by status.FromError.
-func (err NotFoundError) GRPCStatus() *status.Status {
-	return status.New(codes.NotFound, err.Error())
-}
-
-// Unwrap returns fs.ErrNotExist, so that errors.Is works.
-func (err NotFoundError) Unwrap() error {
-	return fs.ErrNotExist
-}
-
-var _ error = NotFoundError{}
-
-// }}}
-
-// type BadSchemeError {{{
-
-// BadSchemeError represents failure to identify a URL scheme or a RoxyTarget
+// SchemeError represents failure to identify a URL scheme or a RoxyTarget
 // scheme.
-type BadSchemeError struct {
+type SchemeError struct {
 	Scheme string
 	Err    error
 }
 
 // Error fulfills the error interface.
-func (err BadSchemeError) Error() string {
+func (err SchemeError) Error() string {
 	return fmt.Sprintf("invalid scheme %q: %v", err.Scheme, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadSchemeError) Unwrap() error {
+func (err SchemeError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadSchemeError{}
+var _ error = SchemeError{}
 
 // }}}
 
-// type BadAuthorityError {{{
+// type AuthorityError {{{
 
-// BadAuthorityError represents failure to parse a URL authority section or a
+// AuthorityError represents failure to parse a URL authority section or a
 // RoxyTarget authority section.
-type BadAuthorityError struct {
+type AuthorityError struct {
 	Authority string
 	Err       error
 }
 
 // Error fulfills the error interface.
-func (err BadAuthorityError) Error() string {
+func (err AuthorityError) Error() string {
 	return fmt.Sprintf("invalid authority %q: %v", err.Authority, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadAuthorityError) Unwrap() error {
+func (err AuthorityError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadAuthorityError{}
+var _ error = AuthorityError{}
 
 // }}}
 
-// type BadEndpointError {{{
+// type EndpointError {{{
 
-// BadEndpointError represents failure to parse a RoxyTarget endpoint section.
-type BadEndpointError struct {
+// EndpointError represents failure to parse a RoxyTarget endpoint section.
+type EndpointError struct {
 	Endpoint string
 	Err      error
 }
 
 // Error fulfills the error interface.
-func (err BadEndpointError) Error() string {
+func (err EndpointError) Error() string {
 	return fmt.Sprintf("invalid endpoint %q: %v", err.Endpoint, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadEndpointError) Unwrap() error {
+func (err EndpointError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadEndpointError{}
+var _ error = EndpointError{}
 
 // }}}
 
-// type BadPathError {{{
+// type PathError {{{
 
-// BadPathError represents failure to parse a path of some sort, such as a URL
+// PathError represents failure to parse a path of some sort, such as a URL
 // path or a ZooKeeper path.
-type BadPathError struct {
+type PathError struct {
 	Path string
 	Err  error
 }
 
 // Error fulfills the error interface.
-func (err BadPathError) Error() string {
+func (err PathError) Error() string {
 	return fmt.Sprintf("invalid path %q: %v", err.Path, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadPathError) Unwrap() error {
+func (err PathError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadPathError{}
+var _ error = PathError{}
 
 // }}}
 
-// type BadQueryStringError {{{
+// type QueryStringError {{{
 
-// BadQueryStringError represents failure to parse a URL query string or a
+// QueryStringError represents failure to parse a URL query string or a
 // RoxyTarget query string.
-type BadQueryStringError struct {
+type QueryStringError struct {
 	QueryString string
 	Err         error
 }
 
 // Error fulfills the error interface.
-func (err BadQueryStringError) Error() string {
+func (err QueryStringError) Error() string {
 	return fmt.Sprintf("invalid query string %q: %v", err.QueryString, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadQueryStringError) Unwrap() error {
+func (err QueryStringError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadQueryStringError{}
+var _ error = QueryStringError{}
 
 // }}}
 
-// type BadQueryParamError {{{
+// type QueryParamError {{{
 
-// BadQueryParamError represents failure to parse the value of a specific URL
+// QueryParamError represents failure to parse the value of a specific URL
 // query parameter or a specific RoxyTarget query parameter.
-type BadQueryParamError struct {
+type QueryParamError struct {
 	Name  string
 	Value string
 	Err   error
 }
 
 // Error fulfills the error interface.
-func (err BadQueryParamError) Error() string {
+func (err QueryParamError) Error() string {
 	return fmt.Sprintf("invalid query param %s=%q: %v", err.Name, err.Value, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadQueryParamError) Unwrap() error {
+func (err QueryParamError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadQueryParamError{}
+var _ error = QueryParamError{}
 
 // }}}
 
-// type BadHostPortError {{{
+// type HostPortError {{{
 
-// BadHostPortError represents failure to parse a "host:port"-shaped string.
-type BadHostPortError struct {
+// HostPortError represents failure to parse a "host:port"-shaped string.
+type HostPortError struct {
 	HostPort string
 	Err      error
 }
 
 // Error fulfills the error interface.
-func (err BadHostPortError) Error() string {
+func (err HostPortError) Error() string {
 	return fmt.Sprintf("invalid <host>:<port> string %q: %v", err.HostPort, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadHostPortError) Unwrap() error {
+func (err HostPortError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadHostPortError{}
+var _ error = HostPortError{}
 
 // }}}
 
-// type BadHostError {{{
+// type HostError {{{
 
-// BadHostError represents failure to parse a hostname string.
-type BadHostError struct {
+// HostError represents failure to parse a hostname string.
+type HostError struct {
 	Host string
 	Err  error
 }
 
 // Error fulfills the error interface.
-func (err BadHostError) Error() string {
+func (err HostError) Error() string {
 	return fmt.Sprintf("invalid hostname %q: %v", err.Host, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadHostError) Unwrap() error {
+func (err HostError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadHostError{}
+var _ error = HostError{}
 
 // }}}
 
-// type BadIPError {{{
+// type IPError {{{
 
-// BadIPError represents failure to parse an IP address string.
-type BadIPError struct {
-	IP string
+// IPError represents failure to parse an IP address string.
+type IPError struct {
+	IP  string
+	Err error
 }
 
 // Error fulfills the error interface.
-func (err BadIPError) Error() string {
-	return fmt.Sprintf("invalid IP address %q", err.IP)
+func (err IPError) Error() string {
+	return fmt.Sprintf("invalid IP address %q: %v", err.IP, err.Err)
 }
 
-var _ error = BadIPError{}
+// Unwrap returns the underlying cause of this error.
+func (err IPError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = IPError{}
 
 // }}}
 
-// type BadPortError {{{
+// type PortError {{{
 
-// BadPortError represents failure to parse a port number string.
-type BadPortError struct {
+// PortError represents failure to parse a port number string.
+type PortError struct {
 	Port    string
 	Err     error
 	NamedOK bool
 }
 
 // Error fulfills the error interface.
-func (err BadPortError) Error() string {
+func (err PortError) Error() string {
 	format := "invalid port number %q: %v"
 	if err.NamedOK {
 		format = "invalid port number or named port %q: %v"
@@ -307,141 +374,135 @@ func (err BadPortError) Error() string {
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadPortError) Unwrap() error {
+func (err PortError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadPortError{}
+var _ error = PortError{}
 
 // }}}
 
-// type BadATCServiceNameError {{{
+// type ATCServiceNameError {{{
 
-// BadATCServiceNameError represents failure to parse an ATC service name.
-type BadATCServiceNameError struct {
+// ATCServiceNameError represents failure to parse an ATC service name.
+type ATCServiceNameError struct {
 	ServiceName string
 	Err         error
 }
 
 // Error fulfills the error interface.
-func (err BadATCServiceNameError) Error() string {
+func (err ATCServiceNameError) Error() string {
 	return fmt.Sprintf("invalid ATC service name %q: %v", err.ServiceName, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadATCServiceNameError) Unwrap() error {
+func (err ATCServiceNameError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadATCServiceNameError{}
+var _ error = ATCServiceNameError{}
 
 // }}}
 
-// type BadATCLocationError {{{
+// type ATCLocationError {{{
 
-// BadATCLocationError represents failure to parse an ATC location.
-type BadATCLocationError struct {
+// ATCLocationError represents failure to parse an ATC location.
+type ATCLocationError struct {
 	Location string
 	Err      error
 }
 
 // Error fulfills the error interface.
-func (err BadATCLocationError) Error() string {
+func (err ATCLocationError) Error() string {
 	return fmt.Sprintf("invalid ATC location name %q: %v", err.Location, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadATCLocationError) Unwrap() error {
+func (err ATCLocationError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadATCLocationError{}
+var _ error = ATCLocationError{}
 
 // }}}
 
-// type BadATCUniqueError {{{
+// type ATCUniqueError {{{
 
-// BadATCUniqueError represents failure to parse an ATC unique client ID or
+// ATCUniqueError represents failure to parse an ATC unique client ID or
 // unique server ID.
-type BadATCUniqueError struct {
+type ATCUniqueError struct {
 	Unique string
 	Err    error
 }
 
 // Error fulfills the error interface.
-func (err BadATCUniqueError) Error() string {
+func (err ATCUniqueError) Error() string {
 	return fmt.Sprintf("invalid ATC unique identifier %q: %v", err.Unique, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err BadATCUniqueError) Unwrap() error {
+func (err ATCUniqueError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = BadATCUniqueError{}
+var _ error = ATCUniqueError{}
 
 // }}}
 
-// type EnvVarNotFoundError {{{
+// type EnvVarLookupError {{{
 
-// EnvVarNotFoundError represents failure to expand an environment variable
-// reference because the named environment variable does not exist.
-type EnvVarNotFoundError struct {
+// EnvVarLookupError represents failure to look up an environment variable.
+type EnvVarLookupError struct {
 	Var string
+	Err error
 }
 
 // Error fulfills the error interface.
-func (err EnvVarNotFoundError) Error() string {
-	return fmt.Sprintf("no such environment variable ${%s}", err.Var)
+func (err EnvVarLookupError) Error() string {
+	return fmt.Sprintf("invalid environment variable ${%s}: %v", err.Var, err.Err)
 }
 
-// GRPCStatus returns this error's representation as a gRPC Status.  It is
-// detected by status.FromError.
-func (err EnvVarNotFoundError) GRPCStatus() *status.Status {
-	return status.New(codes.NotFound, err.Error())
+// Unwrap returns the underlying cause of this error.
+func (err EnvVarLookupError) Unwrap() error {
+	return err.Err
 }
 
-// Unwrap returns fs.ErrNotExist, so that errors.Is works.
-func (err EnvVarNotFoundError) Unwrap() error {
-	return fs.ErrNotExist
-}
-
-var _ error = EnvVarNotFoundError{}
+var _ error = EnvVarLookupError{}
 
 // }}}
 
-// type UserIDLookupError {{{
+// type LookupUserByIDError {{{
 
-// UserIDLookupError represents failure to look up an OS user by UID.
-type UserIDLookupError struct {
+// LookupUserByIDError represents failure to look up an OS user by UID.
+type LookupUserByIDError struct {
 	ID  uint32
 	Err error
 }
 
 // Error fulfills the error interface.
-func (err UserIDLookupError) Error() string {
+func (err LookupUserByIDError) Error() string {
 	return fmt.Sprintf("\"os/user\".LookupId(%d) failed: %v", err.ID, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err UserIDLookupError) Unwrap() error {
+func (err LookupUserByIDError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = UserIDLookupError{}
+var _ error = LookupUserByIDError{}
 
 // }}}
 
-// type UserNameLookupError {{{
+// type LookupUserByNameError {{{
 
-// UserNameLookupError represents failure to look up an OS user by name.
-type UserNameLookupError struct {
+// LookupUserByNameError represents failure to look up an OS user by name.
+type LookupUserByNameError struct {
 	Name string
 	Err  error
 }
 
 // Error fulfills the error interface.
-func (err UserNameLookupError) Error() string {
+func (err LookupUserByNameError) Error() string {
 	if err.Name == "" {
 		return fmt.Sprintf("\"os/user\".Current() failed: %v", err.Err)
 	}
@@ -449,76 +510,149 @@ func (err UserNameLookupError) Error() string {
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err UserNameLookupError) Unwrap() error {
+func (err LookupUserByNameError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = UserNameLookupError{}
+var _ error = LookupUserByNameError{}
 
 // }}}
 
-// type GroupIDLookupError {{{
+// type LookupGroupByIDError {{{
 
-// GroupIDLookupError represents failure to look up an OS group by GID.
-type GroupIDLookupError struct {
+// LookupGroupByIDError represents failure to look up an OS group by GID.
+type LookupGroupByIDError struct {
 	ID  uint32
 	Err error
 }
 
 // Error fulfills the error interface.
-func (err GroupIDLookupError) Error() string {
+func (err LookupGroupByIDError) Error() string {
 	return fmt.Sprintf("\"os/user\".LookupGroupId(%d) failed: %v", err.ID, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err GroupIDLookupError) Unwrap() error {
+func (err LookupGroupByIDError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = GroupIDLookupError{}
+var _ error = LookupGroupByIDError{}
 
 // }}}
 
-// type GroupNameLookupError {{{
+// type LookupGroupByNameError {{{
 
-// GroupNameLookupError represents failure to look up an OS group by name.
-type GroupNameLookupError struct {
+// LookupGroupByNameError represents failure to look up an OS group by name.
+type LookupGroupByNameError struct {
 	Name string
 	Err  error
 }
 
 // Error fulfills the error interface.
-func (err GroupNameLookupError) Error() string {
+func (err LookupGroupByNameError) Error() string {
 	return fmt.Sprintf("\"os/user\".LookupGroup(%q) failed: %v", err.Name, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err GroupNameLookupError) Unwrap() error {
+func (err LookupGroupByNameError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = GroupNameLookupError{}
+var _ error = LookupGroupByNameError{}
 
 // }}}
 
-// type FailedPathAbsError {{{
+// type PathAbsError {{{
 
-// FailedPathAbsError represents failure to make a file path absolute.
-type FailedPathAbsError struct {
+// PathAbsError represents failure to make a file path absolute.
+type PathAbsError struct {
 	Path string
 	Err  error
 }
 
 // Error fulfills the error interface.
-func (err FailedPathAbsError) Error() string {
+func (err PathAbsError) Error() string {
 	return fmt.Sprintf("failed to make path absolute: %q: %v", err.Path, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err FailedPathAbsError) Unwrap() error {
+func (err PathAbsError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = FailedPathAbsError{}
+var _ error = PathAbsError{}
+
+// }}}
+
+// type GRPCStatusError {{{
+
+// GRPCStatusError represents an error with an associated GRPC status code.
+type GRPCStatusError struct {
+	Code codes.Code
+	Err  error
+}
+
+// MakeGRPCStatusError attempts to autodetect the correct status code.
+func MakeGRPCStatusError(err error) GRPCStatusError {
+	if err == nil {
+		panic(errors.New("err is nil"))
+	}
+
+	if err0, ok := err.(GRPCStatusError); ok {
+		return err0
+	}
+
+	var err1 GRPCStatusError
+	if errors.As(err, &err1) {
+		return err1
+	}
+
+	var err2 grpcStatusError
+	if errors.As(err, &err2) {
+		s := err2.GRPCStatus()
+		code := s.Code()
+		return GRPCStatusError{Code: code, Err: err2}
+	}
+
+	var err3 grpcStatusCodeError
+	code := codes.Unknown
+	switch {
+	case errors.As(err, &err3):
+		code = err3.GRPCStatusCode()
+	case errors.Is(err, fs.ErrInvalid):
+		code = codes.InvalidArgument
+	case errors.Is(err, fs.ErrPermission):
+		code = codes.PermissionDenied
+	case errors.Is(err, fs.ErrNotExist):
+		code = codes.NotFound
+	case errors.Is(err, fs.ErrExist):
+		code = codes.AlreadyExists
+	case errors.Is(err, fs.ErrClosed):
+		code = codes.FailedPrecondition
+	case errors.Is(err, context.Canceled):
+		code = codes.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		code = codes.DeadlineExceeded
+	}
+	return GRPCStatusError{Code: code, Err: err}
+}
+
+// Error fulfills the error interface.
+func (err GRPCStatusError) Error() string {
+	return err.Err.Error()
+}
+
+// GRPCStatus returns this error's representation as a gRPC Status.
+func (err GRPCStatusError) GRPCStatus() *status.Status {
+	return status.New(err.Code, err.Error())
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err GRPCStatusError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = GRPCStatusError{}
+var _ grpcStatusError = GRPCStatusError{}
 
 // }}}

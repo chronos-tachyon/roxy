@@ -37,34 +37,34 @@ func NewIPResolver(opts Options) (Resolver, error) {
 
 func ParseIPTarget(rt RoxyTarget, defaultPort string) (tcpAddrs []*net.TCPAddr, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
-		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
+		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
 	ipPortListStr, err := roxyutil.ExpandString(rt.Endpoint)
 	if err != nil {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 	if ipPortListStr == "" {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
 	tcpAddrs, err = misc.ParseTCPAddrList(ipPortListStr, defaultPort)
 	if err != nil {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 	if len(tcpAddrs) == 0 {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}

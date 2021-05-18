@@ -14,8 +14,9 @@ func LookupUserByName(userName string) (*user.User, error) {
 	} else {
 		u, err = user.Lookup(userName)
 	}
+	err = flattenUserLookupError(err)
 	if err != nil {
-		return nil, UserNameLookupError{Name: userName, Err: err}
+		return nil, LookupUserByNameError{Name: userName, Err: err}
 	}
 	return u, nil
 }
@@ -23,8 +24,9 @@ func LookupUserByName(userName string) (*user.User, error) {
 // LookupUserByID is a wrapper around "os/user".LookupId.
 func LookupUserByID(uid uint32) (*user.User, error) {
 	u, err := user.LookupId(uint32ToString(uid))
+	err = flattenUserLookupError(err)
 	if err != nil {
-		return nil, UserIDLookupError{ID: uid, Err: err}
+		return nil, LookupUserByIDError{ID: uid, Err: err}
 	}
 	return u, nil
 }
@@ -32,8 +34,9 @@ func LookupUserByID(uid uint32) (*user.User, error) {
 // LookupGroupByName is a wrapper around "os/user".LookupGroup.
 func LookupGroupByName(groupName string) (*user.Group, error) {
 	g, err := user.LookupGroup(groupName)
+	err = flattenUserLookupError(err)
 	if err != nil {
-		return nil, GroupNameLookupError{Name: groupName, Err: err}
+		return nil, LookupGroupByNameError{Name: groupName, Err: err}
 	}
 	return g, nil
 }
@@ -41,12 +44,28 @@ func LookupGroupByName(groupName string) (*user.Group, error) {
 // LookupGroupByID is a wrapper around "os/user".LookupGroupId.
 func LookupGroupByID(gid uint32) (*user.Group, error) {
 	g, err := user.LookupGroupId(uint32ToString(gid))
+	err = flattenUserLookupError(err)
 	if err != nil {
-		return nil, GroupIDLookupError{ID: gid, Err: err}
+		return nil, LookupGroupByIDError{ID: gid, Err: err}
 	}
 	return g, nil
 }
 
 func uint32ToString(x uint32) string {
 	return strconv.FormatUint(uint64(x), 10)
+}
+
+func flattenUserLookupError(err error) error {
+	switch err.(type) {
+	case user.UnknownUserError:
+		return ErrNotExist
+	case user.UnknownUserIdError:
+		return ErrNotExist
+	case user.UnknownGroupError:
+		return ErrNotExist
+	case user.UnknownGroupIdError:
+		return ErrNotExist
+	default:
+		return err
+	}
 }

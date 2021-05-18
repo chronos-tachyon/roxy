@@ -54,13 +54,13 @@ func NewZKResolver(opts Options) (Resolver, error) {
 
 func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
-		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
+		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
 	}
 
 	pathAndPort := rt.Endpoint
 	if pathAndPort == "" {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
@@ -76,13 +76,13 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	}
 	err = roxyutil.ValidateZKPath(zkPath)
 	if err != nil {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 	if hasPort {
 		err = roxyutil.ValidateNamedPort(zkPort)
 		if err != nil {
-			err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+			err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 			return
 		}
 	}
@@ -90,7 +90,7 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}

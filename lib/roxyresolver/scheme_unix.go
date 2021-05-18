@@ -49,13 +49,13 @@ func NewUnixResolver(opts Options) (Resolver, error) {
 
 func ParseUnixTarget(rt RoxyTarget) (unixAddr *net.UnixAddr, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" && !strings.EqualFold(rt.Authority, "localhost") {
-		err = roxyutil.BadAuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmptyOrLocalhost}
+		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmptyOrLocalhost}
 		return
 	}
 
 	rawUnixPath := rt.Endpoint
 	if rawUnixPath == "" {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
@@ -75,11 +75,11 @@ func ParseUnixTarget(rt RoxyTarget) (unixAddr *net.UnixAddr, balancer BalancerTy
 
 	rawUnixPath, err = fn(rawUnixPath)
 	if err != nil {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: err}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 		return
 	}
 	if rawUnixPath == "" {
-		err = roxyutil.BadEndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
 		return
 	}
 
@@ -95,7 +95,7 @@ func ParseUnixTarget(rt RoxyTarget) (unixAddr *net.UnixAddr, balancer BalancerTy
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = balancer.Parse(str)
 		if err != nil {
-			err = roxyutil.BadQueryParamError{Name: "balancer", Value: str, Err: err}
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
 			return
 		}
 	}

@@ -1,6 +1,7 @@
 package roxyresolver
 
 import (
+	"regexp"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -14,6 +15,10 @@ const (
 	maxWeight = float32(65536.0)
 
 	atcBalancerName = "atc_lb"
+)
+
+var (
+	reTargetScheme = regexp.MustCompile(`^([0-9A-Za-z+-]+):`)
 )
 
 var (

@@ -8,7 +8,7 @@ import (
 func PathAbs(str string) (string, error) {
 	abs, err := filepath.Abs(str)
 	if err != nil {
-		return "", FailedPathAbsError{Path: str, Err: err}
+		return "", PathAbsError{Path: str, Err: err}
 	}
 	return abs, nil
 }
