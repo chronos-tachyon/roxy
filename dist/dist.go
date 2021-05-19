@@ -1,7 +1,7 @@
 // Package dist contains embedded copies of files distributed with Roxy.
 package dist
 
-import _ "embed"
+import _ "embed" // for go:embed
 
 //go:embed roxy.mime.json
 var defaultMimeJSON []byte

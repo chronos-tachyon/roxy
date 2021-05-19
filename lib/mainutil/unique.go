@@ -14,6 +14,7 @@ import (
 
 var gUniqueFile string
 
+// SetUniqueFile specifies the path to the state file where UniqueID is stored.
 func SetUniqueFile(path string) {
 	abs, err := roxyutil.ExpandPath(path)
 	if err != nil {
@@ -22,6 +23,9 @@ func SetUniqueFile(path string) {
 	gUniqueFile = abs
 }
 
+// UniqueID returns the ATC Unique ID associated with this program.
+//
+// The program must call SetUniqueFile in main() before calling this function.
 func UniqueID() (string, error) {
 	if gUniqueFile == "" {
 		return "", errors.New("must call mainutil.SetUniqueFile")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// ListenConfig represents the configuration for a net.Listener socket with
+// optional TLS.
 type ListenConfig struct {
 	Enabled bool
 	Network string
@@ -21,47 +24,68 @@ type ListenConfig struct {
 	TLS     TLSServerConfig
 }
 
-type lcJSON struct {
-	Network string   `json:"network"`
-	Address string   `json:"address"`
-	TLS     *tscJSON `json:"tls,omitempty"`
+// ListenConfigJSON represents the JSON doppelgänger of an ListenConfig.
+type ListenConfigJSON struct {
+	Network string               `json:"network"`
+	Address string               `json:"address"`
+	TLS     *TLSServerConfigJSON `json:"tls,omitempty"`
 }
 
-func (lc ListenConfig) AppendTo(out *strings.Builder) {
-	out.WriteString(lc.Address)
-	if lc.Network != constants.NetTCP {
+// AppendTo appends the string representation to the given Builder.
+func (cfg ListenConfig) AppendTo(out *strings.Builder) {
+	out.WriteString(cfg.Address)
+	if cfg.Network != constants.NetTCP {
 		out.WriteString(";net=")
-		out.WriteString(lc.Network)
+		out.WriteString(cfg.Network)
 	}
-	if lc.TLS.Enabled {
+	if cfg.TLS.Enabled {
 		out.WriteString(";tls=")
-		lc.TLS.AppendTo(out)
+		cfg.TLS.AppendTo(out)
 	}
 }
 
-func (lc ListenConfig) String() string {
-	if !lc.Enabled {
+// String returns the string representation.
+func (cfg ListenConfig) String() string {
+	if !cfg.Enabled {
 		return ""
 	}
 
 	var buf strings.Builder
 	buf.Grow(64)
-	lc.AppendTo(&buf)
+	cfg.AppendTo(&buf)
 	return buf.String()
 }
 
-func (lc ListenConfig) MarshalJSON() ([]byte, error) {
-	if !lc.Enabled {
+// MarshalJSON fulfills json.Marshaler.
+func (cfg ListenConfig) MarshalJSON() ([]byte, error) {
+	if !cfg.Enabled {
 		return constants.NullBytes, nil
 	}
-	return json.Marshal(lc.toAlt())
+	return json.Marshal(cfg.ToJSON())
 }
 
-func (lc *ListenConfig) Parse(str string) error {
+// ToJSON converts the object to its JSON doppelgänger.
+func (cfg ListenConfig) ToJSON() *ListenConfigJSON {
+	if !cfg.Enabled {
+		return nil
+	}
+	return &ListenConfigJSON{
+		Network: cfg.Network,
+		Address: escapeListenAddress(cfg.Address),
+		TLS:     cfg.TLS.ToJSON(),
+	}
+}
+
+// Parse parses the string representation.
+func (cfg *ListenConfig) Parse(str string) error {
+	if cfg == nil {
+		panic(errors.New("*ListenConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*lc = ListenConfig{}
+			*cfg = ListenConfig{}
 		}
 	}()
 
@@ -69,23 +93,25 @@ func (lc *ListenConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := misc.StrictUnmarshalJSON([]byte(str), lc)
+	err := misc.StrictUnmarshalJSON([]byte(str), cfg)
 	if err == nil {
 		wantZero = false
 		return nil
 	}
 
+	cfg.Enabled = true
+
 	pieces := strings.Split(str, ";")
 
-	lc.Address = pieces[0]
+	cfg.Address = pieces[0]
 
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "net="):
-			lc.Network = item[4:]
+			cfg.Network = item[4:]
 
 		case strings.HasPrefix(item, "tls="):
-			err = lc.TLS.Parse(item[4:])
+			err = cfg.TLS.Parse(item[4:])
 			if err != nil {
 				return err
 			}
@@ -95,22 +121,25 @@ func (lc *ListenConfig) Parse(str string) error {
 		}
 	}
 
-	lc.Enabled = true
-	tmp, err := lc.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*lc = tmp
 	wantZero = false
 	return nil
 }
 
-func (lc *ListenConfig) UnmarshalJSON(raw []byte) error {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (cfg *ListenConfig) UnmarshalJSON(raw []byte) error {
+	if cfg == nil {
+		panic(errors.New("*ListenConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*lc = ListenConfig{}
+			*cfg = ListenConfig{}
 		}
 	}()
 
@@ -118,39 +147,114 @@ func (lc *ListenConfig) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	var alt lcJSON
+	var alt *ListenConfigJSON
 	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
 
-	tmp1, err := alt.toStd()
+	err = cfg.FromJSON(alt)
 	if err != nil {
 		return err
 	}
 
-	tmp2, err := tmp1.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*lc = tmp2
 	wantZero = false
 	return nil
 }
 
-func (lc ListenConfig) Listen(ctx context.Context) (net.Listener, error) {
-	if !lc.Enabled {
+// FromJSON converts the object's JSON doppelgänger into the object.
+func (cfg *ListenConfig) FromJSON(alt *ListenConfigJSON) error {
+	if cfg == nil {
+		panic(errors.New("*ListenConfig is nil"))
+	}
+
+	if alt == nil {
+		*cfg = ListenConfig{}
+		return nil
+	}
+
+	*cfg = ListenConfig{
+		Enabled: true,
+		Network: alt.Network,
+		Address: unescapeListenAddress(alt.Address),
+	}
+
+	err := cfg.TLS.FromJSON(alt.TLS)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// PostProcess performs data integrity checks and input post-processing.
+func (cfg *ListenConfig) PostProcess() error {
+	if cfg == nil {
+		panic(errors.New("*ListenConfig is nil"))
+	}
+
+	if !cfg.Enabled {
+		*cfg = ListenConfig{}
+		return nil
+	}
+
+	err := cfg.TLS.PostProcess()
+	if err != nil {
+		return err
+	}
+
+	if cfg.Address == "" {
+		return fmt.Errorf("invalid address %q: %w", cfg.Address, roxyutil.ErrExpectNonEmpty)
+	}
+
+	maybeUnix := (cfg.Network == constants.NetEmpty) || constants.IsNetUnix(cfg.Network)
+	if maybeUnix {
+		if cfg.Address[0] == '/' || cfg.Address[0] == '\x00' {
+			if cfg.Network == constants.NetEmpty {
+				cfg.Network = constants.NetUnix
+			}
+		} else if cfg.Address[0] == '@' {
+			cfg.Address = "\x00" + cfg.Address[1:]
+			if cfg.Network == constants.NetEmpty {
+				cfg.Network = constants.NetUnix
+			}
+		} else if cfg.Network != constants.NetEmpty || strings.Contains(cfg.Address, "/") {
+			abs, err := roxyutil.PathAbs(cfg.Address)
+			if err != nil {
+				return err
+			}
+			cfg.Address = abs
+			if cfg.Network == constants.NetEmpty {
+				cfg.Network = constants.NetUnix
+			}
+		}
+	}
+
+	if cfg.Network == constants.NetEmpty {
+		cfg.Network = constants.NetTCP
+	}
+
+	return nil
+}
+
+// Listen creates the configured net.Listener.
+func (cfg ListenConfig) Listen(ctx context.Context) (net.Listener, error) {
+	if !cfg.Enabled {
 		return newDummyListener(), nil
 	}
 
-	tlsConfig, err := lc.TLS.MakeTLS()
+	tlsConfig, err := cfg.TLS.MakeTLS()
 	if err != nil {
 		return nil, err
 	}
 
 	var l net.Listener
-	l, err = net.Listen(lc.Network, lc.Address)
+	l, err = net.Listen(cfg.Network, cfg.Address)
 	if err != nil {
 		return nil, err
 	}
@@ -162,82 +266,19 @@ func (lc ListenConfig) Listen(ctx context.Context) (net.Listener, error) {
 	return l, nil
 }
 
-func (lc ListenConfig) ListenNoTLS(ctx context.Context) (net.Listener, error) {
-	if !lc.Enabled {
+// ListenNoTLS creates the configured net.Listener.  TLS handshaking is not
+// added automatically.
+func (cfg ListenConfig) ListenNoTLS(ctx context.Context) (net.Listener, error) {
+	if !cfg.Enabled {
 		return newDummyListener(), nil
 	}
 
-	l, err := net.Listen(lc.Network, lc.Address)
+	l, err := net.Listen(cfg.Network, cfg.Address)
 	if err != nil {
 		return nil, err
 	}
 
 	return l, nil
-}
-
-func (lc ListenConfig) toAlt() *lcJSON {
-	if !lc.Enabled {
-		return nil
-	}
-	return &lcJSON{
-		Network: lc.Network,
-		Address: escapeListenAddress(lc.Address),
-		TLS:     lc.TLS.toAlt(),
-	}
-}
-
-func (alt *lcJSON) toStd() (ListenConfig, error) {
-	if alt == nil {
-		return ListenConfig{}, nil
-	}
-
-	return ListenConfig{
-		Enabled: true,
-		Network: alt.Network,
-		Address: unescapeListenAddress(alt.Address),
-		TLS:     alt.TLS.toStd(),
-	}, nil
-}
-
-func (lc ListenConfig) postprocess() (out ListenConfig, err error) {
-	var zero ListenConfig
-
-	if !lc.Enabled {
-		return zero, nil
-	}
-
-	if lc.Address == "" {
-		return zero, fmt.Errorf("invalid address %q: %w", lc.Address, roxyutil.ErrExpectNonEmpty)
-	}
-
-	maybeUnix := (lc.Network == constants.NetEmpty) || constants.IsNetUnix(lc.Network)
-	if maybeUnix {
-		if lc.Address[0] == '/' || lc.Address[0] == '\x00' {
-			if lc.Network == constants.NetEmpty {
-				lc.Network = constants.NetUnix
-			}
-		} else if lc.Address[0] == '@' {
-			lc.Address = "\x00" + lc.Address[1:]
-			if lc.Network == constants.NetEmpty {
-				lc.Network = constants.NetUnix
-			}
-		} else if lc.Network != constants.NetEmpty || strings.Contains(lc.Address, "/") {
-			abs, err := roxyutil.PathAbs(lc.Address)
-			if err != nil {
-				return zero, err
-			}
-			lc.Address = abs
-			if lc.Network == constants.NetEmpty {
-				lc.Network = constants.NetUnix
-			}
-		}
-	}
-
-	if lc.Network == constants.NetEmpty {
-		lc.Network = constants.NetTCP
-	}
-
-	return lc, nil
 }
 
 func escapeListenAddress(addr string) string {

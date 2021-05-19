@@ -1,7 +1,7 @@
 package mainutil
 
 import (
-	_ "embed"
+	_ "embed" // for go:embed
 	"strings"
 )
 

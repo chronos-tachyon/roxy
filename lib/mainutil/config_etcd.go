@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// EtcdConfig represents the configuration for an etcd.io *v3.Client.
 type EtcdConfig struct {
 	Enabled          bool
 	Endpoints        []string
@@ -28,75 +30,100 @@ type EtcdConfig struct {
 	KeepAliveTimeout time.Duration
 }
 
-type ecJSON struct {
-	Endpoints        []string      `json:"endpoints"`
-	TLS              *tccJSON      `json:"tls,omitempty"`
-	Username         string        `json:"username,omitempty"`
-	Password         string        `json:"password,omitempty"`
-	DialTimeout      time.Duration `json:"dialTimeout,omitempty"`
-	KeepAlive        time.Duration `json:"keepAlive,omitempty"`
-	KeepAliveTimeout time.Duration `json:"keepAliveTimeout,omitempty"`
+// EtcdConfigJSON represents the JSON doppelgänger of an EtcdConfig.
+type EtcdConfigJSON struct {
+	Endpoints        []string             `json:"endpoints"`
+	TLS              *TLSClientConfigJSON `json:"tls,omitempty"`
+	Username         string               `json:"username,omitempty"`
+	Password         string               `json:"password,omitempty"`
+	DialTimeout      time.Duration        `json:"dialTimeout,omitempty"`
+	KeepAlive        time.Duration        `json:"keepAlive,omitempty"`
+	KeepAliveTimeout time.Duration        `json:"keepAliveTimeout,omitempty"`
 }
 
-func (ec EtcdConfig) AppendTo(out *strings.Builder) {
-	if !ec.Enabled {
+// AppendTo appends the string representation to the given Builder.
+func (cfg EtcdConfig) AppendTo(out *strings.Builder) {
+	if !cfg.Enabled {
 		return
 	}
-	for i, endpoint := range ec.Endpoints {
+	for i, endpoint := range cfg.Endpoints {
 		if i != 0 {
 			out.WriteString(",")
 		}
 		out.WriteString(endpoint)
 	}
-	if ec.TLS.Enabled {
+	if cfg.TLS.Enabled {
 		out.WriteString(";tls=")
-		ec.TLS.AppendTo(out)
+		cfg.TLS.AppendTo(out)
 	}
-	if ec.Username != "" {
+	if cfg.Username != "" {
 		out.WriteString(";username=")
-		out.WriteString(ec.Username)
+		out.WriteString(cfg.Username)
 	}
-	if ec.Password != "" {
+	if cfg.Password != "" {
 		out.WriteString(";password=")
-		out.WriteString(ec.Password)
+		out.WriteString(cfg.Password)
 	}
-	if ec.DialTimeout != 0 {
+	if cfg.DialTimeout != 0 {
 		out.WriteString(";dialTimeout=")
-		out.WriteString(ec.DialTimeout.String())
+		out.WriteString(cfg.DialTimeout.String())
 	}
-	if ec.KeepAlive != 0 {
+	if cfg.KeepAlive != 0 {
 		out.WriteString(";keepAlive=")
-		out.WriteString(ec.KeepAlive.String())
+		out.WriteString(cfg.KeepAlive.String())
 	}
-	if ec.KeepAliveTimeout != 0 {
+	if cfg.KeepAliveTimeout != 0 {
 		out.WriteString(";keepAliveTimeout=")
-		out.WriteString(ec.KeepAliveTimeout.String())
+		out.WriteString(cfg.KeepAliveTimeout.String())
 	}
 }
 
-func (ec EtcdConfig) String() string {
-	if !ec.Enabled {
+// String returns the string representation.
+func (cfg EtcdConfig) String() string {
+	if !cfg.Enabled {
 		return ""
 	}
 
 	var buf strings.Builder
 	buf.Grow(64)
-	ec.AppendTo(&buf)
+	cfg.AppendTo(&buf)
 	return buf.String()
 }
 
-func (ec EtcdConfig) MarshalJSON() ([]byte, error) {
-	if !ec.Enabled {
+// MarshalJSON fulfills json.Marshaler.
+func (cfg EtcdConfig) MarshalJSON() ([]byte, error) {
+	if !cfg.Enabled {
 		return constants.NullBytes, nil
 	}
-	return json.Marshal(ec.toAlt())
+	return json.Marshal(cfg.ToJSON())
 }
 
-func (ec *EtcdConfig) Parse(str string) error {
+// ToJSON converts the object to its JSON doppelgänger.
+func (cfg EtcdConfig) ToJSON() *EtcdConfigJSON {
+	if !cfg.Enabled {
+		return nil
+	}
+	return &EtcdConfigJSON{
+		Endpoints:        cfg.Endpoints,
+		TLS:              cfg.TLS.ToJSON(),
+		Username:         cfg.Username,
+		Password:         cfg.Password,
+		DialTimeout:      cfg.DialTimeout,
+		KeepAlive:        cfg.KeepAlive,
+		KeepAliveTimeout: cfg.KeepAliveTimeout,
+	}
+}
+
+// Parse parses the string representation.
+func (cfg *EtcdConfig) Parse(str string) error {
+	if cfg == nil {
+		panic(errors.New("*EtcdConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*ec = EtcdConfig{}
+			*cfg = EtcdConfig{}
 		}
 	}()
 
@@ -104,14 +131,15 @@ func (ec *EtcdConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := misc.StrictUnmarshalJSON([]byte(str), ec)
+	err := misc.StrictUnmarshalJSON([]byte(str), cfg)
 	if err == nil {
 		wantZero = false
 		return nil
 	}
 
-	pieces := strings.Split(str, ";")
+	cfg.Enabled = true
 
+	pieces := strings.Split(str, ";")
 	if pieces[0] == "" {
 		return nil
 	}
@@ -119,37 +147,37 @@ func (ec *EtcdConfig) Parse(str string) error {
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "tls="):
-			err = ec.TLS.Parse(item[4:])
+			err = cfg.TLS.Parse(item[4:])
 			if err != nil {
 				return err
 			}
 
 		case strings.HasPrefix(item, "username="):
-			ec.Username, err = roxyutil.ExpandString(item[9:])
+			cfg.Username, err = roxyutil.ExpandString(item[9:])
 			if err != nil {
 				return err
 			}
 
 		case strings.HasPrefix(item, "password="):
-			ec.Password, err = roxyutil.ExpandPassword(item[9:])
+			cfg.Password, err = roxyutil.ExpandPassword(item[9:])
 			if err != nil {
 				return err
 			}
 
 		case strings.HasPrefix(item, "dialTimeout="):
-			ec.DialTimeout, err = time.ParseDuration(item[12:])
+			cfg.DialTimeout, err = time.ParseDuration(item[12:])
 			if err != nil {
 				return err
 			}
 
 		case strings.HasPrefix(item, "keepAlive="):
-			ec.KeepAlive, err = time.ParseDuration(item[10:])
+			cfg.KeepAlive, err = time.ParseDuration(item[10:])
 			if err != nil {
 				return err
 			}
 
 		case strings.HasPrefix(item, "keepAliveTimeout="):
-			ec.KeepAliveTimeout, err = time.ParseDuration(item[17:])
+			cfg.KeepAliveTimeout, err = time.ParseDuration(item[17:])
 			if err != nil {
 				return err
 			}
@@ -159,57 +187,39 @@ func (ec *EtcdConfig) Parse(str string) error {
 		}
 	}
 
-	expectScheme := constants.SchemeHTTP
-	if ec.TLS.Enabled {
-		expectScheme = constants.SchemeHTTPS
-	}
-
 	endpointListString, err := roxyutil.ExpandString(pieces[0])
 	if err != nil {
 		return err
 	}
 
 	endpointList := strings.Split(endpointListString, ",")
-	ec.Endpoints = make([]string, 0, len(endpointList))
+	cfg.Endpoints = make([]string, 0, len(endpointList))
 	for _, endpoint := range endpointList {
 		if endpoint == "" {
 			continue
 		}
-		u, err := url.Parse(endpoint)
-		if err != nil {
-			return fmt.Errorf("failed to parse endpoint URL %q: %w", endpoint, err)
-		}
-		if u.Scheme == "" {
-			u.Scheme = expectScheme
-		}
-		if u.Scheme != expectScheme {
-			return fmt.Errorf("expected scheme %q, got scheme %q in URL %q", expectScheme, u.Scheme, u.String())
-		}
-		if u.Port() == "" {
-			u.Host = net.JoinHostPort(u.Hostname(), constants.PortEtcd)
-		}
-		if u.User != nil || u.Path != "" || u.RawQuery != "" || u.RawFragment != "" {
-			return fmt.Errorf("URL %q contains forbidden components", u.String())
-		}
-		ec.Endpoints = append(ec.Endpoints, u.String())
+		cfg.Endpoints = append(cfg.Endpoints, endpoint)
 	}
 
-	ec.Enabled = true
-	tmp, err := ec.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*ec = tmp
 	wantZero = false
 	return nil
 }
 
-func (ec *EtcdConfig) UnmarshalJSON(raw []byte) error {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (cfg *EtcdConfig) UnmarshalJSON(raw []byte) error {
+	if cfg == nil {
+		panic(errors.New("*EtcdConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*ec = EtcdConfig{}
+			*cfg = EtcdConfig{}
 		}
 	}()
 
@@ -217,106 +227,146 @@ func (ec *EtcdConfig) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	var alt ecJSON
+	var alt *EtcdConfigJSON
 	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
 
-	tmp, err := alt.toStd().postprocess()
+	err = cfg.FromJSON(alt)
 	if err != nil {
 		return err
 	}
 
-	*ec = tmp
+	err = cfg.PostProcess()
+	if err != nil {
+		return err
+	}
+
 	wantZero = false
 	return nil
 }
 
-func (ec EtcdConfig) Connect(ctx context.Context) (*v3.Client, error) {
-	if !ec.Enabled {
-		return nil, nil
+// FromJSON converts the object's JSON doppelgänger into the object.
+func (cfg *EtcdConfig) FromJSON(alt *EtcdConfigJSON) error {
+	if cfg == nil {
+		panic(errors.New("*EtcdConfig is nil"))
 	}
 
-	tlsConfig, err := ec.TLS.MakeTLS("")
-	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate TLS config: %w", err)
-	}
-
-	dialTimeout := ec.DialTimeout
-	if dialTimeout == 0 {
-		dialTimeout = 5 * time.Second
-	}
-
-	return v3.New(v3.Config{
-		Endpoints:            ec.Endpoints,
-		AutoSyncInterval:     1 * time.Minute,
-		DialTimeout:          dialTimeout,
-		DialKeepAliveTime:    ec.KeepAlive,
-		DialKeepAliveTimeout: ec.KeepAliveTimeout,
-		Username:             ec.Username,
-		Password:             ec.Password,
-		TLS:                  tlsConfig,
-		LogConfig:            NewDummyZapConfig(),
-		Context:              ctx,
-	})
-}
-
-func (ec EtcdConfig) toAlt() *ecJSON {
-	if !ec.Enabled {
+	if alt == nil {
+		*cfg = EtcdConfig{}
 		return nil
 	}
-	return &ecJSON{
-		Endpoints:        ec.Endpoints,
-		TLS:              ec.TLS.toAlt(),
-		Username:         ec.Username,
-		Password:         ec.Password,
-		DialTimeout:      ec.DialTimeout,
-		KeepAlive:        ec.KeepAlive,
-		KeepAliveTimeout: ec.KeepAliveTimeout,
-	}
-}
 
-func (alt *ecJSON) toStd() EtcdConfig {
-	if alt == nil {
-		return EtcdConfig{}
-	}
-	return EtcdConfig{
+	*cfg = EtcdConfig{
 		Enabled:          true,
 		Endpoints:        alt.Endpoints,
-		TLS:              alt.TLS.toStd(),
 		Username:         alt.Username,
 		Password:         alt.Password,
 		DialTimeout:      alt.DialTimeout,
 		KeepAlive:        alt.KeepAlive,
 		KeepAliveTimeout: alt.KeepAliveTimeout,
 	}
+
+	err := cfg.TLS.FromJSON(alt.TLS)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (ec EtcdConfig) postprocess() (out EtcdConfig, err error) {
-	var zero EtcdConfig
-
-	if !ec.Enabled {
-		return zero, nil
+// PostProcess performs data integrity checks and input post-processing.
+func (cfg *EtcdConfig) PostProcess() error {
+	if cfg == nil {
+		panic(errors.New("*EtcdConfig is nil"))
 	}
 
-	if len(ec.Endpoints) == 0 {
-		return zero, nil
+	if !cfg.Enabled {
+		*cfg = EtcdConfig{}
+		return nil
 	}
 
-	for _, endpoint := range ec.Endpoints {
+	if len(cfg.Endpoints) == 0 {
+		return errors.New("len(EtcdConfig.Endpoints) == 0")
+	}
+
+	err := cfg.TLS.PostProcess()
+	if err != nil {
+		return err
+	}
+
+	expectScheme := constants.SchemeHTTP
+	if cfg.TLS.Enabled {
+		expectScheme = constants.SchemeHTTPS
+	}
+
+	hostnames := make([]string, len(cfg.Endpoints))
+	for index := range cfg.Endpoints {
+		endpoint := cfg.Endpoints[index]
 		if endpoint == "" {
-			return zero, nil
+			return fmt.Errorf("EtcdConfig.Endpoints[%d] == %q", index, endpoint)
 		}
-	}
 
-	if ec.TLS.Enabled && ec.TLS.ServerName == "" {
-		u, err := url.Parse(ec.Endpoints[0])
+		u, err := url.Parse(endpoint)
 		if err != nil {
-			return zero, err
+			return fmt.Errorf("failed to parse endpoint URL %q: %w", endpoint, err)
 		}
-		ec.TLS.ServerName = u.Hostname()
+
+		if u.Scheme == "" {
+			u.Scheme = expectScheme
+		}
+
+		if u.Scheme != expectScheme {
+			return fmt.Errorf("expected scheme %q, got scheme %q in URL %q", expectScheme, u.Scheme, u.String())
+		}
+
+		if u.Port() == "" {
+			u.Host = net.JoinHostPort(u.Hostname(), constants.PortEtcd)
+		}
+
+		if u.User != nil || u.Path != "" || u.RawQuery != "" || u.RawFragment != "" {
+			return fmt.Errorf("URL %q contains forbidden components", u.String())
+		}
+
+		cfg.Endpoints[index] = u.String()
+		hostnames[index] = u.Hostname()
 	}
 
-	return ec, nil
+	if cfg.TLS.Enabled && !cfg.TLS.SkipVerify && !cfg.TLS.SkipVerifyServerName && cfg.TLS.ServerName == "" {
+		cfg.TLS.ServerName = hostnames[0]
+	}
+
+	return nil
+}
+
+// Connect constructs the configured etcd.io *v3.Client and dials the etcd
+// cluster.
+func (cfg EtcdConfig) Connect(ctx context.Context) (*v3.Client, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+
+	tlsConfig, err := cfg.TLS.MakeTLS("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to instantiate TLS config: %w", err)
+	}
+
+	dialTimeout := cfg.DialTimeout
+	if dialTimeout == 0 {
+		dialTimeout = 5 * time.Second
+	}
+
+	return v3.New(v3.Config{
+		Endpoints:            cfg.Endpoints,
+		AutoSyncInterval:     1 * time.Minute,
+		DialTimeout:          dialTimeout,
+		DialKeepAliveTime:    cfg.KeepAlive,
+		DialKeepAliveTimeout: cfg.KeepAliveTimeout,
+		Username:             cfg.Username,
+		Password:             cfg.Password,
+		TLS:                  tlsConfig,
+		LogConfig:            NewDummyZapConfig(),
+		Context:              ctx,
+	})
 }

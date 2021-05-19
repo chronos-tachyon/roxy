@@ -38,10 +38,12 @@ var (
 	flagLogFile     string
 )
 
+// RegisterVersionFlag registers the -V/--version flag.
 func RegisterVersionFlag() {
 	getopt.FlagLong(&flagVersion, "version", 'V', "print version and exit")
 }
 
+// RegisterLoggingFlags registers the flags for controlling log output.
 func RegisterLoggingFlags() {
 	getopt.FlagLong(&flagDebug, "verbose", 'v', "enable debug logging")
 	getopt.FlagLong(&flagTrace, "debug", 'd', "enable debug and trace logging")
@@ -50,6 +52,7 @@ func RegisterLoggingFlags() {
 	getopt.FlagLong(&flagLogFile, "log-file", 'l', "log JSON to file")
 }
 
+// InitVersion processes the -V/--version flag.
 func InitVersion() {
 	if flagVersion {
 		fmt.Println(AppVersion())
@@ -57,6 +60,10 @@ func InitVersion() {
 	}
 }
 
+// InitLogging processes the logging flags and sets up log.Logger.
+//
+// The caller must ensure that DoneLogging gets called by the end of the
+// program's lifecycle.
 func InitLogging() {
 	if flagLogStderr && flagLogJournald {
 		fmt.Fprintln(os.Stderr, "fatal: flags '--log-stderr' and '--log-journald' are mutually exclusive")
@@ -115,12 +122,15 @@ func InitLogging() {
 	stdlog.SetOutput(log.Logger)
 }
 
+// DoneLogging does end-of-program cleanup on the logging subsystem.
 func DoneLogging() {
 	if gLogger != nil {
 		_ = gLogger.Close()
 	}
 }
 
+// RotateLogs rotates the logfile, if that operation makes sense in the current
+// logging configuration.
 func RotateLogs() error {
 	if gLogger != nil {
 		if err := gLogger.Rotate(); err != nil {
@@ -135,6 +145,8 @@ func RotateLogs() error {
 
 // type RotatingLogWriter {{{
 
+// RotatingLogWriter is an io.WriteCloser that can close and re-open its output
+// file, for logrotate(8) and the like.
 type RotatingLogWriter struct {
 	fileName   string
 	mu         sync.Mutex
@@ -143,6 +155,7 @@ type RotatingLogWriter struct {
 	numWriters int
 }
 
+// NewRotatingLogWriter constructs a new RotatingLogWriter.
 func NewRotatingLogWriter(fileName string) (*RotatingLogWriter, error) {
 	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
@@ -158,6 +171,9 @@ func NewRotatingLogWriter(fileName string) (*RotatingLogWriter, error) {
 	return w, nil
 }
 
+// Write writes a block of data to the logfile.
+//
+// The input should generally be a single line of JSON data.
 func (w *RotatingLogWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	file := w.file
@@ -176,6 +192,7 @@ func (w *RotatingLogWriter) Write(p []byte) (int, error) {
 	return file.Write(p)
 }
 
+// Close closes the logfile.
 func (w *RotatingLogWriter) Close() error {
 	w.mu.Lock()
 	defer func() {
@@ -197,6 +214,7 @@ func (w *RotatingLogWriter) Close() error {
 	return misc.ErrorOrNil(errs)
 }
 
+// Rotate closes and re-opens the log file.
 func (w *RotatingLogWriter) Rotate() error {
 	newFile, err := os.OpenFile(w.fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
@@ -232,8 +250,10 @@ var _ io.WriteCloser = (*RotatingLogWriter)(nil)
 
 // type PromLoggerBridge {{{
 
+// PromLoggerBridge is a promhttp.Logger that forwards to zerolog.
 type PromLoggerBridge struct{}
 
+// Println fulfills promhttp.Logger.
 func (PromLoggerBridge) Println(v ...interface{}) {
 	log.Logger.Log().Msg("prometheus: " + fmt.Sprint(v...))
 }
@@ -244,8 +264,10 @@ var _ promhttp.Logger = PromLoggerBridge{}
 
 // type ZKLoggerBridge {{{
 
+// ZKLoggerBridge is a zk.Logger that forwards to zerolog.
 type ZKLoggerBridge struct{}
 
+// Printf fulfills zk.Logger.
 func (ZKLoggerBridge) Printf(fmt string, args ...interface{}) {
 	log.Logger.Log().Msgf("zookeeper: "+fmt, args...)
 }
@@ -256,8 +278,10 @@ var _ zk.Logger = ZKLoggerBridge{}
 
 // type ZapLoggerBridge {{{
 
+// ZapLoggerBridge is a zap.Sink that forwards to zerolog.
 type ZapLoggerBridge struct{}
 
+// Write fulfills zap.Sink.
 func (ZapLoggerBridge) Write(p []byte) (int, error) {
 	var data map[string]interface{}
 	d := json.NewDecoder(bytes.NewReader(p))
@@ -307,10 +331,12 @@ func (ZapLoggerBridge) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Sync fulfills zap.Sink.
 func (ZapLoggerBridge) Sync() error {
 	return nil
 }
 
+// Close fulfills zap.Sink.
 func (ZapLoggerBridge) Close() error {
 	return nil
 }
@@ -319,6 +345,7 @@ var _ zap.Sink = ZapLoggerBridge{}
 
 // }}}
 
+// NewDummyZapConfig returns a *zap.Config that logs to zerolog.
 func NewDummyZapConfig() *zap.Config {
 	return &zap.Config{
 		Level:    zap.NewAtomicLevelAt(zapcore.InfoLevel),

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"strings"
@@ -17,6 +18,8 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+// TLSServerConfig represents the configuration for a server-oriented
+// *tls.Config object.
 type TLSServerConfig struct {
 	Enabled      bool
 	Cert         string
@@ -26,7 +29,8 @@ type TLSServerConfig struct {
 	AllowedNames certnames.CertNames
 }
 
-type tscJSON struct {
+// TLSServerConfigJSON represents the JSON doppelgänger of an TLSServerConfig.
+type TLSServerConfigJSON struct {
 	Cert         string              `json:"cert,omitempty"`
 	Key          string              `json:"key,omitempty"`
 	MutualTLS    bool                `json:"mTLS,omitempty"`
@@ -34,65 +38,86 @@ type tscJSON struct {
 	AllowedNames certnames.CertNames `json:"allowedNames,omitempty"`
 }
 
-func (tsc TLSServerConfig) AppendTo(out *strings.Builder) {
-	if !tsc.Enabled {
+// AppendTo appends the string representation to the given Builder.
+func (cfg TLSServerConfig) AppendTo(out *strings.Builder) {
+	if !cfg.Enabled {
 		out.WriteString("no")
 		return
 	}
 	out.WriteString("yes")
 	out.WriteString(",cert=")
-	out.WriteString(tsc.Cert)
-	if tsc.Key != "" && tsc.Key != tsc.Cert {
+	out.WriteString(cfg.Cert)
+	if cfg.Key != "" && cfg.Key != cfg.Cert {
 		out.WriteString(",key=")
-		out.WriteString(tsc.Key)
+		out.WriteString(cfg.Key)
 	}
-	if tsc.MutualTLS {
+	if cfg.MutualTLS {
 		out.WriteString(",mtls=yes")
-		if tsc.ClientCA != "" {
+		if cfg.ClientCA != "" {
 			out.WriteString(",ca=")
-			out.WriteString(tsc.ClientCA)
+			out.WriteString(cfg.ClientCA)
 		}
 		out.WriteString(",allow=")
-		tsc.AllowedNames.AppendTo(out)
+		cfg.AllowedNames.AppendTo(out)
 	}
 }
 
-func (tsc TLSServerConfig) String() string {
-	if !tsc.Enabled {
+// String returns the string representation.
+func (cfg TLSServerConfig) String() string {
+	if !cfg.Enabled {
 		return "no"
 	}
 
 	var buf strings.Builder
 	buf.Grow(64)
-	tsc.AppendTo(&buf)
+	cfg.AppendTo(&buf)
 	return buf.String()
 }
 
-func (tsc TLSServerConfig) MarshalJSON() ([]byte, error) {
-	if !tsc.Enabled {
+// MarshalJSON fulfills json.Marshaler.
+func (cfg TLSServerConfig) MarshalJSON() ([]byte, error) {
+	if !cfg.Enabled {
 		return constants.NullBytes, nil
 	}
-	return json.Marshal(tsc.toAlt())
+	return json.Marshal(cfg.ToJSON())
 }
 
-func (tsc *TLSServerConfig) Parse(str string) error {
-	*tsc = TLSServerConfig{}
-
-	if str == "" || str == constants.NullString {
+// ToJSON converts the object to its JSON doppelgänger.
+func (cfg TLSServerConfig) ToJSON() *TLSServerConfigJSON {
+	if !cfg.Enabled {
 		return nil
 	}
+	return &TLSServerConfigJSON{
+		Cert:         cfg.Cert,
+		Key:          cfg.Key,
+		MutualTLS:    cfg.MutualTLS,
+		ClientCA:     cfg.ClientCA,
+		AllowedNames: cfg.AllowedNames,
+	}
+}
 
-	err := misc.StrictUnmarshalJSON([]byte(str), tsc)
-	if err == nil {
-		return nil
+// Parse parses the string representation.
+func (cfg *TLSServerConfig) Parse(str string) error {
+	if cfg == nil {
+		panic(errors.New("*TLSServerConfig is nil"))
 	}
 
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*tsc = TLSServerConfig{}
+			*cfg = TLSServerConfig{}
 		}
 	}()
+
+	if str == "" || str == constants.NullString {
+		return nil
+	}
+
+	err := misc.StrictUnmarshalJSON([]byte(str), cfg)
+	if err == nil {
+		wantZero = false
+		return nil
+	}
 
 	pieces := strings.Split(str, ",")
 
@@ -104,31 +129,33 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 		return nil
 	}
 
+	cfg.Enabled = true
+
 	sawAllow := false
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "cert="):
-			tsc.Cert = item[5:]
+			cfg.Cert = item[5:]
 
 		case strings.HasPrefix(item, "key="):
-			tsc.Key = item[4:]
+			cfg.Key = item[4:]
 
 		case strings.HasPrefix(item, "mTLS=") || strings.HasPrefix(item, "mtls="):
 			value, err = misc.ParseBool(item[5:])
 			if err != nil {
 				return err
 			}
-			tsc.MutualTLS = value
+			cfg.MutualTLS = value
 
 		case strings.HasPrefix(item, "clientCA="):
-			tsc.ClientCA = item[9:]
+			cfg.ClientCA = item[9:]
 
 		case strings.HasPrefix(item, "ca="):
-			tsc.ClientCA = item[3:]
+			cfg.ClientCA = item[3:]
 
 		case strings.HasPrefix(item, "allow="):
 			sawAllow = true
-			err = tsc.AllowedNames.Parse(item[6:])
+			err = cfg.AllowedNames.Parse(item[6:])
 			if err != nil {
 				return err
 			}
@@ -138,26 +165,29 @@ func (tsc *TLSServerConfig) Parse(str string) error {
 		}
 	}
 
-	tsc.Enabled = true
-	if tsc.MutualTLS && !sawAllow {
-		_ = tsc.AllowedNames.Parse(certnames.ANY)
+	if cfg.MutualTLS && !sawAllow {
+		_ = cfg.AllowedNames.Parse(certnames.ANY)
 	}
 
-	tmp, err := tsc.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*tsc = tmp
 	wantZero = false
 	return nil
 }
 
-func (tsc *TLSServerConfig) UnmarshalJSON(raw []byte) error {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (cfg *TLSServerConfig) UnmarshalJSON(raw []byte) error {
+	if cfg == nil {
+		panic(errors.New("*TLSServerConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*tsc = TLSServerConfig{}
+			*cfg = TLSServerConfig{}
 		}
 	}()
 
@@ -165,31 +195,108 @@ func (tsc *TLSServerConfig) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	var alt tscJSON
+	var alt *TLSServerConfigJSON
 	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
 
-	tmp, err := alt.toStd().postprocess()
+	err = cfg.FromJSON(alt)
 	if err != nil {
 		return err
 	}
 
-	*tsc = tmp
+	err = cfg.PostProcess()
+	if err != nil {
+		return err
+	}
+
 	wantZero = false
 	return nil
 }
 
-func (tsc TLSServerConfig) MakeTLS() (*tls.Config, error) {
-	if !tsc.Enabled {
+// FromJSON converts the object's JSON doppelgänger into the object.
+func (cfg *TLSServerConfig) FromJSON(alt *TLSServerConfigJSON) error {
+	if cfg == nil {
+		panic(errors.New("*TLSServerConfig is nil"))
+	}
+
+	if alt == nil {
+		*cfg = TLSServerConfig{}
+		return nil
+	}
+
+	*cfg = TLSServerConfig{
+		Enabled:      true,
+		Cert:         alt.Cert,
+		Key:          alt.Key,
+		MutualTLS:    alt.MutualTLS,
+		ClientCA:     alt.ClientCA,
+		AllowedNames: alt.AllowedNames,
+	}
+
+	return nil
+}
+
+// PostProcess performs data integrity checks and input post-processing.
+func (cfg *TLSServerConfig) PostProcess() error {
+	if cfg == nil {
+		panic(errors.New("*TLSServerConfig is nil"))
+	}
+
+	if !cfg.Enabled {
+		*cfg = TLSServerConfig{}
+		return nil
+	}
+
+	if cfg.Cert == "" {
+		return fmt.Errorf("TLSServerConfig.Cert is empty")
+	}
+
+	expanded, err := roxyutil.ExpandPath(cfg.Cert)
+	if err != nil {
+		return err
+	}
+	cfg.Cert = expanded
+
+	if cfg.Key != "" {
+		expanded, err = roxyutil.ExpandPath(cfg.Key)
+		if err != nil {
+			return err
+		}
+		cfg.Key = expanded
+	}
+
+	if cfg.Key == "" {
+		cfg.Key = cfg.Cert
+	}
+
+	if !cfg.MutualTLS {
+		cfg.ClientCA = ""
+		_ = cfg.AllowedNames.Parse(certnames.ANY)
+	}
+
+	if cfg.ClientCA != "" {
+		expanded, err = roxyutil.ExpandPath(cfg.ClientCA)
+		if err != nil {
+			return err
+		}
+		cfg.ClientCA = expanded
+	}
+
+	return nil
+}
+
+// MakeTLS constructs the configured *tls.Config.
+func (cfg TLSServerConfig) MakeTLS() (*tls.Config, error) {
+	if !cfg.Enabled {
 		return nil, nil
 	}
 
 	out := new(tls.Config)
 
-	certPath := tsc.Cert
-	keyPath := tsc.Key
+	certPath := cfg.Cert
+	keyPath := cfg.Key
 
 	var err error
 	out.Certificates = make([]tls.Certificate, 1)
@@ -198,10 +305,10 @@ func (tsc TLSServerConfig) MakeTLS() (*tls.Config, error) {
 		return nil, fmt.Errorf("failed to load X.509 keypair from cert=%q key=%q: %w", certPath, keyPath, err)
 	}
 
-	if tsc.MutualTLS {
+	if cfg.MutualTLS {
 		out.ClientAuth = tls.RequireAndVerifyClientCert
 
-		if tsc.ClientCA == "" {
+		if cfg.ClientCA == "" {
 			roots, err := x509.SystemCertPool()
 			if err != nil {
 				return nil, fmt.Errorf("failed to load system certificate pool: %w", err)
@@ -211,14 +318,14 @@ func (tsc TLSServerConfig) MakeTLS() (*tls.Config, error) {
 		} else {
 			roots := x509.NewCertPool()
 
-			raw, err := ioutil.ReadFile(tsc.ClientCA)
+			raw, err := ioutil.ReadFile(cfg.ClientCA)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read file %q: %w", tsc.ClientCA, err)
+				return nil, fmt.Errorf("failed to read file %q: %w", cfg.ClientCA, err)
 			}
 
 			ok := roots.AppendCertsFromPEM(raw)
 			if !ok {
-				return nil, fmt.Errorf("failed to process certificates from PEM file %q", tsc.ClientCA)
+				return nil, fmt.Errorf("failed to process certificates from PEM file %q", cfg.ClientCA)
 			}
 
 			out.ClientCAs = roots
@@ -226,10 +333,10 @@ func (tsc TLSServerConfig) MakeTLS() (*tls.Config, error) {
 
 		out.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 			cert := verifiedChains[0][0]
-			if tsc.AllowedNames.Check(cert) {
+			if cfg.AllowedNames.Check(cert) {
 				return nil
 			}
-			return fmt.Errorf("expected %s, got Subject DN %q", tsc.AllowedNames.String(), cert.Subject.String())
+			return fmt.Errorf("expected %s, got Subject DN %q", cfg.AllowedNames.String(), cert.Subject.String())
 		}
 	}
 
@@ -237,12 +344,13 @@ func (tsc TLSServerConfig) MakeTLS() (*tls.Config, error) {
 	return out, nil
 }
 
-func (tsc TLSServerConfig) MakeGRPCServerOptions(opts ...grpc.ServerOption) ([]grpc.ServerOption, error) {
-	if !tsc.Enabled {
+// MakeGRPCServerOptions constructs the configured gRPC ServerOptions.
+func (cfg TLSServerConfig) MakeGRPCServerOptions(opts ...grpc.ServerOption) ([]grpc.ServerOption, error) {
+	if !cfg.Enabled {
 		return opts, nil
 	}
 
-	tlsConfig, err := tsc.MakeTLS()
+	tlsConfig, err := cfg.MakeTLS()
 	if err != nil {
 		return nil, err
 	}
@@ -253,76 +361,4 @@ func (tsc TLSServerConfig) MakeGRPCServerOptions(opts ...grpc.ServerOption) ([]g
 	out[0] = grpc.Creds(credentials.NewTLS(tlsConfig))
 	copy(out[1:], opts)
 	return out, nil
-}
-
-func (tsc TLSServerConfig) toAlt() *tscJSON {
-	if !tsc.Enabled {
-		return nil
-	}
-	return &tscJSON{
-		Cert:         tsc.Cert,
-		Key:          tsc.Key,
-		MutualTLS:    tsc.MutualTLS,
-		ClientCA:     tsc.ClientCA,
-		AllowedNames: tsc.AllowedNames,
-	}
-}
-
-func (alt *tscJSON) toStd() TLSServerConfig {
-	if alt == nil {
-		return TLSServerConfig{}
-	}
-	return TLSServerConfig{
-		Enabled:      true,
-		Cert:         alt.Cert,
-		Key:          alt.Key,
-		MutualTLS:    alt.MutualTLS,
-		ClientCA:     alt.ClientCA,
-		AllowedNames: alt.AllowedNames,
-	}
-}
-
-func (tsc TLSServerConfig) postprocess() (out TLSServerConfig, err error) {
-	var zero TLSServerConfig
-
-	if !tsc.Enabled {
-		return zero, nil
-	}
-
-	if tsc.Cert == "" {
-		return zero, nil
-	}
-
-	expanded, err := roxyutil.ExpandPath(tsc.Cert)
-	if err != nil {
-		return zero, err
-	}
-	tsc.Cert = expanded
-
-	if tsc.Key != "" {
-		expanded, err = roxyutil.ExpandPath(tsc.Key)
-		if err != nil {
-			return zero, err
-		}
-		tsc.Key = expanded
-	}
-
-	if tsc.Key == "" {
-		tsc.Key = tsc.Cert
-	}
-
-	if !tsc.MutualTLS {
-		tsc.ClientCA = ""
-		_ = tsc.AllowedNames.Parse(certnames.ANY)
-	}
-
-	if tsc.ClientCA != "" {
-		expanded, err = roxyutil.ExpandPath(tsc.ClientCA)
-		if err != nil {
-			return zero, err
-		}
-		tsc.ClientCA = expanded
-	}
-
-	return tsc, nil
 }

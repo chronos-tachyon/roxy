@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// TLSClientConfig represents the configuration for a client-oriented
+// *tls.Config object.
 type TLSClientConfig struct {
 	Enabled              bool
 	SkipVerify           bool
@@ -25,7 +28,8 @@ type TLSClientConfig struct {
 	ClientKey            string
 }
 
-type tccJSON struct {
+// TLSClientConfigJSON represents the JSON doppelgänger of an TLSClientConfig.
+type TLSClientConfigJSON struct {
 	SkipVerify           bool   `json:"skipVerify,omitempty"`
 	SkipVerifyServerName bool   `json:"skipVerifyServerName,omitempty"`
 	RootCA               string `json:"rootCA,omitempty"`
@@ -35,63 +39,87 @@ type tccJSON struct {
 	ClientKey            string `json:"clientKey,omitempty"`
 }
 
-func (tcc TLSClientConfig) AppendTo(out *strings.Builder) {
-	if !tcc.Enabled {
+// AppendTo appends the string representation to the given Builder.
+func (cfg TLSClientConfig) AppendTo(out *strings.Builder) {
+	if !cfg.Enabled {
 		out.WriteString("no")
 		return
 	}
 	out.WriteString("yes")
-	if tcc.SkipVerify {
+	if cfg.SkipVerify {
 		out.WriteString(",verify=no")
 	}
-	if tcc.SkipVerifyServerName {
+	if cfg.SkipVerifyServerName {
 		out.WriteString(",verifyServerName=no")
 	}
-	if tcc.RootCA != "" {
+	if cfg.RootCA != "" {
 		out.WriteString(",ca=")
-		out.WriteString(tcc.RootCA)
+		out.WriteString(cfg.RootCA)
 	}
-	if tcc.ServerName != "" {
+	if cfg.ServerName != "" {
 		out.WriteString(",serverName=")
-		out.WriteString(tcc.ServerName)
+		out.WriteString(cfg.ServerName)
 	}
-	if tcc.CommonName != "" {
+	if cfg.CommonName != "" {
 		out.WriteString(",commonName=")
-		out.WriteString(tcc.CommonName)
+		out.WriteString(cfg.CommonName)
 	}
-	if tcc.ClientCert != "" {
+	if cfg.ClientCert != "" {
 		out.WriteString(",clientCert=")
-		out.WriteString(tcc.ClientCert)
+		out.WriteString(cfg.ClientCert)
 	}
-	if tcc.ClientKey != "" {
+	if cfg.ClientKey != "" {
 		out.WriteString(",clientKey=")
-		out.WriteString(tcc.ClientKey)
+		out.WriteString(cfg.ClientKey)
 	}
 }
 
-func (tcc TLSClientConfig) String() string {
-	if !tcc.Enabled {
+// String returns the string representation.
+func (cfg TLSClientConfig) String() string {
+	if !cfg.Enabled {
 		return "no"
 	}
 
 	var buf strings.Builder
 	buf.Grow(64)
-	tcc.AppendTo(&buf)
+	cfg.AppendTo(&buf)
 	return buf.String()
 }
 
-func (tcc TLSClientConfig) MarshalJSON() ([]byte, error) {
-	if !tcc.Enabled {
+// MarshalJSON fulfills json.Marshaler.
+func (cfg TLSClientConfig) MarshalJSON() ([]byte, error) {
+	if !cfg.Enabled {
 		return constants.NullBytes, nil
 	}
-	return json.Marshal(tcc.toAlt())
+	return json.Marshal(cfg.ToJSON())
 }
 
-func (tcc *TLSClientConfig) Parse(str string) error {
+// ToJSON converts the object to its JSON doppelgänger.
+func (cfg TLSClientConfig) ToJSON() *TLSClientConfigJSON {
+	if !cfg.Enabled {
+		return nil
+	}
+	return &TLSClientConfigJSON{
+		SkipVerify:           cfg.SkipVerify,
+		SkipVerifyServerName: cfg.SkipVerifyServerName,
+		RootCA:               cfg.RootCA,
+		ServerName:           cfg.ServerName,
+		CommonName:           cfg.CommonName,
+		ClientCert:           cfg.ClientCert,
+		ClientKey:            cfg.ClientKey,
+	}
+}
+
+// Parse parses the string representation.
+func (cfg *TLSClientConfig) Parse(str string) error {
+	if cfg == nil {
+		panic(errors.New("*TLSClientConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*tcc = TLSClientConfig{}
+			*cfg = TLSClientConfig{}
 		}
 	}()
 
@@ -99,7 +127,7 @@ func (tcc *TLSClientConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := misc.StrictUnmarshalJSON([]byte(str), tcc)
+	err := misc.StrictUnmarshalJSON([]byte(str), cfg)
 	if err == nil {
 		wantZero = false
 		return nil
@@ -115,6 +143,8 @@ func (tcc *TLSClientConfig) Parse(str string) error {
 		return nil
 	}
 
+	cfg.Enabled = true
+
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "verify="):
@@ -122,54 +152,57 @@ func (tcc *TLSClientConfig) Parse(str string) error {
 			if err != nil {
 				return err
 			}
-			tcc.SkipVerify = !value
+			cfg.SkipVerify = !value
 
 		case strings.HasPrefix(item, "verifyServerName="):
 			value, err = misc.ParseBool(item[17:])
 			if err != nil {
 				return err
 			}
-			tcc.SkipVerifyServerName = !value
+			cfg.SkipVerifyServerName = !value
 
 		case strings.HasPrefix(item, "ca="):
-			tcc.RootCA = item[3:]
+			cfg.RootCA = item[3:]
 
 		case strings.HasPrefix(item, "serverName="):
-			tcc.ServerName = item[11:]
+			cfg.ServerName = item[11:]
 
 		case strings.HasPrefix(item, "commonName="):
-			tcc.CommonName = item[11:]
+			cfg.CommonName = item[11:]
 
 		case strings.HasPrefix(item, "cn="):
-			tcc.CommonName = item[3:]
+			cfg.CommonName = item[3:]
 
 		case strings.HasPrefix(item, "clientCert="):
-			tcc.ClientCert = item[11:]
+			cfg.ClientCert = item[11:]
 
 		case strings.HasPrefix(item, "clientKey="):
-			tcc.ClientKey = item[10:]
+			cfg.ClientKey = item[10:]
 
 		default:
 			return fmt.Errorf("unknown option %q", item)
 		}
 	}
 
-	tcc.Enabled = true
-	tmp, err := tcc.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*tcc = tmp
 	wantZero = false
 	return nil
 }
 
-func (tcc *TLSClientConfig) UnmarshalJSON(raw []byte) error {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (cfg *TLSClientConfig) UnmarshalJSON(raw []byte) error {
+	if cfg == nil {
+		panic(errors.New("*TLSClientConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*tcc = TLSClientConfig{}
+			*cfg = TLSClientConfig{}
 		}
 	}()
 
@@ -177,32 +210,115 @@ func (tcc *TLSClientConfig) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	var alt tccJSON
+	var alt *TLSClientConfigJSON
 	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
 
-	tmp, err := alt.toStd().postprocess()
+	err = cfg.FromJSON(alt)
 	if err != nil {
 		return err
 	}
 
-	*tcc = tmp
+	err = cfg.PostProcess()
+	if err != nil {
+		return err
+	}
+
 	wantZero = false
 	return nil
 }
 
-func (tcc TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
-	if !tcc.Enabled {
+// FromJSON converts the object's JSON doppelgänger into the object.
+func (cfg *TLSClientConfig) FromJSON(alt *TLSClientConfigJSON) error {
+	if cfg == nil {
+		panic(errors.New("*TLSClientConfig is nil"))
+	}
+
+	if alt == nil {
+		*cfg = TLSClientConfig{}
+		return nil
+	}
+
+	*cfg = TLSClientConfig{
+		Enabled:              true,
+		SkipVerify:           alt.SkipVerify,
+		SkipVerifyServerName: alt.SkipVerifyServerName,
+		RootCA:               alt.RootCA,
+		ServerName:           alt.ServerName,
+		CommonName:           alt.CommonName,
+		ClientCert:           alt.ClientCert,
+		ClientKey:            alt.ClientKey,
+	}
+
+	return nil
+}
+
+// PostProcess performs data integrity checks and input post-processing.
+func (cfg *TLSClientConfig) PostProcess() error {
+	if cfg == nil {
+		panic(errors.New("*TLSClientConfig is nil"))
+	}
+
+	if !cfg.Enabled {
+		*cfg = TLSClientConfig{}
+		return nil
+	}
+
+	if cfg.SkipVerify {
+		cfg.RootCA = ""
+		cfg.ServerName = ""
+		cfg.CommonName = ""
+		cfg.SkipVerifyServerName = false
+	}
+
+	if cfg.SkipVerifyServerName {
+		cfg.ServerName = ""
+	}
+
+	if cfg.RootCA != "" {
+		expanded, err := roxyutil.ExpandPath(cfg.RootCA)
+		if err != nil {
+			return err
+		}
+		cfg.RootCA = expanded
+	}
+
+	if cfg.ClientCert != "" {
+		expanded, err := roxyutil.ExpandPath(cfg.ClientCert)
+		if err != nil {
+			return err
+		}
+		cfg.ClientCert = expanded
+	}
+
+	if cfg.ClientKey != "" {
+		expanded, err := roxyutil.ExpandPath(cfg.ClientKey)
+		if err != nil {
+			return err
+		}
+		cfg.ClientKey = expanded
+	}
+
+	if cfg.ClientCert != "" && cfg.ClientKey == "" {
+		cfg.ClientKey = cfg.ClientCert
+	}
+
+	return nil
+}
+
+// MakeTLS constructs the configured *tls.Config.
+func (cfg TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
+	if !cfg.Enabled {
 		return nil, nil
 	}
 
 	out := new(tls.Config)
 
-	if tcc.SkipVerify {
+	if cfg.SkipVerify {
 		// pass
-	} else if tcc.RootCA == "" {
+	} else if cfg.RootCA == "" {
 		roots, err := x509.SystemCertPool()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load system certificate pool: %w", err)
@@ -212,27 +328,27 @@ func (tcc TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 	} else {
 		roots := x509.NewCertPool()
 
-		raw, err := ioutil.ReadFile(tcc.RootCA)
+		raw, err := ioutil.ReadFile(cfg.RootCA)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file %q: %w", tcc.RootCA, err)
+			return nil, fmt.Errorf("failed to read file %q: %w", cfg.RootCA, err)
 		}
 
 		ok := roots.AppendCertsFromPEM(raw)
 		if !ok {
-			return nil, fmt.Errorf("failed to process certificates from PEM file %q", tcc.RootCA)
+			return nil, fmt.Errorf("failed to process certificates from PEM file %q", cfg.RootCA)
 		}
 
 		out.RootCAs = roots
 	}
 
-	out.ServerName = tcc.ServerName
+	out.ServerName = cfg.ServerName
 	if out.ServerName == "" {
 		out.ServerName = serverName
 	}
 
-	if tcc.SkipVerify {
+	if cfg.SkipVerify {
 		out.InsecureSkipVerify = true
-	} else if tcc.SkipVerifyServerName {
+	} else if cfg.SkipVerifyServerName {
 		out.InsecureSkipVerify = true
 		out.VerifyConnection = func(cs tls.ConnectionState) error {
 			opts := x509.VerifyOptions{
@@ -250,8 +366,8 @@ func (tcc TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 				return err
 			}
 
-			if tcc.CommonName != "" {
-				expectCN := tcc.CommonName
+			if cfg.CommonName != "" {
+				expectCN := cfg.CommonName
 				actualCN := cs.PeerCertificates[0].Subject.CommonName
 				if expectCN != actualCN {
 					return fmt.Errorf("expected subject CommonName %q, got subject CommonName %q", expectCN, actualCN)
@@ -260,9 +376,9 @@ func (tcc TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 
 			return nil
 		}
-	} else if tcc.CommonName != "" {
+	} else if cfg.CommonName != "" {
 		out.VerifyConnection = func(cs tls.ConnectionState) error {
-			expectCN := tcc.CommonName
+			expectCN := cfg.CommonName
 			actualCN := cs.PeerCertificates[0].Subject.CommonName
 			if expectCN != actualCN {
 				return fmt.Errorf("expected subject CommonName %q, got subject CommonName %q", expectCN, actualCN)
@@ -271,9 +387,9 @@ func (tcc TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 		}
 	}
 
-	if tcc.ClientCert != "" {
-		certPath := tcc.ClientCert
-		keyPath := tcc.ClientKey
+	if cfg.ClientCert != "" {
+		certPath := cfg.ClientCert
+		keyPath := cfg.ClientKey
 
 		var err error
 		out.Certificates = make([]tls.Certificate, 1)
@@ -284,84 +400,4 @@ func (tcc TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 	}
 
 	return out, nil
-}
-
-func (tcc TLSClientConfig) toAlt() *tccJSON {
-	if !tcc.Enabled {
-		return nil
-	}
-	return &tccJSON{
-		SkipVerify:           tcc.SkipVerify,
-		SkipVerifyServerName: tcc.SkipVerifyServerName,
-		RootCA:               tcc.RootCA,
-		ServerName:           tcc.ServerName,
-		CommonName:           tcc.CommonName,
-		ClientCert:           tcc.ClientCert,
-		ClientKey:            tcc.ClientKey,
-	}
-}
-
-func (alt *tccJSON) toStd() TLSClientConfig {
-	if alt == nil {
-		return TLSClientConfig{}
-	}
-	return TLSClientConfig{
-		Enabled:              true,
-		SkipVerify:           alt.SkipVerify,
-		SkipVerifyServerName: alt.SkipVerifyServerName,
-		RootCA:               alt.RootCA,
-		ServerName:           alt.ServerName,
-		CommonName:           alt.CommonName,
-		ClientCert:           alt.ClientCert,
-		ClientKey:            alt.ClientKey,
-	}
-}
-
-func (tcc TLSClientConfig) postprocess() (out TLSClientConfig, err error) {
-	var zero TLSClientConfig
-
-	if !tcc.Enabled {
-		return zero, nil
-	}
-
-	if tcc.SkipVerify {
-		tcc.RootCA = ""
-		tcc.ServerName = ""
-		tcc.CommonName = ""
-		tcc.SkipVerifyServerName = false
-	}
-
-	if tcc.SkipVerifyServerName {
-		tcc.ServerName = ""
-	}
-
-	if tcc.RootCA != "" {
-		expanded, err := roxyutil.ExpandPath(tcc.RootCA)
-		if err != nil {
-			return zero, err
-		}
-		tcc.RootCA = expanded
-	}
-
-	if tcc.ClientCert != "" {
-		expanded, err := roxyutil.ExpandPath(tcc.ClientCert)
-		if err != nil {
-			return zero, err
-		}
-		tcc.ClientCert = expanded
-	}
-
-	if tcc.ClientKey != "" {
-		expanded, err := roxyutil.ExpandPath(tcc.ClientKey)
-		if err != nil {
-			return zero, err
-		}
-		tcc.ClientKey = expanded
-	}
-
-	if tcc.ClientCert != "" && tcc.ClientKey == "" {
-		tcc.ClientKey = tcc.ClientCert
-	}
-
-	return tcc, nil
 }

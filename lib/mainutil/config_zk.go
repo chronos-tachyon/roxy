@@ -18,6 +18,7 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// ZKConfig represents the configuration for a *zk.Conn.
 type ZKConfig struct {
 	Enabled        bool
 	Servers        []string
@@ -25,6 +26,7 @@ type ZKConfig struct {
 	Auth           ZKAuthConfig
 }
 
+// ZKAuthConfig represents the configuration for (*zk.Conn).AddAuth.
 type ZKAuthConfig struct {
 	Enabled  bool
 	Scheme   string
@@ -33,77 +35,120 @@ type ZKAuthConfig struct {
 	Password string
 }
 
-type zcJSON struct {
-	Servers        []string      `json:"servers"`
-	SessionTimeout time.Duration `json:"sessionTimeout,omitempty"`
-	Auth           *zcaJSON      `json:"auth,omitempty"`
+// ZKConfigJSON represents the JSON doppelgänger of an ZKConfig.
+type ZKConfigJSON struct {
+	Servers        []string          `json:"servers"`
+	SessionTimeout time.Duration     `json:"sessionTimeout,omitempty"`
+	Auth           *ZKAuthConfigJSON `json:"auth,omitempty"`
 }
 
-type zcaJSON struct {
+// ZKAuthConfigJSON represents the JSON doppelgänger of an ZKAuthConfig.
+type ZKAuthConfigJSON struct {
 	Scheme   string `json:"scheme"`
 	Raw      string `json:"raw,omitempty"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
 }
 
-func (zc ZKConfig) AppendTo(out *strings.Builder) {
-	if !zc.Enabled {
+// AppendTo appends the string representation to the given Builder.
+func (cfg ZKConfig) AppendTo(out *strings.Builder) {
+	if !cfg.Enabled {
 		return
 	}
-	for i, server := range zc.Servers {
+	for i, server := range cfg.Servers {
 		if i != 0 {
 			out.WriteString(",")
 		}
 		out.WriteString(server)
 	}
-	if zc.SessionTimeout != 0 {
+	if cfg.SessionTimeout != 0 {
 		out.WriteString(";sessionTimeout=")
-		out.WriteString(zc.SessionTimeout.String())
+		out.WriteString(cfg.SessionTimeout.String())
 	}
-	if !zc.Auth.Enabled {
+	if !cfg.Auth.Enabled {
 		return
 	}
-	if zc.Auth.Scheme != "" {
+	if cfg.Auth.Scheme != "" {
 		out.WriteString(";authtype=")
-		out.WriteString(zc.Auth.Scheme)
+		out.WriteString(cfg.Auth.Scheme)
 	}
-	if zc.Auth.Raw != nil {
+	if cfg.Auth.Raw != nil {
 		out.WriteString(";authdata=")
-		out.WriteString(base64.StdEncoding.EncodeToString(zc.Auth.Raw))
+		out.WriteString(base64.StdEncoding.EncodeToString(cfg.Auth.Raw))
 	}
-	if zc.Auth.Username != "" {
+	if cfg.Auth.Username != "" {
 		out.WriteString(";username=")
-		out.WriteString(zc.Auth.Username)
+		out.WriteString(cfg.Auth.Username)
 	}
-	if zc.Auth.Password != "" {
+	if cfg.Auth.Password != "" {
 		out.WriteString(";password=")
-		out.WriteString(zc.Auth.Password)
+		out.WriteString(cfg.Auth.Password)
 	}
 }
 
-func (zc ZKConfig) String() string {
-	if !zc.Enabled {
+// String returns the string representation.
+func (cfg ZKConfig) String() string {
+	if !cfg.Enabled {
 		return ""
 	}
 
 	var buf strings.Builder
 	buf.Grow(64)
-	zc.AppendTo(&buf)
+	cfg.AppendTo(&buf)
 	return buf.String()
 }
 
-func (zc ZKConfig) MarshalJSON() ([]byte, error) {
-	if !zc.Enabled {
+// MarshalJSON fulfills json.Marshaler.
+func (cfg ZKConfig) MarshalJSON() ([]byte, error) {
+	if !cfg.Enabled {
 		return constants.NullBytes, nil
 	}
-	return json.Marshal(zc.toAlt())
+	return json.Marshal(cfg.ToJSON())
 }
 
-func (zc *ZKConfig) Parse(str string) error {
+// MarshalJSON fulfills json.Marshaler.
+func (cfg ZKAuthConfig) MarshalJSON() ([]byte, error) {
+	if !cfg.Enabled {
+		return constants.NullBytes, nil
+	}
+	return json.Marshal(cfg.ToJSON())
+}
+
+// ToJSON converts the object to its JSON doppelgänger.
+func (cfg ZKConfig) ToJSON() *ZKConfigJSON {
+	if !cfg.Enabled {
+		return nil
+	}
+	return &ZKConfigJSON{
+		Servers:        cfg.Servers,
+		SessionTimeout: cfg.SessionTimeout,
+		Auth:           cfg.Auth.ToJSON(),
+	}
+}
+
+// ToJSON converts the object to its JSON doppelgänger.
+func (cfg ZKAuthConfig) ToJSON() *ZKAuthConfigJSON {
+	if !cfg.Enabled {
+		return nil
+	}
+	return &ZKAuthConfigJSON{
+		Scheme:   cfg.Scheme,
+		Raw:      base64.StdEncoding.EncodeToString(cfg.Raw),
+		Username: cfg.Username,
+		Password: cfg.Password,
+	}
+}
+
+// Parse parses the string representation.
+func (cfg *ZKConfig) Parse(str string) error {
+	if cfg == nil {
+		panic(errors.New("*ZKConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*zc = ZKConfig{}
+			*cfg = ZKConfig{}
 		}
 	}()
 
@@ -111,11 +156,13 @@ func (zc *ZKConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := misc.StrictUnmarshalJSON([]byte(str), zc)
+	err := misc.StrictUnmarshalJSON([]byte(str), cfg)
 	if err == nil {
 		wantZero = false
 		return nil
 	}
+
+	cfg.Enabled = true
 
 	pieces := strings.Split(str, ";")
 
@@ -129,36 +176,32 @@ func (zc *ZKConfig) Parse(str string) error {
 	}
 
 	serverList := strings.Split(serverListString, ",")
-	zc.Servers = make([]string, 0, len(serverList))
+	cfg.Servers = make([]string, 0, len(serverList))
 	for _, server := range serverList {
 		if server == "" {
 			continue
 		}
-		host, port, err := misc.SplitHostPort(server, constants.PortZK)
-		if err != nil {
-			return err
-		}
-		zc.Servers = append(zc.Servers, net.JoinHostPort(host, port))
+		cfg.Servers = append(cfg.Servers, server)
 	}
-	if len(zc.Servers) == 0 {
+	if len(cfg.Servers) == 0 {
 		return nil
 	}
 
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "sessionTimeout="):
-			zc.SessionTimeout, err = time.ParseDuration(item[15:])
+			cfg.SessionTimeout, err = time.ParseDuration(item[15:])
 			if err != nil {
 				return err
 			}
 
 		case strings.HasPrefix(item, "authtype="):
-			zc.Auth.Enabled = true
-			zc.Auth.Scheme = item[9:]
+			cfg.Auth.Enabled = true
+			cfg.Auth.Scheme = item[9:]
 
 		case strings.HasPrefix(item, "authdata="):
-			zc.Auth.Enabled = true
-			zc.Auth.Raw, err = misc.TryBase64DecodeString(item[9:])
+			cfg.Auth.Enabled = true
+			cfg.Auth.Raw, err = misc.TryBase64DecodeString(item[9:])
 			if err != nil {
 				return err
 			}
@@ -168,41 +211,44 @@ func (zc *ZKConfig) Parse(str string) error {
 			if err != nil {
 				return err
 			}
-			zc.Auth.Enabled = true
-			if zc.Auth.Scheme == "" {
-				zc.Auth.Scheme = "digest"
+			cfg.Auth.Enabled = true
+			if cfg.Auth.Scheme == "" {
+				cfg.Auth.Scheme = "digest"
 			}
-			zc.Auth.Username = expanded
+			cfg.Auth.Username = expanded
 
 		case strings.HasPrefix(item, "password="):
 			expanded, err := roxyutil.ExpandPassword(item[9:])
 			if err != nil {
 				return err
 			}
-			zc.Auth.Enabled = true
-			zc.Auth.Password = expanded
+			cfg.Auth.Enabled = true
+			cfg.Auth.Password = expanded
 
 		default:
 			return fmt.Errorf("unknown option %q", item)
 		}
 	}
 
-	zc.Enabled = true
-	tmp, err := zc.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*zc = tmp
 	wantZero = false
 	return nil
 }
 
-func (zc *ZKConfig) UnmarshalJSON(raw []byte) error {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (cfg *ZKConfig) UnmarshalJSON(raw []byte) error {
+	if cfg == nil {
+		panic(errors.New("*ZKConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*zc = ZKConfig{}
+			*cfg = ZKConfig{}
 		}
 	}()
 
@@ -210,149 +256,215 @@ func (zc *ZKConfig) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	var alt zcJSON
+	var alt *ZKConfigJSON
 	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
 
-	tmp1, err := alt.toStd()
+	err = cfg.FromJSON(alt)
 	if err != nil {
 		return err
 	}
 
-	tmp2, err := tmp1.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*zc = tmp2
 	wantZero = false
 	return nil
 }
 
-func (zc ZKConfig) Connect(ctx context.Context) (*zk.Conn, error) {
-	if !zc.Enabled {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (cfg *ZKAuthConfig) UnmarshalJSON(raw []byte) error {
+	if cfg == nil {
+		panic(errors.New("*ZKAuthConfig is nil"))
+	}
+
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*cfg = ZKAuthConfig{}
+		}
+	}()
+
+	if bytes.Equal(raw, constants.NullBytes) {
+		return nil
+	}
+
+	var alt *ZKAuthConfigJSON
+	err := misc.StrictUnmarshalJSON(raw, &alt)
+	if err != nil {
+		return err
+	}
+
+	err = cfg.FromJSON(alt)
+	if err != nil {
+		return err
+	}
+
+	err = cfg.PostProcess()
+	if err != nil {
+		return err
+	}
+
+	wantZero = false
+	return nil
+}
+
+// FromJSON converts the object's JSON doppelgänger into the object.
+func (cfg *ZKConfig) FromJSON(alt *ZKConfigJSON) error {
+	if cfg == nil {
+		panic(errors.New("*ZKConfig is nil"))
+	}
+
+	if alt == nil {
+		*cfg = ZKConfig{}
+		return nil
+	}
+
+	*cfg = ZKConfig{
+		Enabled:        true,
+		Servers:        alt.Servers,
+		SessionTimeout: alt.SessionTimeout,
+	}
+
+	err := cfg.Auth.FromJSON(alt.Auth)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// FromJSON converts the object's JSON doppelgänger into the object.
+func (cfg *ZKAuthConfig) FromJSON(alt *ZKAuthConfigJSON) error {
+	if cfg == nil {
+		panic(errors.New("*ZKAuthConfig is nil"))
+	}
+
+	if alt == nil {
+		*cfg = ZKAuthConfig{}
+		return nil
+	}
+
+	*cfg = ZKAuthConfig{
+		Enabled:  true,
+		Scheme:   alt.Scheme,
+		Username: alt.Username,
+		Password: alt.Password,
+	}
+
+	raw, err := misc.TryBase64DecodeString(alt.Raw)
+	if err != nil {
+		return err
+	}
+
+	cfg.Raw = raw
+	return nil
+}
+
+// PostProcess performs data integrity checks and input post-processing.
+func (cfg *ZKConfig) PostProcess() error {
+	if cfg == nil {
+		panic(errors.New("*ZKConfig is nil"))
+	}
+
+	if !cfg.Enabled {
+		*cfg = ZKConfig{}
+		return nil
+	}
+
+	if len(cfg.Servers) == 0 {
+		return errors.New("len(ZKConfig.Servers) == 0")
+	}
+
+	for index := range cfg.Servers {
+		server := cfg.Servers[index]
+		if server == "" {
+			return fmt.Errorf("ZKConfig.Servers[%d] == %q", index, server)
+		}
+
+		host, port, err := misc.SplitHostPort(server, constants.PortZK)
+		if err != nil {
+			return err
+		}
+
+		cfg.Servers[index] = net.JoinHostPort(host, port)
+	}
+
+	err := cfg.Auth.PostProcess()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// PostProcess performs data integrity checks and input post-processing.
+func (cfg *ZKAuthConfig) PostProcess() error {
+	if cfg == nil {
+		panic(errors.New("*ZKAuthConfig is nil"))
+	}
+
+	if !cfg.Enabled {
+		*cfg = ZKAuthConfig{}
+		return nil
+	}
+
+	if cfg.Raw == nil && cfg.Username == "" {
+		return errors.New("must specify either \"ZKAuthConfig.Raw\" or \"ZKAuthConfig.Username\"")
+	}
+
+	if cfg.Raw != nil && cfg.Username != "" {
+		return errors.New("cannot specify both \"ZKAuthConfig.Raw\" and \"ZKAuthConfig.Username\"")
+	}
+
+	if cfg.Scheme == "" && cfg.Raw != nil {
+		return errors.New("must specify \"ZKAuthConfig.Scheme\"")
+	}
+
+	if cfg.Scheme == "" {
+		cfg.Scheme = "digest"
+	}
+
+	return nil
+}
+
+// Connect constructs the configured *zk.Conn and dials the ZooKeeper cluster.
+func (cfg ZKConfig) Connect(ctx context.Context) (*zk.Conn, error) {
+	if !cfg.Enabled {
 		return nil, nil
 	}
 
-	sessTimeout := zc.SessionTimeout
+	sessTimeout := cfg.SessionTimeout
 	if sessTimeout == 0 {
 		sessTimeout = 30 * time.Second
 	}
 
 	zkconn, _, err := zk.Connect(
-		zc.Servers,
+		cfg.Servers,
 		sessTimeout,
 		zk.WithLogger(ZKLoggerBridge{}))
 	if err != nil {
 		return nil, err
 	}
 
-	if zc.Auth.Enabled {
+	if cfg.Auth.Enabled {
 		var authRaw []byte
-		if zc.Auth.Raw != nil {
-			authRaw = zc.Auth.Raw
+		if cfg.Auth.Raw != nil {
+			authRaw = cfg.Auth.Raw
 		} else {
-			authRaw = []byte(zc.Auth.Username + ":" + zc.Auth.Password)
+			authRaw = []byte(cfg.Auth.Username + ":" + cfg.Auth.Password)
 		}
 
-		err = zkconn.AddAuth(zc.Auth.Scheme, authRaw)
+		err = zkconn.AddAuth(cfg.Auth.Scheme, authRaw)
 		if err != nil {
 			zkconn.Close()
-			return nil, fmt.Errorf("failed to (*zk.Conn).AddAuth with scheme=%q: %w", zc.Auth.Scheme, err)
+			return nil, fmt.Errorf("failed to (*zk.Conn).AddAuth with scheme=%q: %w", cfg.Auth.Scheme, err)
 		}
 	}
 
 	return zkconn, nil
-}
-
-func (zc ZKConfig) toAlt() *zcJSON {
-	if !zc.Enabled {
-		return nil
-	}
-
-	var altAuth *zcaJSON
-	if zc.Auth.Enabled {
-		altAuth = &zcaJSON{
-			Scheme:   zc.Auth.Scheme,
-			Raw:      base64.StdEncoding.EncodeToString(zc.Auth.Raw),
-			Username: zc.Auth.Username,
-			Password: zc.Auth.Password,
-		}
-	}
-
-	return &zcJSON{
-		Servers:        zc.Servers,
-		SessionTimeout: zc.SessionTimeout,
-		Auth:           altAuth,
-	}
-}
-
-func (alt *zcJSON) toStd() (ZKConfig, error) {
-	if alt == nil {
-		return ZKConfig{}, nil
-	}
-
-	var stdAuth ZKAuthConfig
-	if alt.Auth != nil {
-		raw, err := misc.TryBase64DecodeString(alt.Auth.Raw)
-		if err != nil {
-			return ZKConfig{}, err
-		}
-
-		stdAuth = ZKAuthConfig{
-			Enabled:  true,
-			Scheme:   alt.Auth.Scheme,
-			Raw:      raw,
-			Username: alt.Auth.Username,
-			Password: alt.Auth.Password,
-		}
-	}
-
-	return ZKConfig{
-		Enabled:        true,
-		Servers:        alt.Servers,
-		SessionTimeout: alt.SessionTimeout,
-		Auth:           stdAuth,
-	}, nil
-}
-
-func (zc ZKConfig) postprocess() (out ZKConfig, err error) {
-	var zero ZKConfig
-
-	if !zc.Enabled {
-		return zero, nil
-	}
-
-	if len(zc.Servers) == 0 {
-		return zero, nil
-	}
-
-	for _, server := range zc.Servers {
-		if server == "" {
-			return zero, nil
-		}
-	}
-
-	if !zc.Auth.Enabled {
-		zc.Auth = ZKAuthConfig{}
-	}
-
-	if zc.Auth.Enabled {
-		if zc.Auth.Raw == nil && zc.Auth.Username == "" {
-			return zero, errors.New("must specify either \"Auth.Raw\" or \"Auth.Username\"")
-		}
-		if zc.Auth.Raw != nil && zc.Auth.Username != "" {
-			return zero, errors.New("cannot specify both \"Auth.Raw\" and \"Auth.Username\"")
-		}
-		if zc.Auth.Scheme == "" && zc.Auth.Raw != nil {
-			return zero, errors.New("must specify \"Auth.Scheme\"")
-		}
-		if zc.Auth.Scheme == "" {
-			zc.Auth.Scheme = "digest"
-		}
-	}
-
-	return zc, nil
 }

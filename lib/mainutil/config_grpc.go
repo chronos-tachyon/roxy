@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,50 +16,69 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 )
 
-type Target = roxyresolver.Target
-
+// GRPCClientConfig represents the configuration for a *grpc.ClientConn.
 type GRPCClientConfig struct {
 	Enabled bool
-	Target  Target
+	Target  roxyresolver.Target
 	TLS     TLSClientConfig
 }
 
-type gccJSON struct {
-	Target string   `json:"target"`
-	TLS    *tccJSON `json:"tls,omitempty"`
+// GRPCClientConfigJSON represents the JSON doppelgänger of an GRPCClientConfig.
+type GRPCClientConfigJSON struct {
+	Target string               `json:"target"`
+	TLS    *TLSClientConfigJSON `json:"tls,omitempty"`
 }
 
-func (gcc GRPCClientConfig) AppendTo(out *strings.Builder) {
-	gcc.Target.AppendTo(out)
-	if gcc.TLS.Enabled {
+// AppendTo appends the string representation to the given Builder.
+func (cfg GRPCClientConfig) AppendTo(out *strings.Builder) {
+	cfg.Target.AppendTo(out)
+	if cfg.TLS.Enabled {
 		out.WriteString(";tls=")
-		gcc.TLS.AppendTo(out)
+		cfg.TLS.AppendTo(out)
 	}
 }
 
-func (gcc GRPCClientConfig) String() string {
-	if !gcc.Enabled {
+// String returns the string representation.
+func (cfg GRPCClientConfig) String() string {
+	if !cfg.Enabled {
 		return ""
 	}
 
 	var buf strings.Builder
 	buf.Grow(64)
-	gcc.AppendTo(&buf)
+	cfg.AppendTo(&buf)
 	return buf.String()
 }
 
-func (gcc GRPCClientConfig) MarshalJSON() ([]byte, error) {
-	if !gcc.Enabled {
+// MarshalJSON fulfills json.Marshaler.
+func (cfg GRPCClientConfig) MarshalJSON() ([]byte, error) {
+	if !cfg.Enabled {
 		return constants.NullBytes, nil
 	}
-	return json.Marshal(gcc.toAlt())
+	return json.Marshal(cfg.ToJSON())
 }
 
-func (gcc *GRPCClientConfig) Parse(str string) error {
+// ToJSON converts the object to its JSON doppelgänger.
+func (cfg GRPCClientConfig) ToJSON() *GRPCClientConfigJSON {
+	if !cfg.Enabled {
+		return nil
+	}
+	return &GRPCClientConfigJSON{
+		Target: cfg.Target.String(),
+		TLS:    cfg.TLS.ToJSON(),
+	}
+}
+
+// Parse parses the string representation.
+func (cfg *GRPCClientConfig) Parse(str string) error {
+	if cfg == nil {
+		panic(errors.New("*GRPCClientConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*gcc = GRPCClientConfig{}
+			*cfg = GRPCClientConfig{}
 		}
 	}()
 
@@ -66,15 +86,17 @@ func (gcc *GRPCClientConfig) Parse(str string) error {
 		return nil
 	}
 
-	err := misc.StrictUnmarshalJSON([]byte(str), gcc)
+	err := misc.StrictUnmarshalJSON([]byte(str), cfg)
 	if err == nil {
 		wantZero = false
 		return nil
 	}
 
+	cfg.Enabled = true
+
 	pieces := strings.Split(str, ";")
 
-	err = gcc.Target.Parse(pieces[0])
+	err = cfg.Target.Parse(pieces[0])
 	if err != nil {
 		return err
 	}
@@ -82,7 +104,7 @@ func (gcc *GRPCClientConfig) Parse(str string) error {
 	for _, item := range pieces[1:] {
 		switch {
 		case strings.HasPrefix(item, "tls="):
-			err = gcc.TLS.Parse(item[4:])
+			err = cfg.TLS.Parse(item[4:])
 			if err != nil {
 				return err
 			}
@@ -92,22 +114,25 @@ func (gcc *GRPCClientConfig) Parse(str string) error {
 		}
 	}
 
-	gcc.Enabled = true
-	tmp, err := gcc.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*gcc = tmp
 	wantZero = false
 	return nil
 }
 
-func (gcc *GRPCClientConfig) UnmarshalJSON(raw []byte) error {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (cfg *GRPCClientConfig) UnmarshalJSON(raw []byte) error {
+	if cfg == nil {
+		panic(errors.New("*GRPCClientConfig is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*gcc = GRPCClientConfig{}
+			*cfg = GRPCClientConfig{}
 		}
 	}()
 
@@ -115,36 +140,83 @@ func (gcc *GRPCClientConfig) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 
-	var alt gccJSON
+	var alt *GRPCClientConfigJSON
 	err := misc.StrictUnmarshalJSON(raw, &alt)
 	if err != nil {
 		return err
 	}
 
-	tmp1, err := alt.toStd()
+	err = cfg.FromJSON(alt)
 	if err != nil {
 		return err
 	}
 
-	tmp2, err := tmp1.postprocess()
+	err = cfg.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*gcc = tmp2
 	wantZero = false
 	return nil
 }
 
-func (gcc GRPCClientConfig) Dial(ctx context.Context, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
-	if !gcc.Enabled {
+// FromJSON converts the object's JSON doppelgänger into the object.
+func (cfg *GRPCClientConfig) FromJSON(alt *GRPCClientConfigJSON) error {
+	if cfg == nil {
+		panic(errors.New("*GRPCClientConfig is nil"))
+	}
+
+	if alt == nil {
+		*cfg = GRPCClientConfig{}
+		return nil
+	}
+
+	*cfg = GRPCClientConfig{
+		Enabled: true,
+	}
+
+	err := cfg.Target.Parse(alt.Target)
+	if err != nil {
+		return err
+	}
+
+	err = cfg.TLS.FromJSON(alt.TLS)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// PostProcess performs data integrity checks and input post-processing.
+func (cfg *GRPCClientConfig) PostProcess() error {
+	if cfg == nil {
+		panic(errors.New("*GRPCClientConfig is nil"))
+	}
+
+	if !cfg.Enabled {
+		*cfg = GRPCClientConfig{}
+		return nil
+	}
+
+	err := cfg.TLS.PostProcess()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Dial dials the configured gRPC server.
+func (cfg GRPCClientConfig) Dial(ctx context.Context, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+	if !cfg.Enabled {
 		return nil, nil
 	}
 
 	dialOpts := make([]grpc.DialOption, 2, 2+len(opts))
 	dialOpts[0] = roxyresolver.WithStandardResolvers(ctx)
-	if gcc.TLS.Enabled {
-		tlsConfig, err := gcc.TLS.MakeTLS(gcc.Target.ServerName)
+	if cfg.TLS.Enabled {
+		tlsConfig, err := cfg.TLS.MakeTLS(cfg.Target.ServerName)
 		if err != nil {
 			return nil, err
 		}
@@ -154,54 +226,10 @@ func (gcc GRPCClientConfig) Dial(ctx context.Context, opts ...grpc.DialOption) (
 	}
 	dialOpts = append(dialOpts, opts...)
 
-	cc, err := grpc.DialContext(ctx, gcc.Target.String(), dialOpts...)
+	cc, err := grpc.DialContext(ctx, cfg.Target.String(), dialOpts...)
 	if err != nil {
 		return nil, err
 	}
 
 	return cc, nil
-}
-
-func (gcc GRPCClientConfig) toAlt() *gccJSON {
-	if !gcc.Enabled {
-		return nil
-	}
-	return &gccJSON{
-		Target: gcc.Target.String(),
-		TLS:    gcc.TLS.toAlt(),
-	}
-}
-
-func (alt *gccJSON) toStd() (GRPCClientConfig, error) {
-	if alt == nil {
-		return GRPCClientConfig{}, nil
-	}
-
-	var rt Target
-	err := rt.Parse(alt.Target)
-	if err != nil {
-		return GRPCClientConfig{}, err
-	}
-
-	return GRPCClientConfig{
-		Enabled: true,
-		Target:  rt,
-		TLS:     alt.TLS.toStd(),
-	}, nil
-}
-
-func (gcc GRPCClientConfig) postprocess() (out GRPCClientConfig, err error) {
-	var zero GRPCClientConfig
-
-	if !gcc.Enabled {
-		return zero, nil
-	}
-
-	tmp, err := gcc.TLS.postprocess()
-	if err != nil {
-		return zero, err
-	}
-	gcc.TLS = tmp
-
-	return gcc, nil
 }

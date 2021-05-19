@@ -20,6 +20,7 @@ const (
 	hcrServing    = grpc_health_v1.HealthCheckResponse_SERVING
 )
 
+// HealthServer is an implementation of a grpc.health.v1.Health server.
 type HealthServer struct {
 	grpc_health_v1.UnimplementedHealthServer
 
@@ -33,6 +34,8 @@ type serviceHealth struct {
 	ok bool
 }
 
+// Set changes the health status for the named subsystem.  If the subsystem
+// does not yet exist, it is automatically created.
 func (s *HealthServer) Set(subsystemName string, healthy bool) {
 	s.mu.Lock()
 	if s.byService == nil {
@@ -52,6 +55,7 @@ func (s *HealthServer) Set(subsystemName string, healthy bool) {
 	s.mu.Unlock()
 }
 
+// Stop marks all subsystems as unhealthy.
 func (s *HealthServer) Stop() {
 	s.mu.Lock()
 	s.stopped = true
@@ -62,6 +66,7 @@ func (s *HealthServer) Stop() {
 	s.mu.Unlock()
 }
 
+// Check implements the /grpc.health.v1.Health/Check method.
 func (s *HealthServer) Check(ctx context.Context, req *healthCheckRequest) (*healthCheckResponse, error) {
 	log.Logger.Debug().
 		Str("rpcService", "grpc.health.v1.Health").
@@ -82,6 +87,7 @@ func (s *HealthServer) Check(ctx context.Context, req *healthCheckRequest) (*hea
 	return &healthCheckResponse{Status: status}, nil
 }
 
+// Watch implements the /grpc.health.v1.Health/Watch method.
 func (s *HealthServer) Watch(req *healthCheckRequest, ws grpc_health_v1.Health_WatchServer) error {
 	log.Logger.Debug().
 		Str("rpcService", "grpc.health.v1.Health").
