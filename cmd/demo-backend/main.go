@@ -284,7 +284,7 @@ func main() {
 			Msg("Running")
 	})
 
-	gMultiServer.Run()
+	_ = gMultiServer.Run()
 
 	log.Logger.Info().
 		Msg("Exit")
