@@ -8,20 +8,22 @@ import (
 	"net"
 	"time"
 
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func NewDNSBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
+// NewDNSBuilder constructs a new gRPC resolver.Builder for the "dns" scheme.
+func NewDNSBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) resolver.Builder {
 	if ctx == nil {
 		panic(errors.New("context.Context is nil"))
 	}
 	return dnsBuilder{ctx, rng, serviceConfigJSON}
 }
 
+// NewDNSResolver constructs a new Resolver for the "dns" scheme.
 func NewDNSResolver(opts Options) (Resolver, error) {
 	if opts.Context == nil {
 		panic(errors.New("context.Context is nil"))
@@ -54,7 +56,8 @@ func NewDNSResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host string, port string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
+// ParseDNSTarget breaks apart a Target into component data.
+func ParseDNSTarget(rt Target, defaultPort string) (res *net.Resolver, host string, port string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
 	res, err = parseNetResolver(rt.Authority)
 	if err != nil {
 		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: err}
@@ -108,6 +111,8 @@ func ParseDNSTarget(rt RoxyTarget, defaultPort string) (res *net.Resolver, host 
 	return
 }
 
+// MakeDNSResolveFunc constructs a PollingResolveFunc for building your own
+// custom PollingResolver with the "dns" scheme.
 func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, port string, serverName string) PollingResolveFunc {
 	return func() ([]Resolved, error) {
 		// Resolve the port number.
@@ -133,7 +138,7 @@ func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, por
 				IP:   ip,
 				Port: int(portNum),
 			}
-			resAddr := Address{
+			grpcAddr := resolver.Address{
 				Addr:       tcpAddr.String(),
 				ServerName: serverName,
 			}
@@ -141,7 +146,7 @@ func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, por
 				Unique:     tcpAddr.String(),
 				ServerName: serverName,
 				Addr:       tcpAddr,
-				Address:    resAddr,
+				Address:    grpcAddr,
 			}
 		}
 		return out, nil
@@ -160,9 +165,9 @@ func (b dnsBuilder) Scheme() string {
 	return constants.SchemeDNS
 }
 
-func (b dnsBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	rt, err := RoxyTargetFromTarget(target)
-	if err != nil {
+func (b dnsBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	var rt Target
+	if err := rt.FromGRPCTarget(target); err != nil {
 		return nil, err
 	}
 
@@ -190,6 +195,6 @@ func (b dnsBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 	})
 }
 
-var _ grpcresolver.Builder = dnsBuilder{}
+var _ resolver.Builder = dnsBuilder{}
 
 // }}}

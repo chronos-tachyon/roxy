@@ -5,17 +5,19 @@ import (
 	"math/rand"
 	"net"
 
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func NewIPBuilder(rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
+// NewIPBuilder constructs a new gRPC resolver.Builder for the "ip" scheme.
+func NewIPBuilder(rng *rand.Rand, serviceConfigJSON string) resolver.Builder {
 	return ipBuilder{rng, serviceConfigJSON}
 }
 
+// NewIPResolver constructs a new Resolver for the "ip" scheme.
 func NewIPResolver(opts Options) (Resolver, error) {
 	defaultPort := constants.PortHTTP
 	if opts.IsTLS {
@@ -35,7 +37,8 @@ func NewIPResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseIPTarget(rt RoxyTarget, defaultPort string) (tcpAddrs []*net.TCPAddr, balancer BalancerType, serverName string, err error) {
+// ParseIPTarget breaks apart a Target into component data.
+func ParseIPTarget(rt Target, defaultPort string) (tcpAddrs []*net.TCPAddr, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
 		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
@@ -85,9 +88,9 @@ func (b ipBuilder) Scheme() string {
 	return constants.SchemeIP
 }
 
-func (b ipBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	rt, err := RoxyTargetFromTarget(target)
-	if err != nil {
+func (b ipBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	var rt Target
+	if err := rt.FromGRPCTarget(target); err != nil {
 		return nil, err
 	}
 
@@ -105,7 +108,7 @@ func (b ipBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcres
 	})
 }
 
-var _ grpcresolver.Builder = ipBuilder{}
+var _ resolver.Builder = ipBuilder{}
 
 // }}}
 
@@ -116,7 +119,7 @@ func makeIPRecords(tcpAddrs []*net.TCPAddr, serverName string) []Resolved {
 		if myServerName == "" {
 			myServerName = tcpAddr.IP.String()
 		}
-		resAddr := Address{
+		grpcAddr := resolver.Address{
 			Addr:       tcpAddr.String(),
 			ServerName: myServerName,
 		}
@@ -124,7 +127,7 @@ func makeIPRecords(tcpAddrs []*net.TCPAddr, serverName string) []Resolved {
 			Unique:     fmt.Sprintf("%d/%s", index, tcpAddr.String()),
 			ServerName: myServerName,
 			Addr:       tcpAddr,
-			Address:    resAddr,
+			Address:    grpcAddr,
 		}
 	}
 	return records

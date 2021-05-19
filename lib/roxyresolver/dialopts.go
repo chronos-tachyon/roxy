@@ -7,6 +7,8 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
+// WithStandardResolvers returns a gRPC DialOption that enables as many Target
+// schemes as possible on the gRPC ClientConn being created.
 func WithStandardResolvers(ctx context.Context) grpc.DialOption {
 	resolvers := make([]resolver.Builder, 3, 6)
 	resolvers[0] = NewIPBuilder(nil, "")

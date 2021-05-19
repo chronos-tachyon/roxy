@@ -9,32 +9,73 @@ import (
 	"time"
 
 	multierror "github.com/hashicorp/go-multierror"
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/serviceconfig"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/lib/syncrand"
 )
 
-const (
-	MaxPollInterval         = 24 * time.Hour
-	DefaultPollInterval     = 5 * time.Minute
-	DefaultCooldownInterval = 30 * time.Second
-)
+// MaxPollInterval is the maximum permitted value of PollInterval.
+const MaxPollInterval = 24 * time.Hour
 
+// DefaultPollInterval is the default value of PollInterval if not specified.
+const DefaultPollInterval = 5 * time.Minute
+
+// DefaultCooldownInterval is the default value of CooldownInterval if not specified.
+const DefaultCooldownInterval = 30 * time.Second
+
+// PollingResolverOptions holds options related to constructing a new PollingResolver.
 type PollingResolverOptions struct {
-	Context           context.Context
-	Random            *rand.Rand
-	PollInterval      time.Duration
-	CooldownInterval  time.Duration
-	Balancer          BalancerType
-	ResolveFunc       PollingResolveFunc
-	ClientConn        grpcresolver.ClientConn
+	// Context is the context within which the resolver runs.  If this
+	// context is cancelled or reaches its deadline, the resolver will
+	// stop.
+	//
+	// This field is mandatory.
+	Context context.Context
+
+	// Random is the source of randomness for balancer algorithms that need
+	// one.
+	//
+	// If provided, it MUST be thread-safe; see the syncrand package for
+	// more information.  If nil, the syncrand.Global() instance will be
+	// used.
+	Random *rand.Rand
+
+	// PollInterval is the interval between automatic calls to ResolveFunc.
+	// If zero, DefaultPollInterval is used.  If negative, MaxPollInterval
+	// is used.
+	PollInterval time.Duration
+
+	// CooldownInterval is the minimum interval between calls to
+	// ResolveFunc, whether automatic or triggered by ResolveNow.  If zero,
+	// DefaultCooldownInterval is used.  If negative, the final value of
+	// PollInterval is used.
+	CooldownInterval time.Duration
+
+	// Balancer selects which load balancer algorithm to use.
+	Balancer BalancerType
+
+	// ResolveFunc will be called periodically to resolve addresses.
+	//
+	// This field is mandatory.
+	ResolveFunc PollingResolveFunc
+
+	// ClientConn is a gRPC ClientConn that will receive state updates.
+	ClientConn resolver.ClientConn
+
+	// ServiceConfigJSON is the gRPC Service Config which will be provided
+	// to ClientConn on each state update.
 	ServiceConfigJSON string
 }
 
+// PollingResolveFunc represents a closure that will be called periodically to
+// resolve addresses.  It will be called at least once every PollInterval, and
+// no less than CooldownInterval will pass between calls.
 type PollingResolveFunc func() ([]Resolved, error)
 
+// NewPollingResolver constructs a new PollingResolver.
 func NewPollingResolver(opts PollingResolverOptions) (*PollingResolver, error) {
 	if opts.Context == nil {
 		panic(errors.New("Context is nil"))
@@ -89,6 +130,8 @@ func NewPollingResolver(opts PollingResolverOptions) (*PollingResolver, error) {
 	return res, nil
 }
 
+// PollingResolver is an implementation of the Resolver interface that
+// periodically polls for record changes.
 type PollingResolver struct {
 	ctx          context.Context
 	cancelFn     context.CancelFunc
@@ -98,13 +141,12 @@ type PollingResolver struct {
 	balancer     BalancerType
 	resolveFn    PollingResolveFunc
 	resolveNowCh chan struct{}
-	cc           grpcresolver.ClientConn
+	cc           resolver.ClientConn
 	sc           *serviceconfig.ParseResult
 	nextRR       uint32
 
 	mu       sync.Mutex
 	cv       *sync.Cond
-	lastID   WatchID
 	watches  map[WatchID]WatchFunc
 	byAddr   map[string]*Dynamic
 	byUnique map[string]int
@@ -115,6 +157,7 @@ type PollingResolver struct {
 	closed   bool
 }
 
+// Err returns any errors encountered since the last call to Err or ResolveAll.
 func (res *PollingResolver) Err() error {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -123,9 +166,13 @@ func (res *PollingResolver) Err() error {
 		res.cv.Wait()
 	}
 
-	return res.err.ErrorOrNil()
+	err := misc.ErrorOrNil(res.err)
+	res.err.Errors = nil
+	return err
 }
 
+// ResolveAll returns all resolved addresses, plus any errors encountered since
+// the last call to Err or ResolveAll.
 func (res *PollingResolver) ResolveAll() ([]Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -134,9 +181,13 @@ func (res *PollingResolver) ResolveAll() ([]Resolved, error) {
 		res.cv.Wait()
 	}
 
-	return res.resolved, res.err.ErrorOrNil()
+	err := misc.ErrorOrNil(res.err)
+	res.err.Errors = nil
+	return res.resolved, err
 }
 
+// Resolve returns the resolved address of a healthy backend, if one is
+// available, or else returns the error that prevented it from doing so.
 func (res *PollingResolver) Resolve() (Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -145,7 +196,8 @@ func (res *PollingResolver) Resolve() (Resolved, error) {
 		res.cv.Wait()
 	}
 
-	return balanceImpl(res.balancer, res.err, res.resolved, res.rng, res.perm, &res.nextRR)
+	err := misc.ErrorOrNil(res.err)
+	return balanceImpl(res.balancer, err, res.resolved, res.rng, res.perm, &res.nextRR)
 }
 
 func (res *PollingResolver) Update(opts UpdateOptions) {
@@ -160,6 +212,9 @@ func (res *PollingResolver) Update(opts UpdateOptions) {
 	}
 }
 
+// Watch registers a WatchFunc.  The WatchFunc will be called immediately with
+// synthetic events for each resolved address currently known, plus it will be
+// called whenever the Resolver's state changes.
 func (res *PollingResolver) Watch(fn WatchFunc) WatchID {
 	if fn == nil {
 		panic(errors.New("WatchFunc is nil"))
@@ -186,12 +241,12 @@ func (res *PollingResolver) Watch(fn WatchFunc) WatchID {
 		fn(events)
 	}
 
-	res.lastID++
-	id := res.lastID
+	id := generateWatchID()
 	res.watches[id] = fn
 	return id
 }
 
+// CancelWatch cancels a previous call to Watch.
 func (res *PollingResolver) CancelWatch(id WatchID) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -203,7 +258,9 @@ func (res *PollingResolver) CancelWatch(id WatchID) {
 	delete(res.watches, id)
 }
 
-func (res *PollingResolver) ResolveNow(opts ResolveNowOptions) {
+// ResolveNow forces a poll immediately, or as soon as possible if an immediate
+// poll would violate the CooldownInterval.
+func (res *PollingResolver) ResolveNow(opts resolver.ResolveNowOptions) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
 
@@ -217,6 +274,7 @@ func (res *PollingResolver) ResolveNow(opts ResolveNowOptions) {
 	}
 }
 
+// Close stops the resolver and frees all resources.
 func (res *PollingResolver) Close() {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -400,7 +458,7 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 		} else if len(newList) == 0 {
 			res.cc.ReportError(roxyutil.ErrNoHealthyBackends)
 		} else {
-			var state grpcresolver.State
+			var state resolver.State
 			state.Addresses = makeAddressList(newList)
 			state.ServiceConfig = res.sc
 			res.cc.UpdateState(state)

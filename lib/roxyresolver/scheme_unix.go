@@ -4,17 +4,20 @@ import (
 	"net"
 	"strings"
 
+	"google.golang.org/grpc/resolver"
+
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// NewUnixResolver constructs a new Resolver for the "unix" scheme.
 func NewUnixResolver(opts Options) (Resolver, error) {
 	unixAddr, balancer, serverName, err := ParseUnixTarget(opts.Target)
 	if err != nil {
 		return nil, err
 	}
 
-	resAddr := Address{
+	grpcAddr := resolver.Address{
 		Addr:       unixAddr.String(),
 		ServerName: serverName,
 	}
@@ -24,20 +27,20 @@ func NewUnixResolver(opts Options) (Resolver, error) {
 	// We would like to call the following code here:
 	//
 	// >  import "google.golang.org/grpc/internal/transport/networktype"
-	// >  resAddr = networktype.Set(resAddr, "unix")
+	// >  grpcAddr = networktype.Set(grpcAddr, "unix")
 	//
 	// but networktype is an internal package.
 	//
-	// Thankfully, resAddr is only used by resolvers in gRPC mode, i.e.
+	// Thankfully, grpcAddr is only used by resolvers in gRPC mode, i.e.
 	// when FooResolverOptions contains a ClientConn.  We don't create or
-	// register our own grpcresolver.Builder for "unix" or "unix-abstract",
-	// so we rely on the standard gRPC resolver for those schemes.
+	// register our own resolver.Builder for "unix" or "unix-abstract", so
+	// we rely on the standard gRPC resolver for those schemes.
 
 	data := Resolved{
 		Unique:     constants.NetUnix + ":" + unixAddr.String(),
 		ServerName: serverName,
 		Addr:       unixAddr,
-		Address:    resAddr,
+		Address:    grpcAddr,
 	}
 
 	return NewStaticResolver(StaticResolverOptions{
@@ -47,7 +50,8 @@ func NewUnixResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseUnixTarget(rt RoxyTarget) (unixAddr *net.UnixAddr, balancer BalancerType, serverName string, err error) {
+// ParseUnixTarget breaks apart a Target into component data.
+func ParseUnixTarget(rt Target) (unixAddr *net.UnixAddr, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" && !strings.EqualFold(rt.Authority, "localhost") {
 		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmptyOrLocalhost}
 		return

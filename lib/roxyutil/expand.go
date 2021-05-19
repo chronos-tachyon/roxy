@@ -12,32 +12,40 @@ import (
 
 // ExpandString expands ${ENV_VAR} references.
 func ExpandString(in string) (string, error) {
-	var errs multierror.Error
+	var errors []error
 
 	expanded := os.Expand(in, func(name string) string {
 		value, found := os.LookupEnv(name)
 		if !found {
 			err := EnvVarLookupError{Var: name, Err: ErrNotExist}
-			errs.Errors = append(errs.Errors, err)
+			errors = append(errors, err)
 		}
 		return value
 	})
 
-	err := errs.ErrorOrNil()
+	var err error
+	switch uint(len(errors)) {
+	case 0:
+		err = nil
+	case 1:
+		err = errors[0]
+	default:
+		err = &multierror.Error{Errors: errors}
+	}
 	return expanded, err
 }
 
 // ExpandPath expands ${ENV_VAR} references, ~ and ~user references, and makes
 // the path absolute.
 func ExpandPath(in string) (string, error) {
-	var errs multierror.Error
+	var errors []error
 
 	expanded, err := ExpandString(in)
 	if err != nil {
-		if merr, ok := err.(*multierror.Error); ok {
-			errs.Errors = merr.Errors
+		if multi, ok := err.(*multierror.Error); ok {
+			errors = multi.Errors
 		} else {
-			errs.Errors = append(errs.Errors, err)
+			errors = append(errors, err)
 		}
 	}
 
@@ -60,10 +68,10 @@ func ExpandPath(in string) (string, error) {
 				homeDir = u.HomeDir
 			} else if userName == "" {
 				homeDir = "/home/self"
-				errs.Errors = append(errs.Errors, err)
+				errors = append(errors, err)
 			} else {
 				homeDir = filepath.Join("/home", userName)
-				errs.Errors = append(errs.Errors, err)
+				errors = append(errors, err)
 			}
 		}
 		expanded = filepath.Join(homeDir, rest)
@@ -72,26 +80,33 @@ func ExpandPath(in string) (string, error) {
 	if expanded != "" && expanded[0] != '\x00' && expanded[0] != '@' && !reURLScheme.MatchString(expanded) {
 		abs, err := PathAbs(expanded)
 		if err != nil {
-			errs.Errors = append(errs.Errors, err)
+			errors = append(errors, err)
 			abs = expanded
 		}
 		expanded = filepath.Clean(abs)
 	}
 
-	err = errs.ErrorOrNil()
+	switch uint(len(errors)) {
+	case 0:
+		err = nil
+	case 1:
+		err = errors[0]
+	default:
+		err = &multierror.Error{Errors: errors}
+	}
 	return expanded, err
 }
 
 // ExpandPassword expands ${ENV_VAR} references and @file references.
 func ExpandPassword(in string) (string, error) {
-	var errs multierror.Error
+	var errors []error
 
 	expanded, err := ExpandString(in)
 	if err != nil {
-		if merr, ok := err.(*multierror.Error); ok {
-			errs.Errors = merr.Errors
+		if multi, ok := err.(*multierror.Error); ok {
+			errors = multi.Errors
 		} else {
-			errs.Errors = append(errs.Errors, err)
+			errors = append(errors, err)
 		}
 	}
 
@@ -103,6 +118,13 @@ func ExpandPassword(in string) (string, error) {
 		expanded = strings.Trim(string(raw), " \t\r\n")
 	}
 
-	err = errs.ErrorOrNil()
+	switch uint(len(errors)) {
+	case 0:
+		err = nil
+	case 1:
+		err = errors[0]
+	default:
+		err = &multierror.Error{Errors: errors}
+	}
 	return expanded, err
 }

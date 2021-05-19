@@ -7,24 +7,47 @@ import (
 	"sort"
 	"strings"
 
+	"google.golang.org/grpc/resolver"
+
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-type RoxyTarget struct {
-	Scheme     string
-	Authority  string
-	Endpoint   string
+// Target represents a parsed Resolver target name.
+type Target struct {
+	// Scheme indicates which Resolver implementation to use.
+	//
+	// If not specified, "dns" is assumed.
+	Scheme string
+
+	// Authority provides information about which server to query to do the
+	// resolving.
+	//
+	// Most schemes do not permit the Authority field to be specified.
+	Authority string
+
+	// Endpoint provides information about which name to resolve.
+	//
+	// This field is mandatory.
+	Endpoint string
+
+	// ServerName is the value to use for the
+	// "crypto/tls".(*Config).ServerName field.
 	ServerName string
-	Query      url.Values
+
+	// Query is a collection of key-value mappings.
+	Query url.Values
 }
 
-func (rt RoxyTarget) MarshalJSON() ([]byte, error) {
+// MarshalJSON fulfills json.Marshaler.
+func (rt Target) MarshalJSON() ([]byte, error) {
 	return json.Marshal(rt.String())
 }
 
-func (rt RoxyTarget) AppendTo(out *strings.Builder) {
+// AppendTo appends the string representation of this Target to the
+// provided Builder.
+func (rt Target) AppendTo(out *strings.Builder) {
 	out.WriteString(rt.Scheme)
 	out.WriteString("://")
 	escapeAuthorityTo(out, rt.Authority)
@@ -33,30 +56,33 @@ func (rt RoxyTarget) AppendTo(out *strings.Builder) {
 	appendQueryStringTo(out, rt.Query)
 }
 
-func (rt RoxyTarget) String() string {
+// String returns the string representation of this Target.
+func (rt Target) String() string {
 	var buf strings.Builder
 	buf.Grow(32)
 	rt.AppendTo(&buf)
 	return buf.String()
 }
 
-func (rt RoxyTarget) AsTarget() Target {
+// AsGRPCTarget converts this Target to an equivalent resolver.Target.
+func (rt Target) AsGRPCTarget() resolver.Target {
 	var buf strings.Builder
 	buf.Grow(len(rt.Endpoint))
 	escapeEndpointTo(&buf, rt.Endpoint)
 	appendQueryStringTo(&buf, rt.Query)
-	return Target{
+	return resolver.Target{
 		Scheme:    rt.Scheme,
 		Authority: escapeAuthority(rt.Authority),
 		Endpoint:  buf.String(),
 	}
 }
 
-func (rt *RoxyTarget) UnmarshalJSON(raw []byte) error {
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (rt *Target) UnmarshalJSON(raw []byte) error {
 	var str string
 	err := json.Unmarshal(raw, &str)
 	if err != nil {
-		*rt = RoxyTarget{}
+		*rt = Target{}
 		return err
 	}
 
@@ -68,11 +94,12 @@ func (rt *RoxyTarget) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func (rt *RoxyTarget) Parse(str string) error {
+// Parse parses the given string representation.
+func (rt *Target) Parse(str string) error {
 	wantZero := true
 	defer func() {
 		if wantZero {
-			*rt = RoxyTarget{}
+			*rt = Target{}
 		}
 	}()
 
@@ -125,9 +152,14 @@ func (rt *RoxyTarget) Parse(str string) error {
 	return nil
 }
 
-func RoxyTargetFromTarget(target Target) (RoxyTarget, error) {
-	var zero RoxyTarget
-	var rt RoxyTarget
+// FromGRPCTarget tries to make this Target identical to the given resolver.Target.
+func (rt *Target) FromGRPCTarget(target resolver.Target) error {
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*rt = Target{}
+		}
+	}()
 
 	rt.Scheme = target.Scheme
 	rt.Authority = unescapeAuthorityOrEndpoint(target.Authority)
@@ -138,20 +170,22 @@ func RoxyTargetFromTarget(target Target) (RoxyTarget, error) {
 		var err error
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
-			return zero, roxyutil.QueryStringError{QueryString: qs, Err: err}
+			return roxyutil.QueryStringError{QueryString: qs, Err: err}
 		}
 	}
 
 	tmp, err := rt.postprocess(false)
 	if err != nil {
-		return zero, err
+		return err
 	}
 
-	return tmp, nil
+	*rt = tmp
+	wantZero = false
+	return nil
 }
 
-func (rt RoxyTarget) postprocess(hasSlash bool) (RoxyTarget, error) {
-	var zero RoxyTarget
+func (rt Target) postprocess(hasSlash bool) (Target, error) {
+	var zero Target
 
 	if rt.Scheme == constants.SchemeEmpty {
 		rt.Scheme = constants.SchemeDNS

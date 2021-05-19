@@ -3,6 +3,8 @@ package roxyresolver
 import (
 	"fmt"
 
+	"google.golang.org/grpc/resolver"
+
 	"github.com/chronos-tachyon/roxy/lib/membership"
 )
 
@@ -44,11 +46,11 @@ func parseMembershipData(namedPort string, serverName string, pathKey string, by
 		myServerName = tcpAddr.IP.String()
 	}
 
-	resAddr := Address{
+	grpcAddr := resolver.Address{
 		Addr:       tcpAddr.String(),
 		ServerName: myServerName,
 	}
-	resAddr = WithMembership(resAddr, r)
+	grpcAddr = WithMembership(grpcAddr, r)
 
 	return Event{
 		Type: UpdateEvent,
@@ -59,7 +61,7 @@ func parseMembershipData(namedPort string, serverName string, pathKey string, by
 			ShardID:    r.ShardID,
 			HasShardID: r.HasShardID,
 			Addr:       tcpAddr,
-			Address:    resAddr,
+			Address:    grpcAddr,
 		},
 	}
 }

@@ -1,25 +1,41 @@
 package roxyresolver
 
 import (
-	"errors"
 	"fmt"
 )
 
+// Event represents the Resolver state changes triggered by some event.
 type Event struct {
-	Type              EventType
-	Err               error
-	Key               string
-	Data              Resolved
+	// Type is the type of event, i.e. which data has changed.
+	Type EventType
+
+	// Err is the global error.
+	//
+	// Valid for: ErrorEvent.
+	Err error
+
+	// Key is the unique identifier for this address.
+	//
+	// Valid for: UpdateEvent, DeleteEvent, BadDataEvent, StatusChangeEvent.
+	Key string
+
+	// Data is the resolved address data.
+	//
+	// Valid for: UpdateEvent, StatusChangeEvent.
+	Data Resolved
+
+	// ServiceConfigJSON is the new gRPC service config.
+	//
+	// Valid for: NewServiceConfigEvent.
 	ServiceConfigJSON string
 }
 
-func (event *Event) Check() {
+// Check verifies the data integrity of all fields.
+func (event Event) Check() {
 	if checkDisabled {
 		return
 	}
-	if event == nil {
-		panic(errors.New("*Event is nil"))
-	}
+
 	var (
 		expectErr     bool
 		expectKey     bool
@@ -47,6 +63,7 @@ func (event *Event) Check() {
 	case NewServiceConfigEvent:
 		expectSC = true
 	}
+
 	if expectErr && event.Err == nil {
 		panic(fmt.Errorf("Event.Type is %#v but Event.Err is nil", event.Type))
 	}

@@ -83,10 +83,10 @@ func TestNewUnixResolver(t *testing.T) {
 
 	for _, row := range testData1 {
 		t.Run(row.name, func(t *testing.T) {
-			var rt RoxyTarget
+			var rt Target
 			err := rt.Parse(row.target)
 			if err != nil {
-				t.Errorf("RoxyTarget.Parse failed: %v", err)
+				t.Errorf("Target.Parse failed: %v", err)
 				return
 			}
 
@@ -223,13 +223,13 @@ func TestNewUnixResolver(t *testing.T) {
 
 	for _, row := range testData2 {
 		t.Run(row.name, func(t *testing.T) {
-			var rt RoxyTarget
+			var rt Target
 			err := rt.Parse(row.target)
 			if err != nil {
 				if row.errfn(err) {
 					return
 				}
-				t.Errorf("RoxyTarget.Parse returned the wrong error: %v", err)
+				t.Errorf("Target.Parse returned the wrong error: %v", err)
 				return
 			}
 

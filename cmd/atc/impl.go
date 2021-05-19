@@ -210,8 +210,7 @@ func (ref *Ref) Close() error {
 		errs.Errors = append(errs.Errors, err)
 	}
 
-	err := errs.ErrorOrNil()
-	return err
+	return misc.ErrorOrNil(errs)
 }
 
 func (ref *Ref) prepareThreadSend() {

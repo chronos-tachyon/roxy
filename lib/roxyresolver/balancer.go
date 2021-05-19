@@ -6,8 +6,6 @@ import (
 	"math/rand"
 	"sync/atomic"
 
-	multierror "github.com/hashicorp/go-multierror"
-
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
@@ -48,12 +46,12 @@ func computePermImpl(bal BalancerType, resolved []Resolved, rng *rand.Rand) []in
 	}
 }
 
-func balanceImpl(bal BalancerType, errs multierror.Error, resolved []Resolved, rng *rand.Rand, perm []int, nextRR *uint32) (Resolved, error) {
+func balanceImpl(bal BalancerType, err error, resolved []Resolved, rng *rand.Rand, perm []int, nextRR *uint32) (Resolved, error) {
+	if err == nil {
+		err = roxyutil.ErrNoHealthyBackends
+	}
+
 	if len(resolved) == 0 {
-		err := errs.ErrorOrNil()
-		if err == nil {
-			err = roxyutil.ErrNoHealthyBackends
-		}
 		return Resolved{}, err
 	}
 
@@ -119,11 +117,7 @@ func balanceImpl(bal BalancerType, errs multierror.Error, resolved []Resolved, r
 		panic(fmt.Errorf("%#v not implemented", bal))
 	}
 
-	if err := errs.ErrorOrNil(); err != nil {
-		return Resolved{}, err
-	}
-
-	return Resolved{}, roxyutil.ErrNoHealthyBackends
+	return Resolved{}, err
 }
 
 func findHealthyCandidates(resolved []Resolved) []Resolved {

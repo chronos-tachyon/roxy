@@ -9,19 +9,21 @@ import (
 	"strings"
 	"time"
 
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func NewSRVBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) grpcresolver.Builder {
+// NewSRVBuilder constructs a new gRPC resolver.Builder for the "srv" scheme.
+func NewSRVBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) resolver.Builder {
 	if ctx == nil {
 		panic(errors.New("context.Context is nil"))
 	}
 	return srvBuilder{ctx, rng, serviceConfigJSON}
 }
 
+// NewSRVResolver constructs a new Resolver for the "srv" scheme.
 func NewSRVResolver(opts Options) (Resolver, error) {
 	if opts.Context == nil {
 		panic(errors.New("context.Context is nil"))
@@ -42,7 +44,8 @@ func NewSRVResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
+// ParseSRVTarget breaks apart a Target into component data.
+func ParseSRVTarget(rt Target) (res *net.Resolver, name string, service string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
 	res, err = parseNetResolver(rt.Authority)
 	if err != nil {
 		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: err}
@@ -103,6 +106,8 @@ func ParseSRVTarget(rt RoxyTarget) (res *net.Resolver, name string, service stri
 	return
 }
 
+// MakeSRVResolveFunc constructs a PollingResolveFunc for building your own
+// custom PollingResolver with the "srv" scheme.
 func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, service string, serverName string) PollingResolveFunc {
 	proto := constants.NetTCP
 	if service == "" {
@@ -145,7 +150,7 @@ func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, ser
 					IP:   ip,
 					Port: int(record.Port),
 				}
-				resAddr := Address{
+				grpcAddr := resolver.Address{
 					Addr:       tcpAddr.String(),
 					ServerName: srvServerName,
 				}
@@ -158,7 +163,7 @@ func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, ser
 					HasSRV:      true,
 					HasWeight:   true,
 					Addr:        tcpAddr,
-					Address:     resAddr,
+					Address:     grpcAddr,
 				})
 			}
 		}
@@ -178,9 +183,9 @@ func (b srvBuilder) Scheme() string {
 	return constants.SchemeSRV
 }
 
-func (b srvBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	rt, err := RoxyTargetFromTarget(target)
-	if err != nil {
+func (b srvBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	var rt Target
+	if err := rt.FromGRPCTarget(target); err != nil {
 		return nil, err
 	}
 
@@ -200,6 +205,6 @@ func (b srvBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 	})
 }
 
-var _ grpcresolver.Builder = srvBuilder{}
+var _ resolver.Builder = srvBuilder{}
 
 // }}}

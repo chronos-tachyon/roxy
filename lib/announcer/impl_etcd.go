@@ -10,6 +10,7 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 	v3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -123,8 +124,6 @@ func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 }
 
 func (impl *etcdImpl) Withdraw(ctx context.Context) error {
-	var errs multierror.Error
-
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
 
@@ -134,21 +133,20 @@ func (impl *etcdImpl) Withdraw(ctx context.Context) error {
 
 	_, err := impl.etcd.Lease.Revoke(ctx, impl.leaseID)
 	err = roxyresolver.MapEtcdError(err)
+	if err != nil {
+		impl.errs.Errors = append(impl.errs.Errors, err)
+	}
 
 	for impl.state == StateRunning {
 		impl.cv.Wait()
 	}
 
-	errs.Errors = impl.errs.Errors
-	if err != nil {
-		errs.Errors = append(errs.Errors, err)
-	}
-
+	err = misc.ErrorOrNil(impl.errs)
 	impl.errs.Errors = nil
 	impl.cancelFn = nil
 	impl.leaseID = 0
 	impl.state = StateReady
-	return errs.ErrorOrNil()
+	return err
 }
 
 func (impl *etcdImpl) Close() error {

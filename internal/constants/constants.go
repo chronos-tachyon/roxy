@@ -26,7 +26,7 @@ const (
 	SchemeHTTPS = "https"
 )
 
-// SchemeEmpty et al are RoxyTarget schemes.
+// SchemeEmpty et al are Target schemes.
 const (
 	SchemeEmpty        = ""
 	SchemePassthrough  = "passthrough"

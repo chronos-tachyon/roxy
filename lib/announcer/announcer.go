@@ -7,6 +7,7 @@ import (
 
 	multierror "github.com/hashicorp/go-multierror"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/membership"
 )
 
@@ -89,7 +90,7 @@ func (a *Announcer) Announce(ctx context.Context, r *membership.Roxy) error {
 				}
 			}
 		}
-		return errs.ErrorOrNil()
+		return misc.ErrorOrNil(errs)
 	}
 
 	a.alive = alive
@@ -125,7 +126,7 @@ func (a *Announcer) Withdraw(ctx context.Context) error {
 
 	a.alive = nil
 	a.state = StateReady
-	return errs.ErrorOrNil()
+	return misc.ErrorOrNil(errs)
 }
 
 // Close broadcasts to all child announcers that no further announcements are
@@ -152,5 +153,5 @@ func (a *Announcer) Close() error {
 	}
 	a.alive = nil
 	a.state = StateClosed
-	return errs.ErrorOrNil()
+	return misc.ErrorOrNil(errs)
 }

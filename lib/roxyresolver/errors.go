@@ -9,24 +9,19 @@ import (
 
 // type StatusError {{{
 
-// StatusError represents a server that is in a bad state.
+// StatusError indicates that a server is in a bad state.
 type StatusError struct {
 	Status membership.ServerSetStatus
 }
 
+// Error fulfills the error interface.
 func (err StatusError) Error() string {
 	return fmt.Sprintf("status is %v", err.Status)
 }
 
+// Is returns true for fs.ErrNotExist.
 func (err StatusError) Is(other error) bool {
-	switch other {
-	case err:
-		return true
-	case fs.ErrNotExist:
-		return true
-	default:
-		return false
-	}
+	return other == fs.ErrNotExist
 }
 
 var _ error = StatusError{}

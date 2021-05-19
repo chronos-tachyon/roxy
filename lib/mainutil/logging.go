@@ -21,6 +21,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
@@ -193,7 +194,7 @@ func (w *RotatingLogWriter) Close() error {
 	if err := w.file.Close(); err != nil {
 		errs.Errors = append(errs.Errors, err)
 	}
-	return errs.ErrorOrNil()
+	return misc.ErrorOrNil(errs)
 }
 
 func (w *RotatingLogWriter) Rotate() error {
@@ -215,13 +216,14 @@ func (w *RotatingLogWriter) Rotate() error {
 	oldFile := w.file
 	w.file = newFile
 
+	var errs multierror.Error
 	if e := oldFile.Sync(); e != nil {
-		err = multierror.Append(err, e)
+		errs.Errors = append(errs.Errors, e)
 	}
 	if e := oldFile.Close(); e != nil {
-		err = multierror.Append(err, e)
+		errs.Errors = append(errs.Errors, e)
 	}
-	return err
+	return misc.ErrorOrNil(errs)
 }
 
 var _ io.WriteCloser = (*RotatingLogWriter)(nil)

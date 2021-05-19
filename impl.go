@@ -22,6 +22,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/chronos-tachyon/roxy/dist"
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
@@ -574,7 +575,7 @@ func (impl *Impl) Close() error {
 		}
 	}
 
-	return errs.ErrorOrNil()
+	return misc.ErrorOrNil(errs)
 }
 
 func (impl *Impl) ACMEManager() *autocert.Manager {

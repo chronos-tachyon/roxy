@@ -626,7 +626,7 @@ func (c *ATCClient) Close() error {
 
 	c.wg.Wait()
 
-	return errs.ErrorOrNil()
+	return misc.ErrorOrNil(errs)
 }
 
 func (c *ATCClient) updateServiceData(key serviceKey, addr *net.TCPAddr) {

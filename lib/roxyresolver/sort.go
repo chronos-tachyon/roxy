@@ -11,21 +11,26 @@ import (
 
 // type ResolvedList {{{
 
+// ResolvedList is a sorted list of Resolved addresses.
 type ResolvedList []Resolved
 
+// Len fulfills sort.Interface.
 func (list ResolvedList) Len() int {
 	return len(list)
 }
 
+// Swap fulfills sort.Interface.
 func (list ResolvedList) Swap(i, j int) {
 	list[i], list[j] = list[j], list[i]
 }
 
+// Less fulfills sort.Interface.
 func (list ResolvedList) Less(i, j int) bool {
 	a, b := list[i], list[j]
 	return resolvedCompare(a, b) < 0
 }
 
+// Sort is a convenience method for sort.Sort(list).
 func (list ResolvedList) Sort() {
 	sort.Sort(list)
 }

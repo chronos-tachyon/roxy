@@ -11,15 +11,30 @@ import (
 
 // type EventType {{{
 
+// EventType indicates the type of an Event.
 type EventType uint8
 
 const (
+	// NoOpEvent is an Event with no data.
 	NoOpEvent EventType = iota
+
+	// ErrorEvent is an Event with a global error.
 	ErrorEvent
+
+	// UpdateEvent is an Event with a new or changed address.
 	UpdateEvent
+
+	// DeleteEvent is an Event with a deleted address.
 	DeleteEvent
+
+	// BadDataEvent is an Event with an erroneous address.
 	BadDataEvent
+
+	// StatusChangeEvent is an Event with an address whose metadata has
+	// changed.
 	StatusChangeEvent
+
+	// NewServiceConfigEvent is an Event with a new gRPC service config.
 	NewServiceConfigEvent
 )
 
@@ -44,24 +59,28 @@ var eventTypeMap = map[string]EventType{
 	"newServiceConfig": NewServiceConfigEvent,
 }
 
-func (t EventType) String() string {
-	if uint(t) >= uint(len(eventTypeData)) {
-		return fmt.Sprintf("#%d", uint(t))
-	}
-	return eventTypeData[t].Name
-}
-
+// GoString returns the Go constant name.
 func (t EventType) GoString() string {
 	if uint(t) >= uint(len(eventTypeData)) {
-		return fmt.Sprintf("EventType(%d)", uint(t))
+		panic(fmt.Errorf("EventType %d is out of range", uint(t)))
 	}
 	return eventTypeData[t].GoName
 }
 
+// String returns the string representation.
+func (t EventType) String() string {
+	if uint(t) >= uint(len(eventTypeData)) {
+		panic(fmt.Errorf("EventType %d is out of range", uint(t)))
+	}
+	return eventTypeData[t].Name
+}
+
+// MarshalJSON fulfills json.Marshaler.
 func (t EventType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
+// UnmarshalJSON fulfills json.Unmarshaler.
 func (t *EventType) UnmarshalJSON(raw []byte) error {
 	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
@@ -76,6 +95,7 @@ func (t *EventType) UnmarshalJSON(raw []byte) error {
 	return t.Parse(str)
 }
 
+// Parse parses the string representation.
 func (t *EventType) Parse(str string) error {
 	if num, ok := eventTypeMap[str]; ok {
 		*t = num
@@ -100,8 +120,8 @@ func (t *EventType) Parse(str string) error {
 	return fmt.Errorf("illegal event type %q; expected one of %q", str, makeAllowedNames(eventTypeData))
 }
 
-var _ fmt.Stringer = EventType(0)
 var _ fmt.GoStringer = EventType(0)
+var _ fmt.Stringer = EventType(0)
 var _ json.Marshaler = EventType(0)
 var _ json.Unmarshaler = (*EventType)(nil)
 
@@ -109,14 +129,31 @@ var _ json.Unmarshaler = (*EventType)(nil)
 
 // type BalancerType {{{
 
+// BalancerType indicates which load balancer algorithm is in use.
 type BalancerType uint8
 
 const (
+	// RandomBalancer chooses an address with uniform probability.
 	RandomBalancer BalancerType = iota
+
+	// RoundRobinBalancer chooses an address from a random permutation.
+	// The permutation changes each time an address is added, changed, or
+	// deleted.
 	RoundRobinBalancer
+
+	// LeastLoadedBalancer is not implemented.
 	LeastLoadedBalancer
+
+	// SRVBalancer chooses an address using the rules for DNS SRV records.
 	SRVBalancer
+
+	// WeightedRandomBalancer chooses an address with weighted probability.
 	WeightedRandomBalancer
+
+	// WeightedRoundRobinBalancer chooses an address from a random shuffle
+	// that has zero or more copies of each address, each in proportion to
+	// that address's weight.  The shuffle changes each time an address is
+	// added, changed, or deleted.
 	WeightedRoundRobinBalancer
 )
 
@@ -145,24 +182,28 @@ var balancerTypeMap = map[string]BalancerType{
 	"wrr":                WeightedRoundRobinBalancer,
 }
 
-func (t BalancerType) String() string {
-	if uint(t) >= uint(len(balancerTypeData)) {
-		return fmt.Sprintf("#%d", uint(t))
-	}
-	return balancerTypeData[t].Name
-}
-
+// GoString returns the Go constant name.
 func (t BalancerType) GoString() string {
 	if uint(t) >= uint(len(balancerTypeData)) {
-		return fmt.Sprintf("BalancerType(%d)", uint(t))
+		panic(fmt.Errorf("BalancerType %d is out of range", uint(t)))
 	}
 	return balancerTypeData[t].GoName
 }
 
+// String returns the string representation.
+func (t BalancerType) String() string {
+	if uint(t) >= uint(len(balancerTypeData)) {
+		panic(fmt.Errorf("BalancerType %d is out of range", uint(t)))
+	}
+	return balancerTypeData[t].Name
+}
+
+// MarshalJSON fulfills json.Marshaler.
 func (t BalancerType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.String())
 }
 
+// UnmarshalJSON fulfills json.Unmarshaler.
 func (t *BalancerType) UnmarshalJSON(raw []byte) error {
 	if bytes.Equal(raw, constants.NullBytes) {
 		return nil
@@ -177,6 +218,7 @@ func (t *BalancerType) UnmarshalJSON(raw []byte) error {
 	return t.Parse(str)
 }
 
+// Parse parses the string representation.
 func (t *BalancerType) Parse(str string) error {
 	if num, ok := balancerTypeMap[str]; ok {
 		*t = num

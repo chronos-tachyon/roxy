@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	multierror "github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
@@ -209,7 +210,7 @@ func (m *MultiServer) Reload() error {
 		}
 	}
 	sdNotify("READY=1")
-	return errs.ErrorOrNil()
+	return misc.ErrorOrNil(errs)
 }
 
 func (m *MultiServer) Shutdown(graceful bool) error {
@@ -259,7 +260,7 @@ func (m *MultiServer) Shutdown(graceful bool) error {
 	for err := range errCh {
 		errs.Errors = append(errs.Errors, err)
 	}
-	return errs.ErrorOrNil()
+	return misc.ErrorOrNil(errs)
 }
 
 func (m *MultiServer) closeShutdownCh() {

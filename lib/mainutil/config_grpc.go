@@ -15,11 +15,11 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 )
 
-type RoxyTarget = roxyresolver.RoxyTarget
+type Target = roxyresolver.Target
 
 type GRPCClientConfig struct {
 	Enabled bool
-	Target  RoxyTarget
+	Target  Target
 	TLS     TLSClientConfig
 }
 
@@ -177,7 +177,7 @@ func (alt *gccJSON) toStd() (GRPCClientConfig, error) {
 		return GRPCClientConfig{}, nil
 	}
 
-	var rt RoxyTarget
+	var rt Target
 	err := rt.Parse(alt.Target)
 	if err != nil {
 		return GRPCClientConfig{}, err

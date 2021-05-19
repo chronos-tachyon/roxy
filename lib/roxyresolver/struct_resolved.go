@@ -4,25 +4,69 @@ import (
 	"errors"
 	"net"
 	"sync"
+
+	"google.golang.org/grpc/resolver"
 )
 
+// Resolved represents a resolved address.
 type Resolved struct {
-	Unique      string
-	Location    string
-	ServerName  string
+	// Unique is a stable unique identifier for this server.
+	Unique string
+
+	// Location is a string denoting the geographic location of this server.
+	//
+	// This field is only set by the ATC resolver.
+	Location string
+
+	// ServerName is either the empty string or the recommended value of
+	// the "crypto/tls".(*Config).ServerName field.
+	ServerName string
+
+	// SRVPriority is the priority field of this SRV record.
+	//
+	// This field is only set by the SRV resolver.
 	SRVPriority uint16
-	SRVWeight   uint16
-	ShardID     uint32
-	Weight      float32
-	HasSRV      bool
-	HasShardID  bool
-	HasWeight   bool
-	Err         error
-	Addr        net.Addr
-	Address     Address
-	Dynamic     *Dynamic
+
+	// SRVWeight is the weight field of this SRV record.
+	//
+	// This field is only set by the SRV resolver.
+	SRVWeight uint16
+
+	// ShardID is the shard ID number.
+	//
+	// This field is only set by some resolvers.
+	ShardID uint32
+
+	// Weight is the proportional weight for this server.
+	//
+	// This field is only set by some resolvers.
+	Weight float32
+
+	// HasSRV is true if both SRVPriority and SRVWeight are set.
+	HasSRV bool
+
+	// HasShardID is true if ShardID is set.
+	HasShardID bool
+
+	// HasWeight is true if Weight is set.
+	HasWeight bool
+
+	// Err is the error encountered while resolving this server's address.
+	Err error
+
+	// Addr is the address of this server.
+	Addr net.Addr
+
+	// Address is the address of this server, in gRPC format.
+	Address resolver.Address
+
+	// Dynamic points to mutable, mutex-protected data associated with this
+	// server.  Two Resolved addresses can share the same *Dynamic if they
+	// point to the same server (e.g. have the same IP address).
+	Dynamic *Dynamic
 }
 
+// Check verifies the data integrity of all fields.
 func (data Resolved) Check() {
 	if checkDisabled {
 		return
@@ -44,6 +88,7 @@ func (data Resolved) Check() {
 	}
 }
 
+// Equal returns true iff the two Resolved addresses are identical.
 func (data Resolved) Equal(other Resolved) bool {
 	equal := true
 	equal = equal && (data.Unique == other.Unique)
@@ -70,6 +115,7 @@ func (data Resolved) Equal(other Resolved) bool {
 	return equal
 }
 
+// IsHealthy returns true if this server is healthy.
 func (data Resolved) IsHealthy() bool {
 	result := false
 	if data.Dynamic != nil && data.Err == nil {
@@ -78,6 +124,7 @@ func (data Resolved) IsHealthy() bool {
 	return result
 }
 
+// GetLoad returns the load on this server.
 func (data Resolved) GetLoad() (load float32, ok bool) {
 	load, ok = 1.0, false
 	if data.Dynamic != nil && data.Err == nil {
@@ -86,6 +133,8 @@ func (data Resolved) GetLoad() (load float32, ok bool) {
 	return
 }
 
+// Dynamic represents the mutable, mutex-protected data associated with one or
+// more Resolved addresses.
 type Dynamic struct {
 	mu         sync.Mutex
 	load       float32
@@ -107,6 +156,7 @@ func (dynamic *Dynamic) Update(opts UpdateOptions) {
 	dynamic.mu.Unlock()
 }
 
+// IsHealthy returns true if this server is healthy.
 func (dynamic *Dynamic) IsHealthy() bool {
 	dynamic.mu.Lock()
 	result := dynamic.healthy || !dynamic.hasHealthy
@@ -114,6 +164,7 @@ func (dynamic *Dynamic) IsHealthy() bool {
 	return result
 }
 
+// GetLoad returns the load on this server.
 func (dynamic *Dynamic) GetLoad() (load float32, ok bool) {
 	load, ok = 1.0, false
 	dynamic.mu.Lock()

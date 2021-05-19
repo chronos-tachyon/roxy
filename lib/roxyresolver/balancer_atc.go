@@ -10,7 +10,9 @@ import (
 	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/resolver"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/syncrand"
 )
 
@@ -18,6 +20,8 @@ func init() {
 	balancer.Register(NewATCBalancerBuilder())
 }
 
+// NewATCBalancerBuilder returns a gRPC balancer.Builder for the ATC load
+// balancing algorithm.
 func NewATCBalancerBuilder() balancer.Builder {
 	return atcBalancerBuilder{}
 }
@@ -37,7 +41,7 @@ func (b atcBalancerBuilder) Build(cc balancer.ClientConn, opts balancer.BuildOpt
 		rng:      syncrand.Global(),
 		eval:     &balancer.ConnectivityStateEvaluator{},
 		state:    connectivity.Idle,
-		subConns: make(map[Address]subConnInfo, 16),
+		subConns: make(map[resolver.Address]subConnInfo, 16),
 		scStates: make(map[balancer.SubConn]connectivity.State, 16),
 		picker:   nil,
 	}
@@ -62,7 +66,7 @@ type atcBalancer struct {
 	rng      *rand.Rand
 	eval     *balancer.ConnectivityStateEvaluator
 	state    connectivity.State
-	subConns map[Address]subConnInfo
+	subConns map[resolver.Address]subConnInfo
 	scStates map[balancer.SubConn]connectivity.State
 	picker   balancer.Picker
 	errs     multierror.Error
@@ -71,9 +75,9 @@ type atcBalancer struct {
 func (bal *atcBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
 	Logger().Trace().Interface("ClientConnState", ccs).Msg("UpdateClientConnState")
 
-	seen := make(map[Address]struct{}, len(ccs.ResolverState.Addresses))
+	seen := make(map[resolver.Address]struct{}, len(ccs.ResolverState.Addresses))
 	for _, addr := range ccs.ResolverState.Addresses {
-		addrList := []Address{addr}
+		addrList := []resolver.Address{addr}
 		addrKey := noAttrs(addr)
 		seen[addrKey] = struct{}{}
 		if sci, ok := bal.subConns[addrKey]; ok {
@@ -170,7 +174,9 @@ func (bal *atcBalancer) Close() {
 
 func (bal *atcBalancer) regeneratePicker() balancer.Picker {
 	if bal.state == connectivity.TransientFailure {
-		return errPicker{err: bal.errs.ErrorOrNil()}
+		err := misc.ErrorOrNil(bal.errs)
+		bal.errs.Errors = nil
+		return errPicker{err: err}
 	}
 
 	scList := make([]balancer.SubConn, 0, len(bal.subConns))
@@ -237,7 +243,7 @@ var _ balancer.Picker = errPicker{}
 
 // }}}
 
-func noAttrs(addr Address) Address {
+func noAttrs(addr resolver.Address) resolver.Address {
 	addr.Attributes = nil
 	return addr
 }

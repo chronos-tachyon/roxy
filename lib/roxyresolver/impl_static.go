@@ -4,21 +4,37 @@ import (
 	"errors"
 	"math/rand"
 
-	multierror "github.com/hashicorp/go-multierror"
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/lib/syncrand"
 )
 
+// StaticResolverOptions holds options related to constructing a new StaticResolver.
 type StaticResolverOptions struct {
-	Random            *rand.Rand
-	Balancer          BalancerType
-	Records           []Resolved
-	ClientConn        grpcresolver.ClientConn
+	// Records lists the Resolved addresses for this resolver to return.
+	Records []Resolved
+
+	// Random is the source of randomness for balancer algorithms that need
+	// one.
+	//
+	// If provided, it MUST be thread-safe; see the syncrand package for
+	// more information.  If nil, the syncrand.Global() instance will be
+	// used.
+	Random *rand.Rand
+
+	// Balancer selects which load balancer algorithm to use.
+	Balancer BalancerType
+
+	// ClientConn is a gRPC ClientConn that will receive state updates.
+	ClientConn resolver.ClientConn
+
+	// ServiceConfigJSON is the gRPC Service Config which will be provided
+	// to ClientConn on each state update.
 	ServiceConfigJSON string
 }
 
+// NewStaticResolver constructs a new StaticResolver.
 func NewStaticResolver(opts StaticResolverOptions) (*StaticResolver, error) {
 	rng := opts.Random
 	if rng == nil {
@@ -48,7 +64,7 @@ func NewStaticResolver(opts StaticResolverOptions) (*StaticResolver, error) {
 		if len(resolved) == 0 {
 			opts.ClientConn.ReportError(roxyutil.ErrNoHealthyBackends)
 		} else {
-			var state grpcresolver.State
+			var state resolver.State
 			state.Addresses = makeAddressList(resolved)
 			if opts.ServiceConfigJSON != "" {
 				state.ServiceConfig = opts.ClientConn.ParseServiceConfig(opts.ServiceConfigJSON)
@@ -67,6 +83,8 @@ func NewStaticResolver(opts StaticResolverOptions) (*StaticResolver, error) {
 	return res, nil
 }
 
+// StaticResolver is an implementation of the Resolver interface that returns
+// the same static records every time.
 type StaticResolver struct {
 	rng      *rand.Rand
 	balancer BalancerType
@@ -76,20 +94,25 @@ type StaticResolver struct {
 	nextRR   uint32
 }
 
+// Err returns any errors encountered since the last call to Err or ResolveAll.
 func (res *StaticResolver) Err() error {
 	return nil
 }
 
+// ResolveAll returns all resolved addresses, plus any errors encountered since
+// the last call to Err or ResolveAll.
 func (res *StaticResolver) ResolveAll() ([]Resolved, error) {
 	return res.resolved, nil
 }
 
+// Resolve returns the resolved address of a healthy backend, if one is
+// available, or else returns the error that prevented it from doing so.
 func (res *StaticResolver) Resolve() (Resolved, error) {
 	if len(res.resolved) == 0 {
 		return Resolved{}, roxyutil.ErrNoHealthyBackends
 	}
 
-	return balanceImpl(res.balancer, multierror.Error{}, res.resolved, res.rng, res.perm, &res.nextRR)
+	return balanceImpl(res.balancer, nil, res.resolved, res.rng, res.perm, &res.nextRR)
 }
 
 func (res *StaticResolver) Update(opts UpdateOptions) {
@@ -100,6 +123,9 @@ func (res *StaticResolver) Update(opts UpdateOptions) {
 	}
 }
 
+// Watch registers a WatchFunc.  The WatchFunc will be called immediately with
+// synthetic events for each resolved address currently known, plus it will be
+// called whenever the Resolver's state changes.
 func (res *StaticResolver) Watch(fn WatchFunc) WatchID {
 	if fn == nil {
 		panic(errors.New("WatchFunc is nil"))
@@ -123,14 +149,17 @@ func (res *StaticResolver) Watch(fn WatchFunc) WatchID {
 	return 0
 }
 
+// CancelWatch cancels a previous call to Watch.
 func (res *StaticResolver) CancelWatch(id WatchID) {
 	// pass
 }
 
-func (res *StaticResolver) ResolveNow(opts ResolveNowOptions) {
+// ResolveNow is a no-op.
+func (res *StaticResolver) ResolveNow(opts resolver.ResolveNowOptions) {
 	// pass
 }
 
+// Close stops the resolver and frees all resources.
 func (res *StaticResolver) Close() {
 	// pass
 }

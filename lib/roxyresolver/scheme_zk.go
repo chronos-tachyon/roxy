@@ -12,14 +12,15 @@ import (
 	"time"
 
 	"github.com/go-zookeeper/zk"
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
-func NewZKBuilder(ctx context.Context, rng *rand.Rand, zkconn *zk.Conn, serviceConfigJSON string) grpcresolver.Builder {
+// NewZKBuilder constructs a new gRPC resolver.Builder for the "zk" scheme.
+func NewZKBuilder(ctx context.Context, rng *rand.Rand, zkconn *zk.Conn, serviceConfigJSON string) resolver.Builder {
 	if ctx == nil {
 		panic(errors.New("context.Context is nil"))
 	}
@@ -29,6 +30,7 @@ func NewZKBuilder(ctx context.Context, rng *rand.Rand, zkconn *zk.Conn, serviceC
 	return zkBuilder{ctx, rng, zkconn, serviceConfigJSON}
 }
 
+// NewZKResolver constructs a new Resolver for the "zk" scheme.
 func NewZKResolver(opts Options) (Resolver, error) {
 	if opts.Context == nil {
 		panic(errors.New("context.Context is nil"))
@@ -52,7 +54,8 @@ func NewZKResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer BalancerType, serverName string, err error) {
+// ParseZKTarget breaks apart a Target into component data.
+func ParseZKTarget(rt Target) (zkPath string, zkPort string, balancer BalancerType, serverName string, err error) {
 	if rt.Authority != "" {
 		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
@@ -100,6 +103,8 @@ func ParseZKTarget(rt RoxyTarget) (zkPath string, zkPort string, balancer Balanc
 	return
 }
 
+// MakeZKResolveFunc constructs a WatchingResolveFunc for building your own
+// custom WatchingResolver with the "zk" scheme.
 func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error) {
 		var children []string
@@ -320,6 +325,7 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName
 	}
 }
 
+// MapZKError converts a ZooKeeper-specific error to a generic error.
 func MapZKError(err error) error {
 	switch err {
 	case zk.ErrConnectionClosed:
@@ -348,9 +354,9 @@ func (b zkBuilder) Scheme() string {
 	return constants.SchemeZK
 }
 
-func (b zkBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	rt, err := RoxyTargetFromTarget(target)
-	if err != nil {
+func (b zkBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	var rt Target
+	if err := rt.FromGRPCTarget(target); err != nil {
 		return nil, err
 	}
 

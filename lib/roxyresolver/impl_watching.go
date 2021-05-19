@@ -9,25 +9,55 @@ import (
 	"time"
 
 	multierror "github.com/hashicorp/go-multierror"
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/serviceconfig"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/lib/syncrand"
 )
 
+// WatchingResolverOptions holds options related to constructing a new WatchingResolver.
 type WatchingResolverOptions struct {
-	Context           context.Context
-	Random            *rand.Rand
-	Balancer          BalancerType
-	ResolveFunc       WatchingResolveFunc
-	ClientConn        grpcresolver.ClientConn
+	// Context is the context within which the resolver runs.  If this
+	// context is cancelled or reaches its deadline, the resolver will
+	// stop.
+	//
+	// This field is mandatory.
+	Context context.Context
+
+	// Random is the source of randomness for balancer algorithms that need
+	// one.
+	//
+	// If provided, it MUST be thread-safe; see the syncrand package for
+	// more information.  If nil, the syncrand.Global() instance will be
+	// used.
+	Random *rand.Rand
+
+	// Balancer selects which load balancer algorithm to use.
+	Balancer BalancerType
+
+	// ResolveFunc will be called as needed to (re)start the event stream.
+	//
+	// This field is mandatory.
+	ResolveFunc WatchingResolveFunc
+
+	// ClientConn is a gRPC ClientConn that will receive state updates.
+	ClientConn resolver.ClientConn
+
+	// ServiceConfigJSON is the gRPC Service Config which will be provided
+	// to ClientConn on each state update.
 	ServiceConfigJSON string
 }
 
+// WatchingResolveFunc represents a closure that will be called as needed to
+// start a resolver subscription.  If it spawns any goroutines, they should
+// register themselves with the provided WaitGroup.  If it needs to retry any
+// external I/O, it should use the provided ExpBackoff.
 type WatchingResolveFunc func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error)
 
+// NewWatchingResolver constructs a new WatchingResolver.
 func NewWatchingResolver(opts WatchingResolverOptions) (*WatchingResolver, error) {
 	if opts.Context == nil {
 		panic(errors.New("Context is nil"))
@@ -66,6 +96,8 @@ func NewWatchingResolver(opts WatchingResolverOptions) (*WatchingResolver, error
 	return res, nil
 }
 
+// WatchingResolver is an implementation of the Resolver interface that
+// subscribes to an event-oriented resolution source.
 type WatchingResolver struct {
 	ctx      context.Context
 	cancelFn context.CancelFunc
@@ -73,13 +105,12 @@ type WatchingResolver struct {
 	balancer BalancerType
 	backoff  expbackoff.ExpBackoff
 	watchFn  WatchingResolveFunc
-	cc       grpcresolver.ClientConn
+	cc       resolver.ClientConn
 	sc       *serviceconfig.ParseResult
 	nextRR   uint32
 
 	mu       sync.Mutex
 	cv       *sync.Cond
-	lastID   WatchID
 	watches  map[WatchID]WatchFunc
 	byAddr   map[string]*Dynamic
 	byUnique map[string]int
@@ -90,6 +121,7 @@ type WatchingResolver struct {
 	closed   bool
 }
 
+// Err returns any errors encountered since the last call to Err or ResolveAll.
 func (res *WatchingResolver) Err() error {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -98,9 +130,13 @@ func (res *WatchingResolver) Err() error {
 		res.cv.Wait()
 	}
 
-	return res.err.ErrorOrNil()
+	err := misc.ErrorOrNil(res.err)
+	res.err.Errors = nil
+	return err
 }
 
+// ResolveAll returns all resolved addresses, plus any errors encountered since
+// the last call to Err or ResolveAll.
 func (res *WatchingResolver) ResolveAll() ([]Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -109,9 +145,13 @@ func (res *WatchingResolver) ResolveAll() ([]Resolved, error) {
 		res.cv.Wait()
 	}
 
-	return res.resolved, res.err.ErrorOrNil()
+	err := misc.ErrorOrNil(res.err)
+	res.err.Errors = nil
+	return res.resolved, err
 }
 
+// Resolve returns the resolved address of a healthy backend, if one is
+// available, or else returns the error that prevented it from doing so.
 func (res *WatchingResolver) Resolve() (Resolved, error) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -120,7 +160,8 @@ func (res *WatchingResolver) Resolve() (Resolved, error) {
 		res.cv.Wait()
 	}
 
-	return balanceImpl(res.balancer, res.err, res.resolved, res.rng, res.perm, &res.nextRR)
+	err := misc.ErrorOrNil(res.err)
+	return balanceImpl(res.balancer, err, res.resolved, res.rng, res.perm, &res.nextRR)
 }
 
 func (res *WatchingResolver) Update(opts UpdateOptions) {
@@ -135,6 +176,9 @@ func (res *WatchingResolver) Update(opts UpdateOptions) {
 	}
 }
 
+// Watch registers a WatchFunc.  The WatchFunc will be called immediately with
+// synthetic events for each resolved address currently known, plus it will be
+// called whenever the Resolver's state changes.
 func (res *WatchingResolver) Watch(fn WatchFunc) WatchID {
 	if fn == nil {
 		panic(errors.New("WatchFunc is nil"))
@@ -161,12 +205,12 @@ func (res *WatchingResolver) Watch(fn WatchFunc) WatchID {
 		fn(events)
 	}
 
-	res.lastID++
-	id := res.lastID
+	id := generateWatchID()
 	res.watches[id] = fn
 	return id
 }
 
+// CancelWatch cancels a previous call to Watch.
 func (res *WatchingResolver) CancelWatch(id WatchID) {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -178,10 +222,12 @@ func (res *WatchingResolver) CancelWatch(id WatchID) {
 	delete(res.watches, id)
 }
 
-func (res *WatchingResolver) ResolveNow(opts ResolveNowOptions) {
+// ResolveNow is a no-op.
+func (res *WatchingResolver) ResolveNow(opts resolver.ResolveNowOptions) {
 	// pass
 }
 
+// Close stops the resolver and frees all resources.
 func (res *WatchingResolver) Close() {
 	res.mu.Lock()
 	defer res.mu.Unlock()
@@ -358,12 +404,12 @@ func (res *WatchingResolver) sendEvents(events []Event) {
 	}
 
 	if res.cc != nil {
-		if err := newErrors.ErrorOrNil(); err != nil {
+		if err := misc.ErrorOrNil(newErrors); err != nil {
 			res.cc.ReportError(err)
 		} else if len(res.resolved) == 0 {
 			res.cc.ReportError(roxyutil.ErrNoHealthyBackends)
 		} else {
-			var state grpcresolver.State
+			var state resolver.State
 			state.Addresses = makeAddressList(res.resolved)
 			state.ServiceConfig = res.sc
 			res.cc.UpdateState(state)

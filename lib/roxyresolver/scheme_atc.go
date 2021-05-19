@@ -7,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	grpcresolver "google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
@@ -17,7 +17,8 @@ import (
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
-func NewATCBuilder(ctx context.Context, rng *rand.Rand, client *atcclient.ATCClient) grpcresolver.Builder {
+// NewATCBuilder constructs a new gRPC resolver.Builder for the "atc" scheme.
+func NewATCBuilder(ctx context.Context, rng *rand.Rand, client *atcclient.ATCClient) resolver.Builder {
 	if ctx == nil {
 		panic(errors.New("context.Context is nil"))
 	}
@@ -27,6 +28,7 @@ func NewATCBuilder(ctx context.Context, rng *rand.Rand, client *atcclient.ATCCli
 	return atcBuilder{ctx, rng, client}
 }
 
+// NewATCResolver constructs a new Resolver for the "atc" scheme.
 func NewATCResolver(opts Options) (Resolver, error) {
 	if opts.Context == nil {
 		panic(errors.New("context.Context is nil"))
@@ -50,7 +52,8 @@ func NewATCResolver(opts Options) (Resolver, error) {
 	})
 }
 
-func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balancer BalancerType, isDSC bool, serverName string, err error) {
+// ParseATCTarget breaks apart a Target into component data.
+func ParseATCTarget(rt Target) (lbName, lbLocation, lbUnique string, balancer BalancerType, isDSC bool, serverName string, err error) {
 	if rt.Authority != "" {
 		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
 		return
@@ -105,6 +108,8 @@ func ParseATCTarget(rt RoxyTarget) (lbName, lbLocation, lbUnique string, balance
 	return
 }
 
+// MakeATCResolveFunc constructs a WatchingResolveFunc for building your own
+// custom WatchingResolver with the "atc" scheme.
 func MakeATCResolveFunc(client *atcclient.ATCClient, lbName, lbLocation, lbUnique string, dsc bool, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
 		cancelFn, eventCh, errCh, err := client.ClientAssign(ctx, &roxy_v0.ClientAssignRequest_First{
@@ -159,9 +164,9 @@ func (b atcBuilder) Scheme() string {
 	return constants.SchemeATC
 }
 
-func (b atcBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcresolver.BuildOptions) (grpcresolver.Resolver, error) {
-	rt, err := RoxyTargetFromTarget(target)
-	if err != nil {
+func (b atcBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	var rt Target
+	if err := rt.FromGRPCTarget(target); err != nil {
 		return nil, err
 	}
 
@@ -178,7 +183,7 @@ func (b atcBuilder) Build(target Target, cc grpcresolver.ClientConn, opts grpcre
 	})
 }
 
-var _ grpcresolver.Builder = atcBuilder{}
+var _ resolver.Builder = atcBuilder{}
 
 // }}}
 
@@ -207,7 +212,7 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 			myServerName = tcpAddr.IP.String()
 		}
 
-		resAddr := Address{
+		grpcAddr := resolver.Address{
 			Addr:       tcpAddr.String(),
 			ServerName: myServerName,
 		}
@@ -219,7 +224,7 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 			Weight:     event.Weight,
 			HasWeight:  true,
 			Addr:       tcpAddr,
-			Address:    resAddr,
+			Address:    grpcAddr,
 		}
 
 		byUnique[data.Unique] = data

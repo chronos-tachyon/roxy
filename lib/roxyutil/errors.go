@@ -153,8 +153,7 @@ var _ error = BoolError{}
 
 // type SchemeError {{{
 
-// SchemeError represents failure to identify a URL scheme or a RoxyTarget
-// scheme.
+// SchemeError represents failure to identify a URL scheme or a Target scheme.
 type SchemeError struct {
 	Scheme string
 	Err    error
@@ -177,7 +176,7 @@ var _ error = SchemeError{}
 // type AuthorityError {{{
 
 // AuthorityError represents failure to parse a URL authority section or a
-// RoxyTarget authority section.
+// Target authority section.
 type AuthorityError struct {
 	Authority string
 	Err       error
@@ -199,7 +198,7 @@ var _ error = AuthorityError{}
 
 // type EndpointError {{{
 
-// EndpointError represents failure to parse a RoxyTarget endpoint section.
+// EndpointError represents failure to parse a Target endpoint section.
 type EndpointError struct {
 	Endpoint string
 	Err      error
@@ -244,8 +243,8 @@ var _ error = PathError{}
 
 // type QueryStringError {{{
 
-// QueryStringError represents failure to parse a URL query string or a
-// RoxyTarget query string.
+// QueryStringError represents failure to parse a URL query string or a Target
+// query string.
 type QueryStringError struct {
 	QueryString string
 	Err         error
@@ -268,7 +267,7 @@ var _ error = QueryStringError{}
 // type QueryParamError {{{
 
 // QueryParamError represents failure to parse the value of a specific URL
-// query parameter or a specific RoxyTarget query parameter.
+// query parameter or a specific Target query parameter.
 type QueryParamError struct {
 	Name  string
 	Value string

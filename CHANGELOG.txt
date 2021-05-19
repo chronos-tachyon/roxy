@@ -3,6 +3,7 @@ v0.4.6
   * Breaking changes to .proto files to support the above
   * Implement some HTTP and gRPC interceptors for automatically calculating
     client-side QPS demand and server-side QPS supply
+  * API tweaks for roxyutil and roxyresolver
 
 v0.4.5
   * Implement advanced X.509 client certificate checking

@@ -4,12 +4,14 @@ import (
 	"context"
 	"net"
 
+	"google.golang.org/grpc/resolver"
+
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 )
 
-func makeAddressList(resolved []Resolved) []Address {
-	list := make([]Address, 0, len(resolved))
+func makeAddressList(resolved []Resolved) []resolver.Address {
+	list := make([]resolver.Address, 0, len(resolved))
 	for _, data := range resolved {
 		if data.Addr != nil {
 			list = append(list, WithResolved(data.Address, data))
@@ -26,7 +28,7 @@ func makeStaticRecordsForIP(host string, port string, serverName string) []Resol
 	if serverName == "" {
 		serverName = tcpAddr.IP.String()
 	}
-	resAddr := Address{
+	grpcAddr := resolver.Address{
 		Addr:       tcpAddr.String(),
 		ServerName: serverName,
 	}
@@ -35,7 +37,7 @@ func makeStaticRecordsForIP(host string, port string, serverName string) []Resol
 		Unique:     tcpAddr.String(),
 		ServerName: serverName,
 		Addr:       tcpAddr,
-		Address:    resAddr,
+		Address:    grpcAddr,
 	}
 	return records
 }

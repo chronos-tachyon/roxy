@@ -8,6 +8,7 @@ import (
 
 	multierror "github.com/hashicorp/go-multierror"
 
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/membership"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -118,7 +119,7 @@ func (impl *atcImpl) Withdraw(ctx context.Context) error {
 		impl.cv.Wait()
 	}
 
-	err := impl.errs.ErrorOrNil()
+	err := misc.ErrorOrNil(impl.errs)
 	impl.cancelFn = nil
 	impl.errs.Errors = nil
 	impl.state = StateReady
