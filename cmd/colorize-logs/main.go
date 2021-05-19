@@ -87,155 +87,180 @@ func main() {
 
 	tryReopen := func() error { return nil }
 	if flagFollowName && wantClose {
-		tryReopen = func() error {
-			inputFile2, err := os.Open(inputFileName)
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-
-			wantClose2 := true
-			defer func() {
-				if wantClose2 {
-					_ = inputFile2.Close()
-				}
-			}()
-
-			fileInfo1, err := inputFile.Stat()
-			if err != nil {
-				return err
-			}
-
-			fileInfo2, err := inputFile2.Stat()
-			if err != nil {
-				return err
-			}
-
-			if stat1, ok1 := fileInfo1.Sys().(*syscall.Stat_t); ok1 {
-				if stat2, ok2 := fileInfo2.Sys().(*syscall.Stat_t); ok2 {
-					if stat1.Dev != stat2.Dev || stat1.Ino != stat2.Ino {
-						mu.Lock()
-						inputFile, inputFile2 = inputFile2, inputFile
-						mu.Unlock()
-					}
-				}
-			}
-			wantClose2 = false
-			return inputFile2.Close()
-		}
+		tryReopen = makeTryReopen(&mu, &inputFile, inputFileName)
 	}
 
 	ch1 := make(chan []byte)
 	ch2 := make(chan string)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer func() {
-			close(ch1)
-			wg.Done()
-		}()
-
-		var counter uint
-
-	Top:
-		counter = 0
-		for {
-			mu.Lock()
-			f := inputFile
-			mu.Unlock()
-			buf := make([]byte, 4096)
-			n, err := f.Read(buf)
-			if n > 0 {
-				ch1 <- buf[:n]
-			}
-			if err != nil && err != io.EOF {
-				log.Logger.Error().
-					Err(err).
-					Msg("failed to read from input file")
-				break
-			}
-			if err == io.EOF && !flagFollow && !flagFollowName {
-				break
-			}
-			if err == io.EOF {
-				counter++
-				time.Sleep(250 * time.Millisecond)
-				if counter >= 8 {
-					counter = 0
-					if e := tryReopen(); e != nil {
-						log.Logger.Warn().
-							Str("path", inputFileName).
-							Err(err).
-							Msg("failed to re-open input file")
-					}
-				}
-			}
-		}
-		if flagFollowName {
-			goto Top
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer func() {
-			close(ch2)
-			wg.Done()
-		}()
-
-		var buf []byte
-		var scrapLen int
-		var scraps [][]byte
-
-		tryFlush := func() bool {
-			if len(buf) == 0 {
-				return false
-			}
-
-			i := bytes.IndexByte(buf, '\n')
-			if i < 0 {
-				scrapLen += len(buf)
-				scraps = append(scraps, buf)
-				buf = nil
-				return false
-			}
-
-			tmp := make([]byte, 0, scrapLen+i+1)
-			for _, scrap := range scraps {
-				tmp = append(tmp, scrap...)
-			}
-			tmp = append(tmp, buf[:i+1]...)
-			buf = buf[i+1:]
-			scrapLen = 0
-			scraps = nil
-			ch2 <- string(tmp)
-			return true
-		}
-
-		for {
-			var ok bool
-			buf, ok = <-ch1
-			if !ok {
-				break
-			}
-
-			for tryFlush() {
-			}
-		}
-		if scrapLen != 0 {
-			tmp := make([]byte, 0, scrapLen)
-			for _, scrap := range scraps {
-				tmp = append(tmp, scrap...)
-			}
-			ch2 <- string(tmp)
-		}
-	}()
+	wg.Add(2)
+	go loopOne(&mu, &wg, &inputFile, inputFileName, tryReopen, ch1)
+	go loopTwo(&wg, ch1, ch2)
 
 	for line := range ch2 {
 		_, _ = consoleWriter.Write([]byte(line))
 	}
 	wg.Wait()
+}
+
+func makeTryReopen(
+	mu *sync.Mutex,
+	inputFilePtr **os.File,
+	inputFileName string,
+) func() error {
+	return func() error {
+		inputFile2, err := os.Open(inputFileName)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		wantClose2 := true
+		defer func() {
+			if wantClose2 {
+				_ = inputFile2.Close()
+			}
+		}()
+
+		fileInfo1, err := (*inputFilePtr).Stat()
+		if err != nil {
+			return err
+		}
+
+		fileInfo2, err := inputFile2.Stat()
+		if err != nil {
+			return err
+		}
+
+		if stat1, ok1 := fileInfo1.Sys().(*syscall.Stat_t); ok1 {
+			if stat2, ok2 := fileInfo2.Sys().(*syscall.Stat_t); ok2 {
+				if stat1.Dev != stat2.Dev || stat1.Ino != stat2.Ino {
+					mu.Lock()
+					tmp := *inputFilePtr
+					*inputFilePtr = inputFile2
+					inputFile2 = tmp
+					mu.Unlock()
+				}
+			}
+		}
+
+		wantClose2 = false
+		return inputFile2.Close()
+	}
+}
+
+func loopOne(
+	mu *sync.Mutex,
+	wg *sync.WaitGroup,
+	inputFilePtr **os.File,
+	inputFileName string,
+	tryReopen func() error,
+	ch1 chan<- []byte,
+) {
+	defer func() {
+		close(ch1)
+		wg.Done()
+	}()
+
+	var counter uint
+
+Top:
+	counter = 0
+	for {
+		mu.Lock()
+		f := **inputFilePtr
+		mu.Unlock()
+
+		buf := make([]byte, 4096)
+		n, err := f.Read(buf)
+		if n > 0 {
+			ch1 <- buf[:n]
+		}
+		if err != nil && err != io.EOF {
+			log.Logger.Error().
+				Err(err).
+				Msg("failed to read from input file")
+			break
+		}
+		if err == io.EOF && !flagFollow && !flagFollowName {
+			break
+		}
+		if err == io.EOF {
+			counter++
+			time.Sleep(250 * time.Millisecond)
+			if counter >= 8 {
+				counter = 0
+				if e := tryReopen(); e != nil {
+					log.Logger.Warn().
+						Str("path", inputFileName).
+						Err(err).
+						Msg("failed to re-open input file")
+				}
+			}
+		}
+	}
+	if flagFollowName {
+		goto Top
+	}
+}
+
+func loopTwo(
+	wg *sync.WaitGroup,
+	ch1 <-chan []byte,
+	ch2 chan<- string,
+) {
+	defer func() {
+		close(ch2)
+		wg.Done()
+	}()
+
+	var buf []byte
+	var scrapLen int
+	var scraps [][]byte
+
+	tryFlush := func() bool {
+		if len(buf) == 0 {
+			return false
+		}
+
+		i := bytes.IndexByte(buf, '\n')
+		if i < 0 {
+			scrapLen += len(buf)
+			scraps = append(scraps, buf)
+			buf = nil
+			return false
+		}
+
+		tmp := make([]byte, 0, scrapLen+i+1)
+		for _, scrap := range scraps {
+			tmp = append(tmp, scrap...)
+		}
+		tmp = append(tmp, buf[:i+1]...)
+		buf = buf[i+1:]
+		scrapLen = 0
+		scraps = nil
+		ch2 <- string(tmp)
+		return true
+	}
+
+	for {
+		var ok bool
+		buf, ok = <-ch1
+		if !ok {
+			break
+		}
+
+		for tryFlush() {
+		}
+	}
+	if scrapLen != 0 {
+		tmp := make([]byte, 0, scrapLen)
+		for _, scrap := range scraps {
+			tmp = append(tmp, scrap...)
+		}
+		ch2 <- string(tmp)
+	}
 }

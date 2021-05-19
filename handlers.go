@@ -16,7 +16,6 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"os"
-	"os/user"
 	"path"
 	"sort"
 	"strconv"
@@ -35,6 +34,7 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/balancedclient"
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/enums"
+	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
@@ -879,173 +879,11 @@ func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.File
 
 	sort.Sort(fileInfoList(list))
 
-	type entry struct {
-		Name        string
-		Slash       string
-		Mode        string
-		Owner       string
-		Group       string
-		Link        string
-		ContentType string
-		ContentLang string
-		ContentEnc  string
-		Dev         uint64
-		Ino         uint64
-		NLink       uint32
-		Size        int64
-		MTime       time.Time
-		IsDir       bool
-		IsLink      bool
-		IsHidden    bool
-	}
+	var cache misc.LookupCache
 
-	uidCache := make(map[uint32]string, 4)
-	gidCache := make(map[uint32]string, 4)
-
-	lookupUID := func(uid uint32) string {
-		if name, found := uidCache[uid]; found {
-			return name
-		}
-
-		str := strconv.FormatUint(uint64(uid), 10)
-		u, err := user.LookupId(str)
-		var name string
-		if err == nil {
-			name = u.Username
-		} else {
-			rc.Logger.Warn().
-				Uint32("uid", uid).
-				Err(err).
-				Msg("failed to look up user by ID")
-			name = "#" + str
-		}
-		uidCache[uid] = name
-		return name
-	}
-
-	lookupGID := func(gid uint32) string {
-		if name, found := gidCache[gid]; found {
-			return name
-		}
-
-		str := strconv.FormatUint(uint64(gid), 10)
-		g, err := user.LookupGroupId(str)
-		var name string
-		if err == nil {
-			name = g.Name
-		} else {
-			rc.Logger.Warn().
-				Uint32("gid", gid).
-				Err(err).
-				Msg("failed to look up group by ID")
-			name = "#" + str
-		}
-		gidCache[gid] = name
-		return name
-	}
-
-	populateRealStats := func(e *entry, fi fs.FileInfo, fullPath string) {
-		st, ok := fi.Sys().(*syscall.Stat_t)
-		if ok {
-			e.Dev = st.Dev
-			e.Ino = st.Ino
-			e.NLink = uint32(st.Nlink)
-			e.Owner = lookupUID(st.Uid)
-			e.Group = lookupGID(st.Gid)
-
-			var realMode [10]byte
-			for i := 0; i < 10; i++ {
-				realMode[i] = '-'
-			}
-
-			if e.IsDir {
-				realMode[0] = 'd'
-			}
-			if (st.Mode & syscall.S_IFMT) == syscall.S_IFLNK {
-				realMode[0] = 'l'
-				e.IsLink = true
-				if link, err := readLinkAt(f, fi.Name()); err == nil {
-					e.Link = link
-				}
-			}
-
-			if (st.Mode & 0400) == 0400 {
-				realMode[1] = 'r'
-			}
-			if (st.Mode & 0200) == 0200 {
-				realMode[2] = 'w'
-			}
-			switch st.Mode & 04100 {
-			case 04100:
-				realMode[3] = 's'
-			case 04000:
-				realMode[3] = 'S'
-			case 00100:
-				realMode[3] = 'x'
-			}
-
-			if (st.Mode & 0040) == 0040 {
-				realMode[4] = 'r'
-			}
-			if (st.Mode & 0020) == 0020 {
-				realMode[5] = 'w'
-			}
-			switch st.Mode & 02010 {
-			case 02010:
-				realMode[6] = 's'
-			case 02000:
-				realMode[6] = 'S'
-			case 00010:
-				realMode[6] = 'x'
-			}
-
-			if (st.Mode & 0004) == 0004 {
-				realMode[7] = 'r'
-			}
-			if (st.Mode & 0002) == 0002 {
-				realMode[8] = 'w'
-			}
-			switch st.Mode & 01001 {
-			case 01001:
-				realMode[9] = 't'
-			case 01000:
-				realMode[9] = 'T'
-			case 00001:
-				realMode[9] = 'x'
-			}
-
-			e.Mode = string(realMode[:])
-		}
-
-		var (
-			contentType string
-			contentLang string
-			contentEnc  string
-		)
-		if e.IsDir {
-			contentType = "inode/directory"
-		} else if !e.IsLink {
-			contentType, contentLang, contentEnc = DetectMimeProperties(rc.Impl, rc.Logger, h.fs, fullPath)
-		}
-
-		if contentType == "" {
-			contentType = "-"
-		}
-		if contentLang == "" {
-			contentLang = "-"
-		}
-		if contentEnc == "" {
-			contentEnc = "-"
-		}
-
-		e.ContentType = trimContentHeader(contentType)
-		e.ContentLang = trimContentHeader(contentLang)
-		e.ContentEnc = trimContentHeader(contentEnc)
-	}
-
-	entries := make([]entry, 0, 1+len(list))
+	entries := make([]DirEntry, 0, 1+len(list))
 	if rc.Request.URL.Path != "/" {
-		var e entry
+		var e DirEntry
 
 		e.Name = ".."
 		e.IsDir = true
@@ -1058,7 +896,7 @@ func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.File
 		parentDir := path.Dir(rc.Request.URL.Path)
 		if parentFile, err := h.fs.Open(parentDir); err == nil {
 			if parentInfo, err := parentFile.Stat(); err == nil {
-				populateRealStats(&e, parentInfo, parentDir)
+				populateRealStats(rc.Impl, rc.Logger, h.fs, f, &cache, &e, parentInfo, parentDir)
 			}
 			_ = parentFile.Close()
 		}
@@ -1066,7 +904,7 @@ func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.File
 		entries = append(entries, e)
 	}
 	for _, fi := range list {
-		var e entry
+		var e DirEntry
 
 		e.Name = fi.Name()
 		e.IsDir = fi.IsDir()
@@ -1084,7 +922,7 @@ func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.File
 		}
 		e.IsHidden = strings.HasPrefix(e.Name, ".")
 
-		populateRealStats(&e, fi, path.Join(rc.Request.URL.Path, e.Name))
+		populateRealStats(rc.Impl, rc.Logger, h.fs, f, &cache, &e, fi, path.Join(rc.Request.URL.Path, e.Name))
 
 		entries = append(entries, e)
 	}
@@ -1132,7 +970,7 @@ func (h *FileSystemHandler) ServeDir(rc *RequestContext, f http.File, fi fs.File
 
 	type templateData struct {
 		Path             string
-		Entries          []entry
+		Entries          []DirEntry
 		NLinkWidth       uint
 		OwnerWidth       uint
 		GroupWidth       uint
@@ -1670,4 +1508,157 @@ func CompileGRPCBackendHandler(impl *Impl, key string, cfg *FrontendConfig) (htt
 	web := roxy_v0.NewWebClient(cc)
 
 	return &GRPCBackendHandler{cc, web}, nil
+}
+
+type DirEntry struct {
+	Name        string
+	Slash       string
+	Mode        string
+	Owner       string
+	Group       string
+	Link        string
+	ContentType string
+	ContentLang string
+	ContentEnc  string
+	Dev         uint64
+	Ino         uint64
+	NLink       uint32
+	Size        int64
+	MTime       time.Time
+	IsDir       bool
+	IsLink      bool
+	IsHidden    bool
+}
+
+func populateRealStats(impl *Impl, logger zerolog.Logger, rootFS http.FileSystem, f http.File, cache *misc.LookupCache, e *DirEntry, fi fs.FileInfo, fullPath string) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if ok {
+		e.Dev = st.Dev
+		e.Ino = st.Ino
+		e.NLink = uint32(st.Nlink)
+		e.Owner = userNameByID(cache, st.Uid)
+		e.Group = groupNameByID(cache, st.Gid)
+		e.Mode = modeString(st.Mode)
+
+		if (st.Mode & syscall.S_IFMT) == syscall.S_IFLNK {
+			e.IsLink = true
+			if link, err := readLinkAt(f, fi.Name()); err == nil {
+				e.Link = link
+			}
+		}
+	}
+
+	var (
+		contentType string
+		contentLang string
+		contentEnc  string
+	)
+	if e.IsDir {
+		contentType = "inode/directory"
+	} else if !e.IsLink {
+		contentType, contentLang, contentEnc = DetectMimeProperties(impl, logger, rootFS, fullPath)
+	}
+
+	if contentType == "" {
+		contentType = "-"
+	}
+	if contentLang == "" {
+		contentLang = "-"
+	}
+	if contentEnc == "" {
+		contentEnc = "-"
+	}
+
+	e.ContentType = trimContentHeader(contentType)
+	e.ContentLang = trimContentHeader(contentLang)
+	e.ContentEnc = trimContentHeader(contentEnc)
+}
+
+func userNameByID(cache *misc.LookupCache, uid uint32) string {
+	u, err := cache.UserByID(uid)
+	if err != nil {
+		return fmt.Sprintf("#%d", uid)
+	}
+	return u.Username
+}
+
+func groupNameByID(cache *misc.LookupCache, gid uint32) string {
+	g, err := cache.GroupByID(gid)
+	if err != nil {
+		return fmt.Sprintf("#%d", gid)
+	}
+	return g.Name
+}
+
+func modeString(unixMode uint32) string {
+	var realMode [10]byte
+	for i := 0; i < 10; i++ {
+		realMode[i] = '-'
+	}
+
+	switch unixMode & syscall.S_IFMT {
+	case syscall.S_IFREG:
+		realMode[0] = '-'
+	case syscall.S_IFDIR:
+		realMode[0] = 'd'
+	case syscall.S_IFBLK:
+		realMode[0] = 'b'
+	case syscall.S_IFCHR:
+		realMode[0] = 'c'
+	case syscall.S_IFIFO:
+		realMode[0] = 'p'
+	case syscall.S_IFSOCK:
+		realMode[0] = 's'
+	case syscall.S_IFLNK:
+		realMode[0] = 'l'
+	default:
+		realMode[0] = '?'
+	}
+
+	if (unixMode & 0400) == 0400 {
+		realMode[1] = 'r'
+	}
+	if (unixMode & 0200) == 0200 {
+		realMode[2] = 'w'
+	}
+	switch unixMode & 04100 {
+	case 04100:
+		realMode[3] = 's'
+	case 04000:
+		realMode[3] = 'S'
+	case 00100:
+		realMode[3] = 'x'
+	}
+
+	if (unixMode & 0040) == 0040 {
+		realMode[4] = 'r'
+	}
+	if (unixMode & 0020) == 0020 {
+		realMode[5] = 'w'
+	}
+	switch unixMode & 02010 {
+	case 02010:
+		realMode[6] = 's'
+	case 02000:
+		realMode[6] = 'S'
+	case 00010:
+		realMode[6] = 'x'
+	}
+
+	if (unixMode & 0004) == 0004 {
+		realMode[7] = 'r'
+	}
+	if (unixMode & 0002) == 0002 {
+		realMode[8] = 'w'
+	}
+	switch unixMode & 01001 {
+	case 01001:
+		realMode[9] = 't'
+	case 01000:
+		realMode[9] = 'T'
+	case 00001:
+		realMode[9] = 'x'
+	}
+
+	return string(realMode[:])
 }

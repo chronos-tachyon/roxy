@@ -20,14 +20,14 @@ import (
 )
 
 // NewZKBuilder constructs a new gRPC resolver.Builder for the "zk" scheme.
-func NewZKBuilder(ctx context.Context, rng *rand.Rand, zkconn *zk.Conn, serviceConfigJSON string) resolver.Builder {
+func NewZKBuilder(ctx context.Context, rng *rand.Rand, zkConn *zk.Conn, serviceConfigJSON string) resolver.Builder {
 	if ctx == nil {
 		panic(errors.New("context.Context is nil"))
 	}
-	if zkconn == nil {
-		panic(errors.New("zkconn is nil"))
+	if zkConn == nil {
+		panic(errors.New("*zk.Conn is nil"))
 	}
-	return zkBuilder{ctx, rng, zkconn, serviceConfigJSON}
+	return zkBuilder{ctx, rng, zkConn, serviceConfigJSON}
 }
 
 // NewZKResolver constructs a new Resolver for the "zk" scheme.
@@ -36,8 +36,8 @@ func NewZKResolver(opts Options) (Resolver, error) {
 		panic(errors.New("context.Context is nil"))
 	}
 
-	zkconn := GetZKConn(opts.Context)
-	if zkconn == nil {
+	zkConn := GetZKConn(opts.Context)
+	if zkConn == nil {
 		panic(errors.New("*zk.Conn is nil"))
 	}
 
@@ -50,7 +50,7 @@ func NewZKResolver(opts Options) (Resolver, error) {
 		Context:     opts.Context,
 		Random:      opts.Random,
 		Balancer:    balancer,
-		ResolveFunc: MakeZKResolveFunc(zkconn, zkPath, zkPort, serverName),
+		ResolveFunc: MakeZKResolveFunc(zkConn, zkPath, zkPort, serverName),
 	})
 }
 
@@ -105,13 +105,9 @@ func ParseZKTarget(rt Target) (zkPath string, zkPort string, balancer BalancerTy
 
 // MakeZKResolveFunc constructs a WatchingResolveFunc for building your own
 // custom WatchingResolver with the "zk" scheme.
-func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName string) WatchingResolveFunc {
+func MakeZKResolveFunc(zkConn *zk.Conn, zkPath string, zkPort string, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error) {
-		var children []string
-		var zch <-chan zk.Event
-		var err error
-
-		children, _, zch, err = zkconn.ChildrenW(zkPath)
+		children, _, zch, err := zkConn.ChildrenW(zkPath)
 		err = MapZKError(err)
 		if err != nil {
 			return nil, err
@@ -119,115 +115,6 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName
 
 		childEventCh := make(chan Event)
 		childDoneCh := make(chan struct{})
-
-		// begin child thread body
-		// {{{
-
-		childThread := func(myPath string) {
-			defer func() {
-				err := childExitError{Path: myPath}
-				childEventCh <- Event{
-					Type: ErrorEvent,
-					Err:  err,
-				}
-				wg.Done()
-			}()
-
-			var raw []byte
-			var zch <-chan zk.Event
-			var err error
-
-			retries := 0
-			childSleep := func() bool {
-				t := time.NewTimer(backoff.Backoff(retries))
-				retries++
-				select {
-				case <-ctx.Done():
-					t.Stop()
-					return false
-				case <-childDoneCh:
-					t.Stop()
-					return false
-				case <-t.C:
-					return true
-				}
-			}
-
-			for {
-				for {
-					raw, _, zch, err = zkconn.GetW(myPath)
-					err = MapZKError(err)
-					if err == nil {
-						break
-					}
-					if zkIsFatalError(err) {
-						childEventCh <- Event{
-							Type: DeleteEvent,
-							Key:  myPath,
-						}
-						return
-					}
-					childEventCh <- Event{
-						Type: BadDataEvent,
-						Key:  myPath,
-						Data: Resolved{
-							Unique: myPath,
-							Err:    err,
-						},
-					}
-					if !childSleep() {
-						return
-					}
-				}
-
-				retries = 0
-				childEventCh <- parseMembershipData(zkPort, serverName, myPath, raw)
-
-				select {
-				case <-ctx.Done():
-					return
-				case <-childDoneCh:
-					return
-				case zev := <-zch:
-					switch zev.Type {
-					case zk.EventNodeDataChanged:
-						// pass
-					case zk.EventNodeDeleted:
-						childEventCh <- Event{
-							Type: DeleteEvent,
-							Key:  myPath,
-						}
-						return
-					default:
-						err = MapZKError(zev.Err)
-						if err != nil {
-							if zkIsFatalError(err) {
-								childEventCh <- Event{
-									Type: DeleteEvent,
-									Key:  myPath,
-								}
-								return
-							}
-							childEventCh <- Event{
-								Type: BadDataEvent,
-								Key:  myPath,
-								Data: Resolved{
-									Unique: myPath,
-									Err:    err,
-								},
-							}
-							if !childSleep() {
-								return
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// end child thread body
-		// }}}
-
 		ch := make(chan []Event)
 		alive := make(map[string]struct{}, 16)
 
@@ -235,91 +122,11 @@ func MakeZKResolveFunc(zkconn *zk.Conn, zkPath string, zkPort string, serverName
 			childPath := path.Join(zkPath, child)
 			alive[childPath] = struct{}{}
 			wg.Add(1)
-			go childThread(childPath)
+			go zkChildThread(ctx, wg, backoff, zkConn, zkPort, serverName, childEventCh, childDoneCh, childPath)
 		}
 
-		// begin parent thread body
-		// {{{
-
 		wg.Add(1)
-		go func() {
-			defer func() {
-				close(ch)
-				close(childDoneCh)
-				for len(alive) != 0 {
-					ev := <-childEventCh
-					if pathKey, ok := zkIsChildExit(ev); ok {
-						delete(alive, pathKey)
-					}
-				}
-				close(childEventCh)
-				wg.Done()
-			}()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case ev := <-childEventCh:
-					if pathKey, ok := zkIsChildExit(ev); ok {
-						delete(alive, pathKey)
-					} else {
-						ch <- []Event{ev}
-					}
-				case zev := <-zch:
-					switch zev.Type {
-					case zk.EventNodeChildrenChanged:
-						// pass
-
-					case zk.EventNodeDeleted:
-						err := fmt.Errorf("node %q was deleted: %w", zkPath, fs.ErrNotExist)
-						ch <- []Event{
-							{
-								Type: ErrorEvent,
-								Err:  err,
-							},
-						}
-						return
-
-					default:
-						err = MapZKError(zev.Err)
-						if err != nil {
-							ch <- []Event{
-								{
-									Type: ErrorEvent,
-									Err:  err,
-								},
-							}
-							return
-						}
-					}
-
-					children, _, zch, err = zkconn.ChildrenW(zkPath)
-					err = MapZKError(err)
-					if err != nil {
-						ch <- []Event{
-							{
-								Type: ErrorEvent,
-								Err:  err,
-							},
-						}
-						return
-					}
-
-					for _, child := range children {
-						childPath := path.Join(zkPath, child)
-						if _, exists := alive[childPath]; !exists {
-							alive[childPath] = struct{}{}
-							wg.Add(1)
-							go childThread(childPath)
-						}
-					}
-				}
-			}
-		}()
-
-		// end parent thread body
-		// }}}
+		go zkParentThread(ctx, wg, backoff, zkConn, zkPath, zkPort, serverName, zch, childEventCh, childDoneCh, ch, alive)
 
 		return ch, nil
 	}
@@ -346,7 +153,7 @@ func MapZKError(err error) error {
 type zkBuilder struct {
 	ctx               context.Context
 	rng               *rand.Rand
-	zkconn            *zk.Conn
+	zkConn            *zk.Conn
 	serviceConfigJSON string
 }
 
@@ -368,7 +175,7 @@ func (b zkBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts re
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:           b.ctx,
 		Random:            b.rng,
-		ResolveFunc:       MakeZKResolveFunc(b.zkconn, zkPath, zkPort, serverName),
+		ResolveFunc:       MakeZKResolveFunc(b.zkConn, zkPath, zkPort, serverName),
 		ClientConn:        cc,
 		ServiceConfigJSON: b.serviceConfigJSON,
 	})
@@ -388,4 +195,208 @@ func zkIsChildExit(ev Event) (pathKey string, ok bool) {
 
 func zkIsFatalError(err error) bool {
 	return errors.Is(err, fs.ErrClosed) || errors.Is(err, fs.ErrNotExist)
+}
+
+func zkParentThread(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	backoff expbackoff.ExpBackoff,
+	zkConn *zk.Conn,
+	zkPath string,
+	zkPort string,
+	serverName string,
+	zch <-chan zk.Event,
+	childEventCh chan Event,
+	childDoneCh chan struct{},
+	ch chan<- []Event,
+	alive map[string]struct{},
+) {
+	defer func() {
+		close(ch)
+		close(childDoneCh)
+		for len(alive) != 0 {
+			ev := <-childEventCh
+			if pathKey, ok := zkIsChildExit(ev); ok {
+				delete(alive, pathKey)
+			}
+		}
+		close(childEventCh)
+		wg.Done()
+	}()
+
+	var children []string
+	var err error
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-childEventCh:
+			if pathKey, ok := zkIsChildExit(ev); ok {
+				delete(alive, pathKey)
+			} else {
+				ch <- []Event{ev}
+			}
+		case zev := <-zch:
+			switch zev.Type {
+			case zk.EventNodeChildrenChanged:
+				// pass
+
+			case zk.EventNodeDeleted:
+				err = fmt.Errorf("node %q was deleted: %w", zkPath, fs.ErrNotExist)
+				ch <- []Event{
+					{
+						Type: ErrorEvent,
+						Err:  err,
+					},
+				}
+				return
+
+			default:
+				err = MapZKError(zev.Err)
+				if err != nil {
+					ch <- []Event{
+						{
+							Type: ErrorEvent,
+							Err:  err,
+						},
+					}
+					return
+				}
+			}
+
+			children, _, zch, err = zkConn.ChildrenW(zkPath)
+			err = MapZKError(err)
+			if err != nil {
+				ch <- []Event{
+					{
+						Type: ErrorEvent,
+						Err:  err,
+					},
+				}
+				return
+			}
+
+			for _, child := range children {
+				childPath := path.Join(zkPath, child)
+				if _, exists := alive[childPath]; !exists {
+					alive[childPath] = struct{}{}
+					wg.Add(1)
+					go zkChildThread(ctx, wg, backoff, zkConn, zkPort, serverName, childEventCh, childDoneCh, childPath)
+				}
+			}
+		}
+	}
+}
+
+func zkChildThread(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	backoff expbackoff.ExpBackoff,
+	zkConn *zk.Conn,
+	zkPort string,
+	serverName string,
+	childEventCh chan<- Event,
+	childDoneCh <-chan struct{},
+	myPath string,
+) {
+	defer func() {
+		err := childExitError{Path: myPath}
+		childEventCh <- Event{
+			Type: ErrorEvent,
+			Err:  err,
+		}
+		wg.Done()
+	}()
+
+	var raw []byte
+	var zch <-chan zk.Event
+	var err error
+
+	retries := 0
+	childSleep := func() bool {
+		t := time.NewTimer(backoff.Backoff(retries))
+		retries++
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return false
+		case <-childDoneCh:
+			t.Stop()
+			return false
+		case <-t.C:
+			return true
+		}
+	}
+
+	for {
+		for {
+			raw, _, zch, err = zkConn.GetW(myPath)
+			err = MapZKError(err)
+			if err == nil {
+				break
+			}
+			if zkIsFatalError(err) {
+				childEventCh <- Event{
+					Type: DeleteEvent,
+					Key:  myPath,
+				}
+				return
+			}
+			childEventCh <- Event{
+				Type: BadDataEvent,
+				Key:  myPath,
+				Data: Resolved{
+					Unique: myPath,
+					Err:    err,
+				},
+			}
+			if !childSleep() {
+				return
+			}
+		}
+
+		retries = 0
+		childEventCh <- parseMembershipData(zkPort, serverName, myPath, raw)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-childDoneCh:
+			return
+		case zev := <-zch:
+			switch zev.Type {
+			case zk.EventNodeDataChanged:
+				// pass
+			case zk.EventNodeDeleted:
+				childEventCh <- Event{
+					Type: DeleteEvent,
+					Key:  myPath,
+				}
+				return
+			default:
+				err = MapZKError(zev.Err)
+				if err != nil {
+					if zkIsFatalError(err) {
+						childEventCh <- Event{
+							Type: DeleteEvent,
+							Key:  myPath,
+						}
+						return
+					}
+					childEventCh <- Event{
+						Type: BadDataEvent,
+						Key:  myPath,
+						Data: Resolved{
+							Unique: myPath,
+							Err:    err,
+						},
+					}
+					if !childSleep() {
+						return
+					}
+				}
+			}
+		}
+	}
 }
