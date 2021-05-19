@@ -18,14 +18,6 @@ type WatchID uint64
 // state changes.
 type WatchFunc func([]Event)
 
-type UpdateOptions struct {
-	Addr       net.Addr
-	HasHealthy bool
-	HasLoad    bool
-	Healthy    bool
-	Load       float32
-}
-
 // type Resolver {{{
 
 // Resolver is an interface for obtaining resolved addresses and/or watching
@@ -44,6 +36,7 @@ type Resolver interface {
 	// so.
 	Resolve() (Resolved, error)
 
+	// Update changes the status of a server.
 	Update(opts UpdateOptions)
 
 	// Watch registers a WatchFunc.  The WatchFunc will be called
@@ -61,6 +54,18 @@ type Resolver interface {
 
 	// Close stops the resolver and frees all resources.
 	Close()
+}
+
+// UpdateOptions holds options for the Resolver.Update method.
+type UpdateOptions struct {
+	// Addr is the address of the server to act upon.
+	Addr net.Addr
+
+	// HasHealthy is true if Healthy has a value.
+	HasHealthy bool
+
+	// Healthy is true if the server is ready to serve, false if it is not.
+	Healthy bool
 }
 
 // Options holds options related to constructing a new Resolver.

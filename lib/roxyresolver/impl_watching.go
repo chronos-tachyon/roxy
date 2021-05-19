@@ -164,6 +164,7 @@ func (res *WatchingResolver) Resolve() (Resolved, error) {
 	return balanceImpl(res.balancer, err, res.resolved, res.rng, res.perm, &res.nextRR)
 }
 
+// Update changes the status of a server.
 func (res *WatchingResolver) Update(opts UpdateOptions) {
 	addr := opts.Addr.String()
 

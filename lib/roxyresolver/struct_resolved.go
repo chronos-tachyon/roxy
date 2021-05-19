@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/grpc/resolver"
 )
@@ -124,53 +125,28 @@ func (data Resolved) IsHealthy() bool {
 	return result
 }
 
-// GetLoad returns the load on this server.
-func (data Resolved) GetLoad() (load float32, ok bool) {
-	load, ok = 1.0, false
-	if data.Dynamic != nil && data.Err == nil {
-		load, ok = data.Dynamic.GetLoad()
-	}
-	return
-}
-
 // Dynamic represents the mutable, mutex-protected data associated with one or
 // more Resolved addresses.
 type Dynamic struct {
-	mu         sync.Mutex
-	load       float32
-	healthy    bool
-	hasHealthy bool
-	hasLoad    bool
+	_ sync.Mutex // prevent copying, force alignment
+
+	healthy uint32
 }
 
+// Update changes the status of this server.
 func (dynamic *Dynamic) Update(opts UpdateOptions) {
-	dynamic.mu.Lock()
 	if opts.HasHealthy {
-		dynamic.hasHealthy = true
-		dynamic.healthy = opts.Healthy
+		newValue := uint32(1)
+		if opts.Healthy {
+			newValue = 2
+		}
+		atomic.StoreUint32(&dynamic.healthy, newValue)
 	}
-	if opts.HasLoad {
-		dynamic.hasLoad = true
-		dynamic.load = opts.Load
-	}
-	dynamic.mu.Unlock()
 }
 
 // IsHealthy returns true if this server is healthy.
 func (dynamic *Dynamic) IsHealthy() bool {
-	dynamic.mu.Lock()
-	result := dynamic.healthy || !dynamic.hasHealthy
-	dynamic.mu.Unlock()
+	value := atomic.LoadUint32(&dynamic.healthy)
+	result := (value == 0 || value == 2)
 	return result
-}
-
-// GetLoad returns the load on this server.
-func (dynamic *Dynamic) GetLoad() (load float32, ok bool) {
-	load, ok = 1.0, false
-	dynamic.mu.Lock()
-	if dynamic.hasLoad {
-		load, ok = dynamic.load, true
-	}
-	dynamic.mu.Unlock()
-	return
 }

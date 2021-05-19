@@ -20,9 +20,6 @@ var (
 )
 
 const (
-	minLoad = 1.0 / float32(1024.0)
-	maxLoad = float32(1024.0)
-
 	minWeight = 1.0 / float32(65536.0)
 	maxWeight = float32(65536.0)
 

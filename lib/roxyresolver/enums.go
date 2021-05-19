@@ -141,12 +141,6 @@ const (
 	// deleted.
 	RoundRobinBalancer
 
-	// LeastLoadedBalancer is not implemented.
-	LeastLoadedBalancer
-
-	// SRVBalancer chooses an address using the rules for DNS SRV records.
-	SRVBalancer
-
 	// WeightedRandomBalancer chooses an address with weighted probability.
 	WeightedRandomBalancer
 
@@ -155,15 +149,17 @@ const (
 	// that address's weight.  The shuffle changes each time an address is
 	// added, changed, or deleted.
 	WeightedRoundRobinBalancer
+
+	// SRVBalancer chooses an address using the rules for DNS SRV records.
+	SRVBalancer
 )
 
 var balancerTypeData = []enumData{
 	{"RandomBalancer", "random"},
 	{"RoundRobinBalancer", "roundRobin"},
-	{"LeastLoadedBalancer", "leastLoaded"},
-	{"SRVBalancer", "srv"},
 	{"WeightedRandomBalancer", "weightedRandom"},
 	{"WeightedRoundRobinBalancer", "weightedRoundRobin"},
+	{"SRVBalancer", "srv"},
 }
 
 var balancerTypeMap = map[string]BalancerType{
@@ -173,13 +169,11 @@ var balancerTypeMap = map[string]BalancerType{
 	"r":                  RandomBalancer,
 	"roundRobin":         RoundRobinBalancer,
 	"rr":                 RoundRobinBalancer,
-	"leastLoaded":        LeastLoadedBalancer,
-	"ll":                 LeastLoadedBalancer,
-	"srv":                SRVBalancer,
 	"weightedRandom":     WeightedRandomBalancer,
 	"wr":                 WeightedRandomBalancer,
 	"weightedRoundRobin": WeightedRoundRobinBalancer,
 	"wrr":                WeightedRoundRobinBalancer,
+	"srv":                SRVBalancer,
 }
 
 // GoString returns the Go constant name.

@@ -62,12 +62,6 @@ func balanceImpl(bal BalancerType, err error, resolved []Resolved, rng *rand.Ran
 			return data, nil
 		}
 
-	case LeastLoadedBalancer:
-		candidates := findHealthyCandidates(resolved)
-		if data, ok := pickWeightedRandom(candidates, rng, loadWeightFn); ok {
-			return data, nil
-		}
-
 	case SRVBalancer:
 		start := 0
 		length := len(resolved)
@@ -139,17 +133,6 @@ var standardWeightFn = func(data Resolved) float32 {
 		weight = maxWeight
 	}
 	return weight
-}
-
-var loadWeightFn = func(data Resolved) float32 {
-	load, _ := data.GetLoad()
-	if load < minLoad {
-		load = minLoad
-	}
-	if load > maxLoad {
-		load = maxLoad
-	}
-	return 1.0 / load
 }
 
 func computeCumulativeProbabilities(candidates []Resolved, fn func(Resolved) float32) []float32 {

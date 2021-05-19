@@ -115,6 +115,7 @@ func (res *StaticResolver) Resolve() (Resolved, error) {
 	return balanceImpl(res.balancer, nil, res.resolved, res.rng, res.perm, &res.nextRR)
 }
 
+// Update changes the status of a server.
 func (res *StaticResolver) Update(opts UpdateOptions) {
 	addr := opts.Addr.String()
 	dynamic := res.byAddr[addr]
