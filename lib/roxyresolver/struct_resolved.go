@@ -1,12 +1,13 @@
 package roxyresolver
 
 import (
-	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
 
 	"google.golang.org/grpc/resolver"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // Resolved represents a resolved address.
@@ -73,19 +74,29 @@ func (data Resolved) Check() {
 		return
 	}
 	if data.Unique == "" {
-		panic(errors.New("Resolved.Unique is empty"))
+		panic(roxyutil.CheckError{
+			Message: "Resolved.Unique is empty",
+		})
 	}
 	if data.Err == nil && data.Addr == nil {
-		panic(errors.New("Resolved.Err is nil but Resolved.Addr is also nil"))
+		panic(roxyutil.CheckError{
+			Message: "Resolved.Err is nil but Resolved.Addr is also nil",
+		})
 	}
 	if data.Addr != nil && data.Address.Addr == "" {
-		panic(errors.New("Resolved.Addr is not nil but Resolved.Address.Addr is empty"))
+		panic(roxyutil.CheckError{
+			Message: "Resolved.Addr is not nil but Resolved.Address.Addr is empty",
+		})
 	}
 	if data.Addr != nil && data.Dynamic == nil {
-		panic(errors.New("Resolved.Addr is not nil but Resolved.Dynamic is nil"))
+		panic(roxyutil.CheckError{
+			Message: "Resolved.Addr is not nil but Resolved.Dynamic is nil",
+		})
 	}
 	if data.ServerName != data.Address.ServerName {
-		panic(errors.New("Resolved.ServerName is not equal to Resolved.Address.ServerName"))
+		panic(roxyutil.CheckError{
+			Message: "Resolved.ServerName is not equal to Resolved.Address.ServerName",
+		})
 	}
 }
 

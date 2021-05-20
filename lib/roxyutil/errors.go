@@ -31,6 +31,8 @@ var (
 	ErrExpectNoDoubleSlash    = inputError("did not expect path to contain '//'")
 	ErrExpectNoDot            = inputError("did not expect path to contain '/./'")
 	ErrExpectNoDotDot         = inputError("did not expect path to contain '/../'")
+	ErrExpectEmptyList        = inputError("expected empty list")
+	ErrExpectNonEmptyList     = inputError("expected non-empty list")
 )
 
 type grpcStatusError interface {
@@ -53,7 +55,7 @@ func (err noHealthyBackendsError) Error() string {
 	return "no healthy backends"
 }
 
-// GRPCStatusCode returns the GRPC status code.
+// GRPCStatusCode returns the GRPC status code "Unavailable".
 func (err noHealthyBackendsError) GRPCStatusCode() codes.Code {
 	return codes.Unavailable
 }
@@ -77,7 +79,7 @@ func (err notExistError) Is(other error) bool {
 	return other == fs.ErrNotExist
 }
 
-// GRPCStatusCode returns the GRPC status code.
+// GRPCStatusCode returns the GRPC status code "NotFound".
 func (err notExistError) GRPCStatusCode() codes.Code {
 	return codes.NotFound
 }
@@ -96,13 +98,33 @@ func (err inputError) Error() string {
 	return string(err)
 }
 
-// GRPCStatusCode returns the GRPC status code.
+// GRPCStatusCode returns the GRPC status code "InvalidArgument".
 func (err inputError) GRPCStatusCode() codes.Code {
 	return codes.InvalidArgument
 }
 
 var _ error = inputError("")
 var _ grpcStatusCodeError = inputError("")
+
+// }}}
+
+// type ExpectLiteralError {{{
+
+// ExpectLiteralError represents failure to parse an input.
+type ExpectLiteralError string
+
+// Error fulfills the error interface.
+func (err ExpectLiteralError) Error() string {
+	return fmt.Sprintf("expected %q", string(err))
+}
+
+// GRPCStatusCode returns the GRPC status code "InvalidArgument".
+func (err ExpectLiteralError) GRPCStatusCode() codes.Code {
+	return codes.InvalidArgument
+}
+
+var _ error = ExpectLiteralError("")
+var _ grpcStatusCodeError = ExpectLiteralError("")
 
 // }}}
 
@@ -119,12 +141,107 @@ func (err RegexpMatchError) Error() string {
 	return fmt.Sprintf("input %q failed to match pattern /%s/", err.Input, err.Pattern.String())
 }
 
-// GRPCStatusCode returns the GRPC status code.
+// GRPCStatusCode returns the GRPC status code "InvalidArgument".
 func (err RegexpMatchError) GRPCStatusCode() codes.Code {
 	return codes.InvalidArgument
 }
 
 var _ error = RegexpMatchError{}
+
+// }}}
+
+// type CheckError {{{
+
+// CheckError represents an assertion failure.
+type CheckError struct {
+	Message string
+}
+
+// Error fulfills the error interface.
+func (err CheckError) Error() string {
+	return err.Message
+}
+
+var _ error = CheckError{}
+
+// }}}
+
+// type ListIndexError {{{
+
+// ListIndexError indicates an error in one item of a list.
+type ListIndexError struct {
+	List  string
+	Index uint
+	Value interface{}
+	Err   error
+}
+
+// Error fulfills the error interface.
+func (err ListIndexError) Error() string {
+	name := err.List
+	if name == "" {
+		name = "list"
+	}
+	return fmt.Sprintf("%s[%d] = %v: %v", name, err.Index, err.Value, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err ListIndexError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = ListIndexError{}
+
+// }}}
+
+// type MapKeyError {{{
+
+// MapKeyError indicates an error in one value of a map.
+type MapKeyError struct {
+	Map   string
+	Key   interface{}
+	Value interface{}
+	Err   error
+}
+
+// Error fulfills the error interface.
+func (err MapKeyError) Error() string {
+	name := err.Map
+	if name == "" {
+		name = "map"
+	}
+	return fmt.Sprintf("%s[%v] = %v: %v", name, err.Key, err.Value, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err MapKeyError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = MapKeyError{}
+
+// }}}
+
+// type StructFieldError {{{
+
+// StructFieldError indicates an error in one field of a struct.
+type StructFieldError struct {
+	Field string
+	Value interface{}
+	Err   error
+}
+
+// Error fulfills the error interface.
+func (err StructFieldError) Error() string {
+	return fmt.Sprintf("%s = %v: %v", err.Field, err.Value, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err StructFieldError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = StructFieldError{}
 
 // }}}
 
@@ -356,18 +473,35 @@ var _ error = IPError{}
 
 // type PortError {{{
 
+// PortType denotes whether a port is named, numbered, or either.
+type PortType uint8
+
+// PortType constants.
+const (
+	NumericPort PortType = iota
+	NumericPortOrServiceName
+	NamedPort
+)
+
 // PortError represents failure to parse a port number string.
 type PortError struct {
-	Port    string
-	Err     error
-	NamedOK bool
+	Type PortType
+	Port string
+	Err  error
 }
 
 // Error fulfills the error interface.
 func (err PortError) Error() string {
-	format := "invalid port number %q: %v"
-	if err.NamedOK {
-		format = "invalid port number or named port %q: %v"
+	var format string
+	switch err.Type {
+	case NumericPort:
+		format = "invalid port number %q: %v"
+	case NumericPortOrServiceName:
+		format = "invalid port number or /etc/services port name %q: %v"
+	case NamedPort:
+		format = "invalid named port %q: %v"
+	default:
+		format = "invalid port %q: %v"
 	}
 	return fmt.Sprintf(format, err.Port, err.Err)
 }
@@ -561,6 +695,76 @@ var _ error = LookupGroupByNameError{}
 
 // }}}
 
+// type LookupPortError {{{
+
+// LookupPortError represents failure to look up a network port by service
+// name, using /etc/services or the like.
+type LookupPortError struct {
+	Net  string
+	Port string
+	Err  error
+}
+
+// Error fulfills the error interface.
+func (err LookupPortError) Error() string {
+	return fmt.Sprintf("\"net\".LookupPort(%q, %q) failed: %v", err.Net, err.Port, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err LookupPortError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = LookupPortError{}
+
+// }}}
+
+// type LookupHostError {{{
+
+// LookupHostError represents failure to look up DNS A/AAAA records.
+type LookupHostError struct {
+	Host string
+	Err  error
+}
+
+// Error fulfills the error interface.
+func (err LookupHostError) Error() string {
+	return fmt.Sprintf("\"net\".LookupHost(%q) failed: %v", err.Host, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err LookupHostError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = LookupHostError{}
+
+// }}}
+
+// type LookupSRVError {{{
+
+// LookupSRVError represents failure to look up DNS SRV records.
+type LookupSRVError struct {
+	Service string
+	Network string
+	Domain  string
+	Err     error
+}
+
+// Error fulfills the error interface.
+func (err LookupSRVError) Error() string {
+	return fmt.Sprintf("\"net\".LookupSRV(%q, %q, %q) failed: %v", err.Service, err.Network, err.Domain, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err LookupSRVError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = LookupSRVError{}
+
+// }}}
+
 // type PathAbsError {{{
 
 // PathAbsError represents failure to make a file path absolute.
@@ -580,6 +784,49 @@ func (err PathAbsError) Unwrap() error {
 }
 
 var _ error = PathAbsError{}
+
+// }}}
+
+// type InvalidEnumValueError {{{
+
+// InvalidEnumValueError indicates an enum whose numeric value is out of range.
+type InvalidEnumValueError struct {
+	Type  string
+	Value uint
+	Limit uint
+}
+
+// Error fulfills the error interface.
+func (err InvalidEnumValueError) Error() string {
+	if err.Limit == 0 {
+		return fmt.Sprintf("invalid %s value %d", err.Type, err.Value)
+	}
+	return fmt.Sprintf("invalid %s value %d; must be < %d", err.Type, err.Value, err.Limit)
+}
+
+var _ error = InvalidEnumValueError{}
+
+// }}}
+
+// type InvalidEnumNameError {{{
+
+// InvalidEnumNameError indicates an enum whose string representation could not
+// be recognized.
+type InvalidEnumNameError struct {
+	Type    string
+	Name    string
+	Allowed []string
+}
+
+// Error fulfills the error interface.
+func (err InvalidEnumNameError) Error() string {
+	if len(err.Allowed) == 0 {
+		return fmt.Sprintf("invalid %s name %q", err.Type, err.Name)
+	}
+	return fmt.Sprintf("invalid %s name %q; must be one of %q", err.Type, err.Name, err.Allowed)
+}
+
+var _ error = InvalidEnumNameError{}
 
 // }}}
 

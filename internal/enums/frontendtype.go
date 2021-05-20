@@ -1,12 +1,10 @@
 package enums
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 
-	"github.com/chronos-tachyon/roxy/internal/constants"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // FrontendType represents a front-end implementation.
@@ -20,71 +18,56 @@ const (
 	GRPCBackendFrontendType
 )
 
-var frontendTypeData = []enumData{
-	{"UndefinedFrontendType", ""},
-	{"FileSystemFrontendType", "fs"},
-	{"HTTPBackendFrontendType", "http"},
-	{"GRPCBackendFrontendType", "grpc"},
-}
-
-var frontendTypeJSON = [][][]byte{
-	{[]byte(`""`)},
-	{[]byte(`"fs"`)},
-	{[]byte(`"http"`)},
-	{[]byte(`"grpc"`)},
+var frontendTypeData = []roxyutil.EnumData{
+	{
+		GoName: "UndefinedFrontendType",
+		Name:   "",
+		JSON:   []byte(`""`),
+	},
+	{
+		GoName: "FileSystemFrontendType",
+		Name:   "fs",
+		JSON:   []byte(`"fs"`),
+	},
+	{
+		GoName: "HTTPBackendFrontendType",
+		Name:   "http",
+		JSON:   []byte(`"http"`),
+	},
+	{
+		GoName: "GRPCBackendFrontendType",
+		Name:   "grpc",
+		JSON:   []byte(`"grpc"`),
+	},
 }
 
 // GoString returns the Go constant name.
 func (t FrontendType) GoString() string {
-	if uint(t) >= uint(len(frontendTypeData)) {
-		return fmt.Sprintf("FrontendType(%d)", uint(t))
-	}
-	return frontendTypeData[t].GoName
+	return roxyutil.DereferenceEnumData("FrontendType", frontendTypeData, uint(t)).GoName
 }
 
 // String returns the string representation.
 func (t FrontendType) String() string {
-	if uint(t) >= uint(len(frontendTypeData)) {
-		return fmt.Sprintf("#%d", uint(t))
-	}
-	return frontendTypeData[t].Name
+	return roxyutil.DereferenceEnumData("FrontendType", frontendTypeData, uint(t)).Name
 }
 
 // MarshalJSON fulfills json.Marshaler.
 func (t FrontendType) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.String())
+	return roxyutil.MarshalEnumToJSON("FrontendType", frontendTypeData, uint(t))
 }
 
 // UnmarshalJSON fulfills json.Unmarshaler.
 func (t *FrontendType) UnmarshalJSON(raw []byte) error {
-	if bytes.Equal(raw, constants.NullBytes) {
+	value, err := roxyutil.UnmarshalEnumFromJSON("FrontendType", frontendTypeData, raw)
+	if err == nil {
+		*t = FrontendType(value)
 		return nil
 	}
-
+	if err == roxyutil.ErrIsNull {
+		return nil
+	}
 	*t = 0
-
-	for index, list := range frontendTypeJSON {
-		for _, item := range list {
-			if bytes.Equal(raw, item) {
-				*t = FrontendType(index)
-				return nil
-			}
-		}
-	}
-
-	var str string
-	if err := json.Unmarshal(raw, &str); err != nil {
-		return err
-	}
-
-	for index, data := range frontendTypeData {
-		if strings.EqualFold(str, data.Name) || strings.EqualFold(str, data.GoName) {
-			*t = FrontendType(index)
-			return nil
-		}
-	}
-
-	return fmt.Errorf("illegal frontend type %q; expected one of %q", str, makeAllowedNames(frontendTypeData))
+	return err
 }
 
 var _ fmt.GoStringer = FrontendType(0)

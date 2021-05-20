@@ -2,6 +2,8 @@ package roxyresolver
 
 import (
 	"fmt"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // Event represents the Resolver state changes triggered by some event.
@@ -72,48 +74,70 @@ func (event Event) Check() {
 
 func (event Event) checkErr(expectErr bool) {
 	if expectErr && event.Err == nil {
-		panic(fmt.Errorf("Event.Type is %#v but Event.Err is nil", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.Err is nil", event.Type),
+		})
 	}
 	if !expectErr && event.Err != nil {
-		panic(fmt.Errorf("Event.Type is %#v but Event.Err is non-nil", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.Err is non-nil", event.Type),
+		})
 	}
 }
 
 func (event Event) checkKey(expectKey bool) {
 	if expectKey && event.Key == "" {
-		panic(fmt.Errorf("Event.Type is %#v but Event.Key is empty", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.Key is empty", event.Type),
+		})
 	}
 	if !expectKey && event.Key != "" {
-		panic(fmt.Errorf("Event.Type is %#v but Event.Key is non-empty", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.Key is non-empty", event.Type),
+		})
 	}
 }
 
 func (event Event) checkData(expectData, expectDataErr bool) {
 	if expectData && event.Data.Dynamic == nil {
-		panic(fmt.Errorf("Event.Type is %#v but Event.Data is nil", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.Data is nil", event.Type),
+		})
 	}
 	if !expectData && event.Data.Dynamic != nil {
-		panic(fmt.Errorf("Event.Type is %#v but Event.Data is non-nil", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.Data is non-nil", event.Type),
+		})
 	}
 	if expectData {
 		event.Data.Check()
 		if event.Key != event.Data.Unique {
-			panic(fmt.Errorf("Event.Key is %q but Event.Data.Unique is %q", event.Key, event.Data.Unique))
+			panic(roxyutil.CheckError{
+				Message: fmt.Sprintf("Event.Key is %q but Event.Data.Unique is %q", event.Key, event.Data.Unique),
+			})
 		}
 		if expectDataErr && event.Data.Err == nil {
-			panic(fmt.Errorf("Event.Type is %#v but Event.Data.Err is nil", event.Type))
+			panic(roxyutil.CheckError{
+				Message: fmt.Sprintf("Event.Type is %#v but Event.Data.Err is nil", event.Type),
+			})
 		}
 		if !expectDataErr && event.Data.Err != nil {
-			panic(fmt.Errorf("Event.Type is %#v but Event.Data.Err is non-nil", event.Type))
+			panic(roxyutil.CheckError{
+				Message: fmt.Sprintf("Event.Type is %#v but Event.Data.Err is non-nil", event.Type),
+			})
 		}
 	}
 }
 
 func (event Event) checkSC(expectSC bool) {
 	if expectSC && event.ServiceConfigJSON == "" {
-		panic(fmt.Errorf("Event.Type is %#v but Event.ServiceConfigJSON is empty", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.ServiceConfigJSON is empty", event.Type),
+		})
 	}
 	if !expectSC && event.ServiceConfigJSON != "" {
-		panic(fmt.Errorf("Event.Type is %#v but Event.ServiceConfigJSON is non-empty", event.Type))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("Event.Type is %#v but Event.ServiceConfigJSON is non-empty", event.Type),
+		})
 	}
 }

@@ -114,35 +114,46 @@ func (cfg *ATCAnnounceConfig) Parse(str string) error {
 	rest.WriteString(pieces[0])
 
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "name="):
-			cfg.ServiceName, err = roxyutil.ExpandString(item[5:])
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
+
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
+
+		switch optName {
+		case optionName:
+			cfg.ServiceName, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "loc="):
-			cfg.Location, err = roxyutil.ExpandString(item[4:])
+		case optionLoc:
+			fallthrough
+		case optionLocation:
+			cfg.Location, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "location="):
-			cfg.Location, err = roxyutil.ExpandString(item[9:])
+		case optionUnique:
+			cfg.Unique, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "unique="):
-			cfg.Unique, err = roxyutil.ExpandString(item[7:])
+		case optionPort:
+			cfg.NamedPort, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
-			}
-
-		case strings.HasPrefix(item, "port="):
-			cfg.NamedPort, err = roxyutil.ExpandString(item[5:])
-			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
 		default:

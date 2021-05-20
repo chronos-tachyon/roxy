@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // CostInterval is the span of time over which the average cost-per-second is
@@ -51,8 +53,14 @@ func GetCostData() CostData {
 //
 // The cost must be a number between 0 and 65536, inclusive.
 func Spend(cost uint) {
+	if cost == 0 {
+		return
+	}
+
 	if cost > 65536 {
-		panic(fmt.Errorf("cost %d is out of range", cost))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("cost %d is out of range (1..65536)", cost),
+		})
 	}
 
 	gCostMu.Lock()

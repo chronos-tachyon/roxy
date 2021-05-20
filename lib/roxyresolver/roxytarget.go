@@ -2,7 +2,8 @@ package roxyresolver
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
+	"net"
 	"net/url"
 	"sort"
 	"strings"
@@ -32,12 +33,22 @@ type Target struct {
 	// This field is mandatory.
 	Endpoint string
 
-	// ServerName is the value to use for the
-	// "crypto/tls".(*Config).ServerName field.
-	ServerName string
-
 	// Query is a collection of key-value mappings.
 	Query url.Values
+
+	// ServerName is the suggested value for the
+	// "crypto/tls".(*Config).ServerName field.
+	//
+	// It is filled in by Parse, FromGRPCTarget, or PostProcess.
+	ServerName string
+
+	// HasSlash is true if the string representation was originally of the
+	// form "scheme://authority/endpoint?query", rather than
+	// "scheme:endpoint?query".
+	//
+	// It is a Scheme-specific hint to PostProcess that a leading slash
+	// before Endpoint can be inferred if necessary.
+	HasSlash bool
 }
 
 // MarshalJSON fulfills json.Marshaler.
@@ -96,12 +107,18 @@ func (rt *Target) UnmarshalJSON(raw []byte) error {
 
 // Parse parses the given string representation.
 func (rt *Target) Parse(str string) error {
+	if rt == nil {
+		panic(errors.New("*Target is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
 			*rt = Target{}
 		}
 	}()
+
+	var err error
 
 	if str == "" {
 		return roxyutil.EndpointError{Endpoint: str, Err: roxyutil.ErrExpectNonEmpty}
@@ -118,14 +135,14 @@ func (rt *Target) Parse(str string) error {
 		str = str[n:]
 	}
 
-	hasSlash := false
+	rt.HasSlash = false
 	if strings.HasPrefix(str, "//") {
 		str = str[2:]
 		i := strings.IndexByte(str, '/')
 		var authority string
 		if i >= 0 {
 			authority, str = str[:i], str[i+1:]
-			hasSlash = true
+			rt.HasSlash = true
 		} else {
 			authority, str = str, ""
 		}
@@ -135,25 +152,27 @@ func (rt *Target) Parse(str string) error {
 	ep, qs, hasQS := splitPathAndQueryString(str)
 	rt.Endpoint = unescapeAuthorityOrEndpoint(ep)
 	if hasQS {
-		var err error
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
 			return roxyutil.QueryStringError{QueryString: qs, Err: err}
 		}
 	}
 
-	tmp, err := rt.postprocess(hasSlash)
+	err = rt.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*rt = tmp
 	wantZero = false
 	return nil
 }
 
 // FromGRPCTarget tries to make this Target identical to the given resolver.Target.
 func (rt *Target) FromGRPCTarget(target resolver.Target) error {
+	if rt == nil {
+		panic(errors.New("*Target is nil"))
+	}
+
 	wantZero := true
 	defer func() {
 		if wantZero {
@@ -161,31 +180,35 @@ func (rt *Target) FromGRPCTarget(target resolver.Target) error {
 		}
 	}()
 
+	var err error
+
+	rt.HasSlash = false
 	rt.Scheme = target.Scheme
 	rt.Authority = unescapeAuthorityOrEndpoint(target.Authority)
 	ep, qs, hasQS := splitPathAndQueryString(target.Endpoint)
 	rt.Endpoint = unescapeAuthorityOrEndpoint(ep)
 
 	if hasQS {
-		var err error
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
 			return roxyutil.QueryStringError{QueryString: qs, Err: err}
 		}
 	}
 
-	tmp, err := rt.postprocess(false)
+	err = rt.PostProcess()
 	if err != nil {
 		return err
 	}
 
-	*rt = tmp
 	wantZero = false
 	return nil
 }
 
-func (rt Target) postprocess(hasSlash bool) (Target, error) {
-	var zero Target
+// PostProcess performs data integrity checks and input post-processing.
+func (rt *Target) PostProcess() error {
+	if rt == nil {
+		panic(errors.New("*Target is nil"))
+	}
 
 	if rt.Scheme == constants.SchemeEmpty {
 		rt.Scheme = constants.SchemeDNS
@@ -193,85 +216,124 @@ func (rt Target) postprocess(hasSlash bool) (Target, error) {
 
 	switch rt.Scheme {
 	case constants.SchemePassthrough:
-		host, _, err := misc.SplitHostPort(rt.Endpoint, constants.PortHTTPS)
-		if err != nil {
-			return zero, err
-		}
-		rt.ServerName = host
-
+		return rt.postProcessPassthrough()
 	case constants.SchemeUnix:
-		if hasSlash && (rt.Endpoint == "" || (rt.Endpoint[0] != '/' && rt.Endpoint[0] != '@' && rt.Endpoint[0] != '\x00')) {
-			rt.Endpoint = "/" + rt.Endpoint
-		}
-		unixAddr, _, serverName, err := ParseUnixTarget(rt)
-		if err != nil {
-			return zero, err
-		}
-		if unixAddr.Name != "" && unixAddr.Name[0] == '\x00' {
-			rt.Scheme = constants.SchemeUnixAbstract
-			rt.Endpoint = unixAddr.Name[1:]
-		}
-		rt.Authority = ""
-		rt.ServerName = serverName
-
+		return rt.postProcessUnix()
 	case constants.SchemeUnixAbstract:
-		_, _, serverName, err := ParseUnixTarget(rt)
-		if err != nil {
-			return zero, err
-		}
-		rt.Authority = ""
-		rt.ServerName = serverName
-
+		return rt.postProcessUnixAbstract()
 	case constants.SchemeIP:
-		_, _, serverName, err := ParseIPTarget(rt, constants.PortHTTPS)
-		if err != nil {
-			return zero, err
-		}
-		rt.ServerName = serverName
-
+		return rt.postProcessIP()
 	case constants.SchemeDNS:
-		_, _, _, _, _, _, serverName, err := ParseDNSTarget(rt, constants.PortHTTPS)
-		if err != nil {
-			return zero, err
-		}
-		rt.ServerName = serverName
-
+		return rt.postProcessDNS()
 	case constants.SchemeSRV:
-		_, _, _, _, _, _, serverName, err := ParseSRVTarget(rt)
-		if err != nil {
-			return zero, err
-		}
-		rt.ServerName = serverName
-
+		return rt.postProcessSRV()
 	case constants.SchemeZK:
-		if rt.Endpoint == "" || rt.Endpoint[0] != '/' {
-			rt.Endpoint = "/" + rt.Endpoint
-		}
-		_, _, _, serverName, err := ParseZKTarget(rt)
-		if err != nil {
-			return zero, err
-		}
-		rt.ServerName = serverName
-
+		return rt.postProcessZK()
 	case constants.SchemeEtcd:
-		_, _, _, serverName, err := ParseEtcdTarget(rt)
-		if err != nil {
-			return zero, err
-		}
-		rt.ServerName = serverName
-
+		return rt.postProcessEtcd()
 	case constants.SchemeATC:
-		_, _, _, _, _, serverName, err := ParseATCTarget(rt)
-		if err != nil {
-			return zero, err
-		}
-		rt.ServerName = serverName
+		return rt.postProcessATC()
 
 	default:
-		return zero, fmt.Errorf("scheme %q is not supported", rt.Scheme)
+		return roxyutil.SchemeError{
+			Scheme: rt.Scheme,
+			Err:    roxyutil.ErrNotExist,
+		}
 	}
+}
 
-	return rt, nil
+func (rt *Target) postProcessPassthrough() error {
+	host, port, err := misc.SplitHostPort(rt.Endpoint, constants.PortHTTPS)
+	if err != nil {
+		return err
+	}
+	rt.Endpoint = net.JoinHostPort(host, port)
+	rt.ServerName = host
+	return nil
+}
+
+func (rt *Target) postProcessUnix() error {
+	if rt.HasSlash && (rt.Endpoint == "" || (rt.Endpoint[0] != '/' && rt.Endpoint[0] != '@' && rt.Endpoint[0] != '\x00')) {
+		rt.Endpoint = "/" + rt.Endpoint
+	}
+	unixAddr, _, serverName, err := ParseUnixTarget(*rt)
+	if err != nil {
+		return err
+	}
+	if unixAddr.Name != "" && unixAddr.Name[0] == '\x00' {
+		rt.Scheme = constants.SchemeUnixAbstract
+		rt.Endpoint = unixAddr.Name[1:]
+	}
+	rt.Authority = ""
+	rt.ServerName = serverName
+	return nil
+}
+
+func (rt *Target) postProcessUnixAbstract() error {
+	_, _, serverName, err := ParseUnixTarget(*rt)
+	if err != nil {
+		return err
+	}
+	rt.Authority = ""
+	rt.ServerName = serverName
+	return nil
+}
+
+func (rt *Target) postProcessIP() error {
+	_, _, serverName, err := ParseIPTarget(*rt, constants.PortHTTPS)
+	if err != nil {
+		return err
+	}
+	rt.ServerName = serverName
+	return nil
+}
+
+func (rt *Target) postProcessDNS() error {
+	_, _, _, _, _, _, serverName, err := ParseDNSTarget(*rt, constants.PortHTTPS)
+	if err != nil {
+		return err
+	}
+	rt.ServerName = serverName
+	return nil
+}
+
+func (rt *Target) postProcessSRV() error {
+	_, _, _, _, _, _, serverName, err := ParseSRVTarget(*rt)
+	if err != nil {
+		return err
+	}
+	rt.ServerName = serverName
+	return nil
+}
+
+func (rt *Target) postProcessZK() error {
+	if rt.HasSlash && (rt.Endpoint == "" || rt.Endpoint[0] != '/') {
+		rt.Endpoint = "/" + rt.Endpoint
+	}
+	_, _, _, serverName, err := ParseZKTarget(*rt)
+	if err != nil {
+		return err
+	}
+	rt.ServerName = serverName
+	return nil
+}
+
+func (rt *Target) postProcessEtcd() error {
+	_, _, _, serverName, err := ParseEtcdTarget(*rt)
+	if err != nil {
+		return err
+	}
+	rt.ServerName = serverName
+	return nil
+}
+
+func (rt *Target) postProcessATC() error {
+	_, _, _, _, _, serverName, err := ParseATCTarget(*rt)
+	if err != nil {
+		return err
+	}
+	rt.ServerName = serverName
+	return nil
 }
 
 func splitPathAndQueryString(str string) (path string, qs string, hasQS bool) {

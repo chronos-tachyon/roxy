@@ -1,15 +1,12 @@
 package membership
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
-	"strings"
 
-	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // type GRPC {{{
@@ -40,9 +37,6 @@ func (grpc *GRPC) NamedPorts() []string {
 
 // PrimaryAddr returns the server's primary endpoint as a TCPAddr.
 func (grpc *GRPC) PrimaryAddr() *net.TCPAddr {
-	if !grpc.IsAlive() {
-		return nil
-	}
 	tcpAddr, err := misc.ParseTCPAddr(grpc.Addr, "")
 	if err != nil {
 		panic(err)
@@ -57,10 +51,7 @@ func (grpc *GRPC) NamedAddr(namedPort string) *net.TCPAddr {
 	if namedPort == "" {
 		return grpc.PrimaryAddr()
 	}
-	if !grpc.IsAlive() {
-		return nil
-	}
-	panic(fmt.Errorf("unknown named port %q", namedPort))
+	panic(roxyutil.PortError{Type: roxyutil.NamedPort, Port: namedPort, Err: roxyutil.ErrNotExist})
 }
 
 var _ Interface = (*GRPC)(nil)
@@ -81,83 +72,46 @@ const (
 	GRPCOpDelete
 )
 
-var grpcOperationData = []enumData{
-	{"GRPCOpAdd", "ADD"},
-	{"GRPCOpDelete", "DELETE"},
-}
-
-var grpcOperationJSON = []enumJSON{
-	{uint(GRPCOpAdd), []byte("0")},
-	{uint(GRPCOpAdd), []byte(`"add"`)},
-	{uint(GRPCOpAdd), []byte(`"ADD"`)},
-	{uint(GRPCOpDelete), []byte("1")},
-	{uint(GRPCOpDelete), []byte(`"delete"`)},
-	{uint(GRPCOpDelete), []byte(`"DELETE"`)},
+var grpcOperationData = []roxyutil.EnumData{
+	{
+		GoName: "GRPCOpAdd",
+		Name:   "ADD",
+		JSON:   []byte(`0`),
+	},
+	{
+		GoName: "GRPCOpDelete",
+		Name:   "DELETE",
+		JSON:   []byte(`1`),
+	},
 }
 
 // GoString fulfills fmt.GoStringer.
 func (op GRPCOperation) GoString() string {
-	if uint(op) >= uint(len(grpcOperationData)) {
-		panic(fmt.Errorf("invalid GRPCOperation value %d", uint(op)))
-	}
-	return grpcOperationData[op].GoName
+	return roxyutil.DereferenceEnumData("GRPCOperation", grpcOperationData, uint(op)).GoName
 }
 
 // String fulfills fmt.Stringer.
 func (op GRPCOperation) String() string {
-	if uint(op) >= uint(len(grpcOperationData)) {
-		panic(fmt.Errorf("invalid GRPCOperation value %d", uint(op)))
-	}
-	return grpcOperationData[op].Name
+	return roxyutil.DereferenceEnumData("GRPCOperation", grpcOperationData, uint(op)).Name
 }
 
 // MarshalJSON fulfills json.Marshaler.
 func (op GRPCOperation) MarshalJSON() ([]byte, error) {
-	return json.Marshal(uint(op))
+	return roxyutil.MarshalEnumToJSON("GRPCOperation", grpcOperationData, uint(op))
 }
 
 // UnmarshalJSON fulfills json.Unmarshaler.
 func (op *GRPCOperation) UnmarshalJSON(raw []byte) error {
-	if raw == nil {
-		panic(errors.New("raw is nil"))
-	}
-
-	if bytes.Equal(raw, constants.NullBytes) {
+	value, err := roxyutil.UnmarshalEnumFromJSON("GRPCOperation", grpcOperationData, raw)
+	if err == nil {
+		*op = GRPCOperation(value)
 		return nil
 	}
-
-	*op = ^GRPCOperation(0)
-
-	for _, row := range grpcOperationJSON {
-		if bytes.Equal(raw, row.bytes) {
-			*op = GRPCOperation(row.index)
-			return nil
-		}
+	if err == roxyutil.ErrIsNull {
+		return nil
 	}
-
-	var num uint8
-	err0 := json.Unmarshal(raw, &num)
-	if err0 == nil {
-		if uint(num) < uint(len(grpcOperationData)) {
-			*op = GRPCOperation(num)
-			return nil
-		}
-		return fmt.Errorf("invalid GRPCOperation value %d", num)
-	}
-
-	var str string
-	err1 := json.Unmarshal(raw, &str)
-	if err1 == nil {
-		for index, data := range grpcOperationData {
-			if strings.EqualFold(str, data.Name) || strings.EqualFold(str, data.GoName) {
-				*op = GRPCOperation(index)
-				return nil
-			}
-		}
-		return fmt.Errorf("invalid GRPCOperation value %q", str)
-	}
-
-	return err0
+	*op = 0
+	return err
 }
 
 var _ fmt.Stringer = GRPCOperation(0)

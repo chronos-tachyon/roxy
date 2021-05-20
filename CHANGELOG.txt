@@ -1,3 +1,9 @@
+v0.4.7
+  * API tweaks for mainutil and roxyresolver.Target
+  * Use structured errors in more places
+  * Overhaul enums; they now parse and JSON marshal/unmarshal consistently
+  * Overhaul mainutil.FooConfig option parsing
+
 v0.4.6
   * Use cost-adjusted queries per second as our load balancer metric
   * Breaking changes to .proto files to support the above

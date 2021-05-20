@@ -3,7 +3,6 @@ package roxyresolver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"math/rand"
 	"path"
@@ -243,7 +242,7 @@ func zkParentThread(
 				// pass
 
 			case zk.EventNodeDeleted:
-				err = fmt.Errorf("node %q was deleted: %w", zkPath, fs.ErrNotExist)
+				err = NodeDeletedError{Path: zkPath}
 				ch <- []Event{
 					{
 						Type: ErrorEvent,

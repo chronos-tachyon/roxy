@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	v3 "go.etcd.io/etcd/client/v3"
@@ -117,29 +116,44 @@ func (cfg *EtcdAnnounceConfig) Parse(str string) error {
 	rest.WriteString(pieces[0])
 
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "path="):
-			cfg.Path, err = roxyutil.ExpandString(item[5:])
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
+
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
+
+		switch optName {
+		case optionPath:
+			cfg.Path, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "unique="):
-			cfg.Unique, err = roxyutil.ExpandString(item[7:])
+		case optionUnique:
+			cfg.Unique, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "port="):
-			cfg.NamedPort, err = roxyutil.ExpandString(item[5:])
+		case optionPort:
+			cfg.NamedPort, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "format="):
-			err = cfg.Format.Parse(item[7:])
+		case optionFormat:
+			err = cfg.Format.Parse(optValue)
 			if err != nil {
-				return fmt.Errorf("failed to parse format: %w", err)
+				optErr.Err = err
+				return optErr
 			}
 
 		default:

@@ -1,8 +1,6 @@
 package roxyresolver
 
 import (
-	"fmt"
-
 	"google.golang.org/grpc/resolver"
 
 	"github.com/chronos-tachyon/roxy/lib/membership"
@@ -12,7 +10,7 @@ func parseMembershipData(namedPort string, serverName string, pathKey string, by
 	r := new(membership.Roxy)
 
 	if err := r.UnmarshalJSON(bytes); err != nil {
-		err = fmt.Errorf("%s: %w", pathKey, err)
+		err = ResolveError{Unique: pathKey, Err: err}
 		return Event{
 			Type: BadDataEvent,
 			Key:  pathKey,
@@ -25,7 +23,7 @@ func parseMembershipData(namedPort string, serverName string, pathKey string, by
 
 	if !r.Ready {
 		var err error = StatusError{membership.StatusDead}
-		err = fmt.Errorf("%s: %w", pathKey, err)
+		err = ResolveError{Unique: pathKey, Err: err}
 		return Event{
 			Type: BadDataEvent,
 			Key:  pathKey,

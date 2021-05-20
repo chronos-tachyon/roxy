@@ -115,5 +115,5 @@ func ParsePort(port string) (uint16, error) {
 		return uint16(p), nil
 	}
 
-	return 0, roxyutil.PortError{Port: "port", Err: err0, NamedOK: true}
+	return 0, roxyutil.PortError{Type: roxyutil.NumericPortOrServiceName, Port: "port", Err: err0}
 }

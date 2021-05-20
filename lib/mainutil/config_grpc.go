@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -102,15 +101,28 @@ func (cfg *GRPCClientConfig) Parse(str string) error {
 	}
 
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "tls="):
-			err = cfg.TLS.Parse(item[4:])
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
+
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
+
+		switch optName {
+		case optionTLS:
+			err = cfg.TLS.Parse(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
 		default:
-			return fmt.Errorf("unknown option %q", item)
+			optErr.Err = UnknownOptionError{}
+			return optErr
 		}
 	}
 

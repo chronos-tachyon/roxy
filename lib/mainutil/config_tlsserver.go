@@ -133,35 +133,52 @@ func (cfg *TLSServerConfig) Parse(str string) error {
 
 	sawAllow := false
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "cert="):
-			cfg.Cert = item[5:]
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
 
-		case strings.HasPrefix(item, "key="):
-			cfg.Key = item[4:]
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
 
-		case strings.HasPrefix(item, "mTLS=") || strings.HasPrefix(item, "mtls="):
-			value, err = misc.ParseBool(item[5:])
+		switch optName {
+		case optionCert:
+			fallthrough
+		case optionServerCert:
+			cfg.Cert = optValue
+
+		case optionKey:
+			fallthrough
+		case optionServerKey:
+			cfg.Key = optValue
+
+		case optionMTLS:
+			value, err = misc.ParseBool(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 			cfg.MutualTLS = value
 
-		case strings.HasPrefix(item, "clientCA="):
-			cfg.ClientCA = item[9:]
+		case optionCA:
+			fallthrough
+		case optionClientCA:
+			cfg.ClientCA = optValue
 
-		case strings.HasPrefix(item, "ca="):
-			cfg.ClientCA = item[3:]
-
-		case strings.HasPrefix(item, "allow="):
+		case optionAllow:
 			sawAllow = true
-			err = cfg.AllowedNames.Parse(item[6:])
+			err = cfg.AllowedNames.Parse(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
 		default:
-			return fmt.Errorf("unknown option %q", item)
+			optErr.Err = UnknownOptionError{}
+			return optErr
 		}
 	}
 
@@ -250,7 +267,11 @@ func (cfg *TLSServerConfig) PostProcess() error {
 	}
 
 	if cfg.Cert == "" {
-		return fmt.Errorf("TLSServerConfig.Cert is empty")
+		return roxyutil.StructFieldError{
+			Field: "TLSServerConfig.Cert",
+			Value: cfg.Cert,
+			Err:   roxyutil.ErrExpectNonEmpty,
+		}
 	}
 
 	expanded, err := roxyutil.ExpandPath(cfg.Cert)
@@ -302,7 +323,7 @@ func (cfg TLSServerConfig) MakeTLS() (*tls.Config, error) {
 	out.Certificates = make([]tls.Certificate, 1)
 	out.Certificates[0], err = tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load X.509 keypair from cert=%q key=%q: %w", certPath, keyPath, err)
+		return nil, CertKeyError{CertPath: certPath, KeyPath: keyPath, Err: err}
 	}
 
 	if cfg.MutualTLS {
@@ -311,7 +332,7 @@ func (cfg TLSServerConfig) MakeTLS() (*tls.Config, error) {
 		if cfg.ClientCA == "" {
 			roots, err := x509.SystemCertPool()
 			if err != nil {
-				return nil, fmt.Errorf("failed to load system certificate pool: %w", err)
+				return nil, CertPoolError{Err: err}
 			}
 
 			out.ClientCAs = roots
@@ -320,12 +341,12 @@ func (cfg TLSServerConfig) MakeTLS() (*tls.Config, error) {
 
 			raw, err := ioutil.ReadFile(cfg.ClientCA)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read file %q: %w", cfg.ClientCA, err)
+				return nil, CertPoolError{Path: cfg.ClientCA, Err: err}
 			}
 
 			ok := roots.AppendCertsFromPEM(raw)
 			if !ok {
-				return nil, fmt.Errorf("failed to process certificates from PEM file %q", cfg.ClientCA)
+				return nil, CertPoolError{Path: cfg.ClientCA, Err: ErrOperationFailed}
 			}
 
 			out.ClientCAs = roots

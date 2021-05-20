@@ -1,12 +1,10 @@
 package roxyresolver
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 
-	"github.com/chronos-tachyon/roxy/internal/constants"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // type EventType {{{
@@ -38,86 +36,75 @@ const (
 	NewServiceConfigEvent
 )
 
-var eventTypeData = []enumData{
-	{"NoOpEvent", "noOp"},
-	{"ErrorEvent", "error"},
-	{"UpdateEvent", "update"},
-	{"DeleteEvent", "delete"},
-	{"BadDataEvent", "badData"},
-	{"StatusChangeEvent", "statusChange"},
-	{"NewServiceConfigEvent", "newServiceConfig"},
-}
-
-var eventTypeMap = map[string]EventType{
-	"":                 NoOpEvent,
-	"noOp":             NoOpEvent,
-	"error":            ErrorEvent,
-	"update":           UpdateEvent,
-	"delete":           DeleteEvent,
-	"badData":          BadDataEvent,
-	"statusChange":     StatusChangeEvent,
-	"newServiceConfig": NewServiceConfigEvent,
+var eventTypeData = []roxyutil.EnumData{
+	{
+		GoName: "NoOpEvent",
+		Name:   "noOp",
+	},
+	{
+		GoName: "ErrorEvent",
+		Name:   "error",
+	},
+	{
+		GoName: "UpdateEvent",
+		Name:   "update",
+	},
+	{
+		GoName: "DeleteEvent",
+		Name:   "delete",
+	},
+	{
+		GoName: "BadDataEvent",
+		Name:   "badData",
+	},
+	{
+		GoName: "StatusChangeEvent",
+		Name:   "statusChange",
+	},
+	{
+		GoName: "NewServiceConfigEvent",
+		Name:   "newServiceConfig",
+	},
 }
 
 // GoString returns the Go constant name.
 func (t EventType) GoString() string {
-	if uint(t) >= uint(len(eventTypeData)) {
-		panic(fmt.Errorf("EventType %d is out of range", uint(t)))
-	}
-	return eventTypeData[t].GoName
+	return roxyutil.DereferenceEnumData("EventType", eventTypeData, uint(t)).GoName
 }
 
 // String returns the string representation.
 func (t EventType) String() string {
-	if uint(t) >= uint(len(eventTypeData)) {
-		panic(fmt.Errorf("EventType %d is out of range", uint(t)))
-	}
-	return eventTypeData[t].Name
+	return roxyutil.DereferenceEnumData("EventType", eventTypeData, uint(t)).Name
 }
 
 // MarshalJSON fulfills json.Marshaler.
 func (t EventType) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.String())
-}
-
-// UnmarshalJSON fulfills json.Unmarshaler.
-func (t *EventType) UnmarshalJSON(raw []byte) error {
-	if bytes.Equal(raw, constants.NullBytes) {
-		return nil
-	}
-
-	var str string
-	if err := json.Unmarshal(raw, &str); err != nil {
-		*t = 0
-		return err
-	}
-
-	return t.Parse(str)
+	return roxyutil.MarshalEnumToJSON("EventType", eventTypeData, uint(t))
 }
 
 // Parse parses the string representation.
 func (t *EventType) Parse(str string) error {
-	if num, ok := eventTypeMap[str]; ok {
-		*t = num
+	value, err := roxyutil.ParseEnum("EventType", eventTypeData, str)
+	if err == nil {
+		*t = EventType(value)
 		return nil
 	}
-
-	for index, row := range eventTypeData {
-		if strings.EqualFold(str, row.Name) || strings.EqualFold(str, row.GoName) {
-			*t = EventType(index)
-			return nil
-		}
-	}
-
-	for key, num := range eventTypeMap {
-		if strings.EqualFold(str, key) {
-			*t = num
-			return nil
-		}
-	}
-
 	*t = 0
-	return fmt.Errorf("illegal event type %q; expected one of %q", str, makeAllowedNames(eventTypeData))
+	return err
+}
+
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (t *EventType) UnmarshalJSON(raw []byte) error {
+	value, err := roxyutil.UnmarshalEnumFromJSON("EventType", eventTypeData, raw)
+	if err == nil {
+		*t = EventType(value)
+		return nil
+	}
+	if err == roxyutil.ErrIsNull {
+		return nil
+	}
+	*t = 0
+	return err
 }
 
 var _ fmt.GoStringer = EventType(0)
@@ -154,105 +141,76 @@ const (
 	SRVBalancer
 )
 
-var balancerTypeData = []enumData{
-	{"RandomBalancer", "random"},
-	{"RoundRobinBalancer", "roundRobin"},
-	{"WeightedRandomBalancer", "weightedRandom"},
-	{"WeightedRoundRobinBalancer", "weightedRoundRobin"},
-	{"SRVBalancer", "srv"},
-}
-
-var balancerTypeMap = map[string]BalancerType{
-	"":                   RandomBalancer,
-	"random":             RandomBalancer,
-	"rand":               RandomBalancer,
-	"r":                  RandomBalancer,
-	"roundRobin":         RoundRobinBalancer,
-	"rr":                 RoundRobinBalancer,
-	"weightedRandom":     WeightedRandomBalancer,
-	"wr":                 WeightedRandomBalancer,
-	"weightedRoundRobin": WeightedRoundRobinBalancer,
-	"wrr":                WeightedRoundRobinBalancer,
-	"srv":                SRVBalancer,
+var balancerTypeData = []roxyutil.EnumData{
+	{
+		GoName:  "RandomBalancer",
+		Name:    "random",
+		Aliases: []string{"rand", "r"},
+	},
+	{
+		GoName:  "RoundRobinBalancer",
+		Name:    "roundRobin",
+		Aliases: []string{"rr"},
+	},
+	{
+		GoName:  "WeightedRandomBalancer",
+		Name:    "weightedRandom",
+		Aliases: []string{"wr"},
+	},
+	{
+		GoName:  "WeightedRoundRobinBalancer",
+		Name:    "weightedRoundRobin",
+		Aliases: []string{"wrr"},
+	},
+	{
+		GoName: "SRVBalancer",
+		Name:   "srv",
+	},
 }
 
 // GoString returns the Go constant name.
 func (t BalancerType) GoString() string {
-	if uint(t) >= uint(len(balancerTypeData)) {
-		panic(fmt.Errorf("BalancerType %d is out of range", uint(t)))
-	}
-	return balancerTypeData[t].GoName
+	return roxyutil.DereferenceEnumData("BalancerType", balancerTypeData, uint(t)).GoName
 }
 
 // String returns the string representation.
 func (t BalancerType) String() string {
-	if uint(t) >= uint(len(balancerTypeData)) {
-		panic(fmt.Errorf("BalancerType %d is out of range", uint(t)))
-	}
-	return balancerTypeData[t].Name
+	return roxyutil.DereferenceEnumData("BalancerType", balancerTypeData, uint(t)).Name
 }
 
 // MarshalJSON fulfills json.Marshaler.
 func (t BalancerType) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.String())
+	return roxyutil.MarshalEnumToJSON("BalancerType", balancerTypeData, uint(t))
 }
 
 // UnmarshalJSON fulfills json.Unmarshaler.
 func (t *BalancerType) UnmarshalJSON(raw []byte) error {
-	if bytes.Equal(raw, constants.NullBytes) {
+	value, err := roxyutil.UnmarshalEnumFromJSON("BalancerType", balancerTypeData, raw)
+	if err == nil {
+		*t = BalancerType(value)
 		return nil
 	}
-
-	var str string
-	if err := json.Unmarshal(raw, &str); err != nil {
-		*t = 0
-		return err
+	if err == roxyutil.ErrIsNull {
+		return nil
 	}
-
-	return t.Parse(str)
+	*t = 0
+	return err
 }
 
 // Parse parses the string representation.
 func (t *BalancerType) Parse(str string) error {
-	if num, ok := balancerTypeMap[str]; ok {
-		*t = num
+	value, err := roxyutil.ParseEnum("BalancerType", balancerTypeData, str)
+	if err == nil {
+		*t = BalancerType(value)
 		return nil
 	}
-
-	for index, row := range balancerTypeData {
-		if strings.EqualFold(str, row.Name) || strings.EqualFold(str, row.GoName) {
-			*t = BalancerType(index)
-			return nil
-		}
-	}
-
-	for key, num := range balancerTypeMap {
-		if strings.EqualFold(str, key) {
-			*t = num
-			return nil
-		}
-	}
-
 	*t = 0
-	return fmt.Errorf("illegal balancer type %q; expected one of %q", str, makeAllowedNames(balancerTypeData))
+	return err
 }
 
-var _ fmt.Stringer = BalancerType(0)
 var _ fmt.GoStringer = BalancerType(0)
+var _ fmt.Stringer = BalancerType(0)
 var _ json.Marshaler = BalancerType(0)
 var _ json.Unmarshaler = (*BalancerType)(nil)
 
 // }}}
-
-func makeAllowedNames(data []enumData) []string {
-	out := make([]string, len(data))
-	for i, row := range data {
-		out[i] = row.Name
-	}
-	return out
-}
-
-type enumData struct {
-	GoName string
-	Name   string
-}

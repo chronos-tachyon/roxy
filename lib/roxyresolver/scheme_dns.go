@@ -3,7 +3,6 @@ package roxyresolver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand"
 	"net"
 	"time"
@@ -116,24 +115,20 @@ func ParseDNSTarget(rt Target, defaultPort string) (res *net.Resolver, host stri
 func MakeDNSResolveFunc(ctx context.Context, res *net.Resolver, host string, port string, serverName string) PollingResolveFunc {
 	return func() ([]Resolved, error) {
 		// Resolve the port number.
-		portNum, err := res.LookupPort(ctx, constants.NetTCP, port)
+		portNum, err := roxyutil.LookupPort(ctx, res, constants.NetTCP, port)
 		if err != nil {
-			return nil, fmt.Errorf("LookupPort(%q, %q) failed: %w", constants.NetTCP, port, err)
+			return nil, err
 		}
 
 		// Resolve the A/AAAA records.
-		ipStrList, err := res.LookupHost(ctx, host)
+		ipList, err := roxyutil.LookupHost(ctx, res, host)
 		if err != nil {
-			return nil, fmt.Errorf("LookupHost(%q) failed: %w", host, err)
+			return nil, err
 		}
 
 		// Synthesize a Resolved for each IP address.
-		out := make([]Resolved, len(ipStrList))
-		for index, ipStr := range ipStrList {
-			ip := net.ParseIP(ipStr)
-			if ip == nil {
-				return nil, fmt.Errorf("LookupHost returned invalid IP address %q", ipStr)
-			}
+		out := make([]Resolved, len(ipList))
+		for index, ip := range ipList {
 			tcpAddr := &net.TCPAddr{
 				IP:   ip,
 				Port: int(portNum),

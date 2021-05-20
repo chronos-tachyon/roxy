@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -145,45 +144,63 @@ func (cfg *EtcdConfig) Parse(str string) error {
 	}
 
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "tls="):
-			err = cfg.TLS.Parse(item[4:])
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
+
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
+
+		switch optName {
+		case optionTLS:
+			err = cfg.TLS.Parse(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "username="):
-			cfg.Username, err = roxyutil.ExpandString(item[9:])
+		case optionUsername:
+			cfg.Username, err = roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "password="):
-			cfg.Password, err = roxyutil.ExpandPassword(item[9:])
+		case optionPassword:
+			cfg.Password, err = roxyutil.ExpandPassword(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "dialTimeout="):
-			cfg.DialTimeout, err = time.ParseDuration(item[12:])
+		case optionDialTimeout:
+			cfg.DialTimeout, err = time.ParseDuration(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "keepAlive="):
-			cfg.KeepAlive, err = time.ParseDuration(item[10:])
+		case optionKeepAlive:
+			cfg.KeepAlive, err = time.ParseDuration(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "keepAliveTimeout="):
-			cfg.KeepAliveTimeout, err = time.ParseDuration(item[17:])
+		case optionKeepAliveTimeout:
+			cfg.KeepAliveTimeout, err = time.ParseDuration(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
 		default:
-			return fmt.Errorf("unknown option %q", item)
+			optErr.Err = UnknownOptionError{}
+			return optErr
 		}
 	}
 
@@ -288,7 +305,11 @@ func (cfg *EtcdConfig) PostProcess() error {
 	}
 
 	if len(cfg.Endpoints) == 0 {
-		return errors.New("len(EtcdConfig.Endpoints) == 0")
+		return roxyutil.StructFieldError{
+			Field: "EtcdConfig.Endpoints",
+			Value: cfg.Endpoints,
+			Err:   roxyutil.ErrExpectNonEmptyList,
+		}
 	}
 
 	err := cfg.TLS.PostProcess()
@@ -304,13 +325,22 @@ func (cfg *EtcdConfig) PostProcess() error {
 	hostnames := make([]string, len(cfg.Endpoints))
 	for index := range cfg.Endpoints {
 		endpoint := cfg.Endpoints[index]
+
+		idxErr := roxyutil.ListIndexError{
+			List:  "EtcdConfig.Endpoints",
+			Index: uint(index),
+			Value: endpoint,
+		}
+
 		if endpoint == "" {
-			return fmt.Errorf("EtcdConfig.Endpoints[%d] == %q", index, endpoint)
+			idxErr.Err = roxyutil.ErrExpectNonEmpty
+			return idxErr
 		}
 
 		u, err := url.Parse(endpoint)
 		if err != nil {
-			return fmt.Errorf("failed to parse endpoint URL %q: %w", endpoint, err)
+			idxErr.Err = err
+			return idxErr
 		}
 
 		if u.Scheme == "" {
@@ -318,15 +348,48 @@ func (cfg *EtcdConfig) PostProcess() error {
 		}
 
 		if u.Scheme != expectScheme {
-			return fmt.Errorf("expected scheme %q, got scheme %q in URL %q", expectScheme, u.Scheme, u.String())
+			idxErr.Err = roxyutil.SchemeError{
+				Scheme: u.Scheme,
+				Err:    roxyutil.ExpectLiteralError(expectScheme),
+			}
+			return idxErr
 		}
 
 		if u.Port() == "" {
 			u.Host = net.JoinHostPort(u.Hostname(), constants.PortEtcd)
 		}
 
-		if u.User != nil || u.Path != "" || u.RawQuery != "" || u.RawFragment != "" {
-			return fmt.Errorf("URL %q contains forbidden components", u.String())
+		if u.User != nil {
+			idxErr.Err = roxyutil.StructFieldError{
+				Field: "URL.User",
+				Value: u.User.String(),
+				Err:   roxyutil.ErrExpectEmpty,
+			}
+			return idxErr
+		}
+		if u.Path != "" {
+			idxErr.Err = roxyutil.StructFieldError{
+				Field: "URL.Path",
+				Value: u.Path,
+				Err:   roxyutil.ErrExpectEmpty,
+			}
+			return idxErr
+		}
+		if u.RawQuery != "" {
+			idxErr.Err = roxyutil.StructFieldError{
+				Field: "URL.RawQuery",
+				Value: u.RawQuery,
+				Err:   roxyutil.ErrExpectEmpty,
+			}
+			return idxErr
+		}
+		if u.RawFragment != "" {
+			idxErr.Err = roxyutil.StructFieldError{
+				Field: "URL.RawFragment",
+				Value: u.RawFragment,
+				Err:   roxyutil.ErrExpectEmpty,
+			}
+			return idxErr
 		}
 
 		cfg.Endpoints[index] = u.String()
@@ -349,7 +412,7 @@ func (cfg EtcdConfig) Connect(ctx context.Context) (*v3.Client, error) {
 
 	tlsConfig, err := cfg.TLS.MakeTLS("")
 	if err != nil {
-		return nil, fmt.Errorf("failed to instantiate TLS config: %w", err)
+		return nil, err
 	}
 
 	dialTimeout := cfg.DialTimeout

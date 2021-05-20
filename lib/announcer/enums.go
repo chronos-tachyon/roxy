@@ -1,11 +1,10 @@
 package announcer
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 
-	"github.com/chronos-tachyon/roxy/internal/constants"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // type State {{{
@@ -29,27 +28,33 @@ const (
 	StateClosed
 )
 
-var stateData = []enumData{
-	{"StateReady", "READY"},
-	{"StateRunning", "RUNNING"},
-	{"StateDead", "DEAD"},
-	{"StateClosed", "CLOSED"},
+var stateData = []roxyutil.EnumData{
+	{
+		GoName: "StateReady",
+		Name:   "READY",
+	},
+	{
+		GoName: "StateRunning",
+		Name:   "RUNNING",
+	},
+	{
+		GoName: "StateDead",
+		Name:   "DEAD",
+	},
+	{
+		GoName: "StateClosed",
+		Name:   "CLOSED",
+	},
 }
 
 // GoString fulfills fmt.GoStringer.
 func (state State) GoString() string {
-	if uint(state) >= uint(len(stateData)) {
-		panic(fmt.Errorf("invalid State value %d", uint(state)))
-	}
-	return stateData[state].GoName
+	return roxyutil.DereferenceEnumData("State", stateData, uint(state)).GoName
 }
 
 // String fulfills fmt.Stringer.
 func (state State) String() string {
-	if uint(state) >= uint(len(stateData)) {
-		panic(fmt.Errorf("invalid State value %d", uint(state)))
-	}
-	return stateData[state].Name
+	return roxyutil.DereferenceEnumData("State", stateData, uint(state)).Name
 }
 
 // IsReady returns true if it is safe to call Announce.
@@ -61,7 +66,7 @@ func (state State) IsReady() bool {
 func (state State) IsRunning() bool {
 	switch state {
 	case StateRunning:
-		fallthrough
+		return true
 	case StateDead:
 		return true
 
@@ -91,68 +96,62 @@ const (
 	GRPCFormat
 )
 
-var formatData = []enumData{
-	{"RoxyFormat", "roxy"},
-	{"FinagleFormat", "finagle"},
-	{"GRPCFormat", "grpc"},
-}
-
-var formatJSON = [][]byte{
-	[]byte(`"roxy"`),
-	[]byte(`"finagle"`),
-	[]byte(`"grpc"`),
+var formatData = []roxyutil.EnumData{
+	{
+		GoName: "RoxyFormat",
+		Name:   "roxy",
+		JSON:   []byte(`"roxy"`),
+	},
+	{
+		GoName: "FinagleFormat",
+		Name:   "finagle",
+		JSON:   []byte(`"finagle"`),
+	},
+	{
+		GoName: "GRPCFormat",
+		Name:   "grpc",
+		JSON:   []byte(`"grpc"`),
+	},
 }
 
 // GoString fulfills fmt.GoStringer.
 func (format Format) GoString() string {
-	if uint(format) >= uint(len(formatData)) {
-		panic(fmt.Errorf("invalid Format value %d", uint(format)))
-	}
-	return formatData[format].GoName
+	return roxyutil.DereferenceEnumData("Format", formatData, uint(format)).GoName
 }
 
 // String fulfills fmt.Stringer.
 func (format Format) String() string {
-	if uint(format) >= uint(len(formatData)) {
-		panic(fmt.Errorf("invalid Format value %d", uint(format)))
-	}
-	return formatData[format].Name
+	return roxyutil.DereferenceEnumData("Format", formatData, uint(format)).Name
 }
 
 // MarshalJSON fulfills json.Marshaler.
 func (format Format) MarshalJSON() ([]byte, error) {
-	if uint(format) >= uint(len(formatJSON)) {
-		return nil, fmt.Errorf("invalid Format value %d", uint(format))
-	}
-	return formatJSON[format], nil
-}
-
-// UnmarshalJSON fulfills json.Unmarshaler.
-func (format *Format) UnmarshalJSON(raw []byte) error {
-	if bytes.Equal(raw, constants.NullBytes) {
-		return nil
-	}
-	for index, value := range formatJSON {
-		if bytes.Equal(raw, value) {
-			*format = Format(index)
-			return nil
-		}
-	}
-	return fmt.Errorf("expected \"roxy\", \"finagle\", or \"grpc\"; got %s", string(raw))
+	return roxyutil.MarshalEnumToJSON("Format", formatData, uint(format))
 }
 
 // Parse parses from a string value.
 func (format *Format) Parse(str string) error {
-	if str == "" {
+	value, err := roxyutil.ParseEnum("Format", formatData, str)
+	if err == nil {
+		*format = Format(value)
 		return nil
 	}
-	for index, row := range formatData {
-		if str == row.Name {
-			*format = Format(index)
-			return nil
-		}
+	*format = 0
+	return err
+}
+
+// UnmarshalJSON fulfills json.Unmarshaler.
+func (format *Format) UnmarshalJSON(raw []byte) error {
+	value, err := roxyutil.UnmarshalEnumFromJSON("Format", formatData, raw)
+	if err == nil {
+		*format = Format(value)
+		return nil
 	}
-	return fmt.Errorf("expected \"roxy\", \"finagle\", or \"grpc\"; got %q", str)
+	if err == roxyutil.ErrIsNull {
+		return nil
+	}
+	*format = 0
+	return err
 }
 
 var _ fmt.GoStringer = Format(0)
@@ -161,8 +160,3 @@ var _ json.Marshaler = Format(0)
 var _ json.Unmarshaler = (*Format)(nil)
 
 // }}}
-
-type enumData struct {
-	GoName string
-	Name   string
-}

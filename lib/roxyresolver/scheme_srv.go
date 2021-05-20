@@ -115,18 +115,18 @@ func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, ser
 	}
 	return func() ([]Resolved, error) {
 		// Resolve the SRV records.
-		_, records, err := res.LookupSRV(ctx, service, proto, name)
+		_, records, err := roxyutil.LookupSRV(ctx, res, service, proto, name)
 		if err != nil {
-			return nil, fmt.Errorf("LookupSRV(%q, %q, %q) failed: %w", service, proto, name, err)
+			return nil, err
 		}
 
 		// Generate the Resolved records.
 		out := make([]Resolved, 0, len(records))
 		for _, record := range records {
 			// Resolve the A/AAAA records.
-			ipStrList, err := res.LookupHost(ctx, record.Target)
+			ipList, err := roxyutil.LookupHost(ctx, res, record.Target)
 			if err != nil {
-				return nil, fmt.Errorf("LookupHost(%q) failed: %w", record.Target, err)
+				return nil, err
 			}
 
 			srvServerName := serverName
@@ -138,14 +138,10 @@ func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, ser
 			srvWeight := record.Weight
 
 			// Divide the weight evenly across all IP addresses.
-			computedWeight := float32(record.Weight) / float32(len(ipStrList))
+			computedWeight := float32(record.Weight) / float32(len(ipList))
 
 			// Synthesize a separate Resolved record for each IP address.
-			for _, ipStr := range ipStrList {
-				ip := net.ParseIP(ipStr)
-				if ip == nil {
-					return nil, fmt.Errorf("LookupHost returned invalid IP address %q", ipStr)
-				}
+			for _, ip := range ipList {
 				tcpAddr := &net.TCPAddr{
 					IP:   ip,
 					Port: int(record.Port),

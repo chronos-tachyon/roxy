@@ -3,6 +3,8 @@ package misc
 import (
 	"encoding/base64"
 	"fmt"
+
+	multierror "github.com/hashicorp/go-multierror"
 )
 
 // TryBase64DecodeString attempts to decode base-64 byte array using any of the
@@ -12,7 +14,9 @@ func TryBase64DecodeString(str string) ([]byte, error) {
 		return nil, nil
 	}
 
-	var firstErr error
+	var errs multierror.Error
+	errs.Errors = make([]error, 0, 4)
+
 	for _, enc := range []*base64.Encoding{
 		base64.StdEncoding,
 		base64.URLEncoding,
@@ -23,9 +27,35 @@ func TryBase64DecodeString(str string) ([]byte, error) {
 		if err == nil {
 			return raw, nil
 		}
-		if firstErr == nil {
-			firstErr = err
-		}
+		errs.Errors = append(errs.Errors, err)
 	}
-	return nil, fmt.Errorf("failed to decode base-64 string %q: %w", str, firstErr)
+
+	err := ErrorOrNil(errs)
+	return nil, Base64DecodeError{Input: str, Err: err}
 }
+
+// type Base64DecodeError {{{
+
+// Base64DecodeError represents failure to convert a base-64 string to []byte.
+type Base64DecodeError struct {
+	Input string
+	Err   error
+}
+
+// Error fulfills the error interface.
+func (err Base64DecodeError) Error() string {
+	input := err.Input
+	if len(input) > 40 {
+		input = input[:37] + "..."
+	}
+	return fmt.Sprintf("failed to decode base-64 string %q: %v", input, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err Base64DecodeError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = Base64DecodeError{}
+
+// }}}

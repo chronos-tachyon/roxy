@@ -11,6 +11,7 @@ import (
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // Interface is the minimum interface supported by all advertisement formats.
@@ -58,9 +59,6 @@ func (r *Roxy) NamedPorts() []string {
 
 // PrimaryAddr returns the server's primary endpoint as a TCPAddr.
 func (r *Roxy) PrimaryAddr() *net.TCPAddr {
-	if !r.IsAlive() {
-		return nil
-	}
 	return &net.TCPAddr{
 		IP:   r.IP,
 		Port: int(r.PrimaryPort),
@@ -73,12 +71,9 @@ func (r *Roxy) NamedAddr(namedPort string) *net.TCPAddr {
 	if namedPort == "" {
 		return r.PrimaryAddr()
 	}
-	if !r.IsAlive() {
-		return nil
-	}
 	port, ok := r.AdditionalPorts[namedPort]
 	if !ok {
-		panic(fmt.Errorf("unknown named port %q", namedPort))
+		panic(roxyutil.PortError{Type: roxyutil.NamedPort, Port: namedPort, Err: roxyutil.ErrNotExist})
 	}
 	return &net.TCPAddr{
 		IP:   r.IP,
@@ -98,7 +93,7 @@ func (r *Roxy) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON fulfills json.Unmarshaler.
 func (r *Roxy) UnmarshalJSON(raw []byte) error {
 	if raw == nil {
-		panic(errors.New("raw is nil"))
+		panic(errors.New("[]byte is nil"))
 	}
 
 	if bytes.Equal(raw, constants.NullBytes) {
@@ -323,10 +318,10 @@ func (r *Roxy) FromServerSet(ss *ServerSet) error {
 			return err
 		}
 		if !tcpAddr.IP.Equal(tcpAddr2.IP) {
-			return fmt.Errorf("ServerSet with multiple IP addresses not supported: %s vs %s", tcpAddr.IP, tcpAddr2.IP)
+			return ConflictingAddressesError{A: tcpAddr.IP, B: tcpAddr2.IP}
 		}
 		if tcpAddr.Zone != tcpAddr2.Zone {
-			return fmt.Errorf("ServerSet with multiple IPv6 zones not supported: %q vs %q", tcpAddr.Zone, tcpAddr2.Zone)
+			return ConflictingZonesError{A: tcpAddr.Zone, B: tcpAddr2.Zone}
 		}
 		r.AdditionalPorts[namedPort] = uint16(tcpAddr2.Port)
 	}

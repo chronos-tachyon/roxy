@@ -3,7 +3,7 @@ package balancedclient
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
+	"errors"
 	"net"
 	"net/http"
 	"time"
@@ -19,7 +19,7 @@ func New(
 	tlsConfig *tls.Config,
 ) (*BalancedClient, error) {
 	if res == nil {
-		panic(fmt.Errorf("Resolver is nil"))
+		panic(errors.New("roxyresolver.Resolver is nil"))
 	}
 
 	if dialer == nil {

@@ -146,41 +146,62 @@ func (cfg *TLSClientConfig) Parse(str string) error {
 	cfg.Enabled = true
 
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "verify="):
-			value, err = misc.ParseBool(item[7:])
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
+
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
+
+		switch optName {
+		case optionVerify:
+			value, err = misc.ParseBool(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 			cfg.SkipVerify = !value
 
-		case strings.HasPrefix(item, "verifyServerName="):
-			value, err = misc.ParseBool(item[17:])
+		case optionVerifyServerName:
+			value, err = misc.ParseBool(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 			cfg.SkipVerifyServerName = !value
 
-		case strings.HasPrefix(item, "ca="):
-			cfg.RootCA = item[3:]
+		case optionCA:
+			fallthrough
+		case optionServerCA:
+			cfg.RootCA = optValue
 
-		case strings.HasPrefix(item, "serverName="):
-			cfg.ServerName = item[11:]
+		case optionSN:
+			fallthrough
+		case optionServerName:
+			cfg.ServerName = optValue
 
-		case strings.HasPrefix(item, "commonName="):
-			cfg.CommonName = item[11:]
+		case optionCN:
+			fallthrough
+		case optionCommonName:
+			cfg.CommonName = optValue
 
-		case strings.HasPrefix(item, "cn="):
-			cfg.CommonName = item[3:]
+		case optionCert:
+			fallthrough
+		case optionClientCert:
+			cfg.ClientCert = optValue
 
-		case strings.HasPrefix(item, "clientCert="):
-			cfg.ClientCert = item[11:]
-
-		case strings.HasPrefix(item, "clientKey="):
-			cfg.ClientKey = item[10:]
+		case optionKey:
+			fallthrough
+		case optionClientKey:
+			cfg.ClientKey = optValue
 
 		default:
-			return fmt.Errorf("unknown option %q", item)
+			optErr.Err = UnknownOptionError{}
+			return optErr
 		}
 	}
 
@@ -321,7 +342,7 @@ func (cfg TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 	} else if cfg.RootCA == "" {
 		roots, err := x509.SystemCertPool()
 		if err != nil {
-			return nil, fmt.Errorf("failed to load system certificate pool: %w", err)
+			return nil, CertPoolError{Err: err}
 		}
 
 		out.RootCAs = roots
@@ -330,12 +351,12 @@ func (cfg TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 
 		raw, err := ioutil.ReadFile(cfg.RootCA)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file %q: %w", cfg.RootCA, err)
+			return nil, CertPoolError{Path: cfg.RootCA, Err: err}
 		}
 
 		ok := roots.AppendCertsFromPEM(raw)
 		if !ok {
-			return nil, fmt.Errorf("failed to process certificates from PEM file %q", cfg.RootCA)
+			return nil, CertPoolError{Path: cfg.RootCA, Err: ErrOperationFailed}
 		}
 
 		out.RootCAs = roots
@@ -395,7 +416,7 @@ func (cfg TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 		out.Certificates = make([]tls.Certificate, 1)
 		out.Certificates[0], err = tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load X.509 keypair from cert=%q key=%q: %w", certPath, keyPath, err)
+			return nil, CertKeyError{CertPath: certPath, KeyPath: keyPath, Err: err}
 		}
 	}
 

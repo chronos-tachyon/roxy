@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"strings"
 
@@ -106,18 +105,33 @@ func (cfg *ListenConfig) Parse(str string) error {
 	cfg.Address = pieces[0]
 
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "net="):
-			cfg.Network = item[4:]
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
 
-		case strings.HasPrefix(item, "tls="):
-			err = cfg.TLS.Parse(item[4:])
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
+
+		switch optName {
+		case optionNet:
+			fallthrough
+		case optionNetwork:
+			cfg.Network = optValue
+
+		case optionTLS:
+			err = cfg.TLS.Parse(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
 		default:
-			return fmt.Errorf("unknown option %q", item)
+			optErr.Err = UnknownOptionError{}
+			return optErr
 		}
 	}
 
@@ -209,7 +223,11 @@ func (cfg *ListenConfig) PostProcess() error {
 	}
 
 	if cfg.Address == "" {
-		return fmt.Errorf("invalid address %q: %w", cfg.Address, roxyutil.ErrExpectNonEmpty)
+		return roxyutil.StructFieldError{
+			Field: "ListenConfig.Address",
+			Value: cfg.Address,
+			Err:   roxyutil.ErrExpectNonEmpty,
+		}
 	}
 
 	maybeUnix := (cfg.Network == constants.NetEmpty) || constants.IsNetUnix(cfg.Network)

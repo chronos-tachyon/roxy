@@ -7,6 +7,8 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
+// LookupCache is a thread-safe cache that remembers the results of OS user and
+// group lookups.
 type LookupCache struct {
 	mu          sync.Mutex
 	userByID    map[uint32]*userCacheEntry
@@ -29,6 +31,7 @@ type groupCacheEntry struct {
 	ready bool
 }
 
+// UserByID is a cached wrapper of "os/user".LookupId.
 func (cache *LookupCache) UserByID(uid uint32) (*user.User, error) {
 	cache.mu.Lock()
 	if cache.userByID == nil {
@@ -55,6 +58,7 @@ func (cache *LookupCache) UserByID(uid uint32) (*user.User, error) {
 	return entry.u, entry.err
 }
 
+// UserByName is a cached wrapper of "os/user".Lookup.
 func (cache *LookupCache) UserByName(userName string) (*user.User, error) {
 	cache.mu.Lock()
 	if cache.userByName == nil {
@@ -81,6 +85,7 @@ func (cache *LookupCache) UserByName(userName string) (*user.User, error) {
 	return entry.u, entry.err
 }
 
+// GroupByID is a cached wrapper of "os/user".LookupGroupId.
 func (cache *LookupCache) GroupByID(gid uint32) (*user.Group, error) {
 	cache.mu.Lock()
 	if cache.groupByID == nil {
@@ -107,6 +112,7 @@ func (cache *LookupCache) GroupByID(gid uint32) (*user.Group, error) {
 	return entry.g, entry.err
 }
 
+// GroupByName is a cached wrapper of "os/user".LookupGroup.
 func (cache *LookupCache) GroupByName(groupName string) (*user.Group, error) {
 	cache.mu.Lock()
 	if cache.groupByName == nil {

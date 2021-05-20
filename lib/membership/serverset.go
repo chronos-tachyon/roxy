@@ -1,16 +1,13 @@
 package membership
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"sort"
-	"strings"
 
-	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // type ServerSet {{{
@@ -51,9 +48,6 @@ func (ss *ServerSet) NamedPorts() []string {
 
 // PrimaryAddr returns the server's primary endpoint as a TCPAddr.
 func (ss *ServerSet) PrimaryAddr() *net.TCPAddr {
-	if !ss.IsAlive() {
-		return nil
-	}
 	return ss.ServiceEndpoint.Addr()
 }
 
@@ -62,12 +56,9 @@ func (ss *ServerSet) NamedAddr(namedPort string) *net.TCPAddr {
 	if namedPort == "" {
 		return ss.PrimaryAddr()
 	}
-	if !ss.IsAlive() {
-		return nil
-	}
 	endpoint := ss.AdditionalEndpoints[namedPort]
 	if endpoint == nil {
-		panic(fmt.Errorf("unknown named port %q", namedPort))
+		panic(roxyutil.PortError{Type: roxyutil.NamedPort, Port: namedPort, Err: roxyutil.ErrNotExist})
 	}
 	return endpoint.Addr()
 }
@@ -116,99 +107,66 @@ const (
 	StatusWarning
 )
 
-var serversetStatusData = []enumData{
-	{"StatusDead", "DEAD"},
-	{"StatusStarting", "STARTING"},
-	{"StatusAlive", "ALIVE"},
-	{"StatusStopping", "STOPPING"},
-	{"StatusStopped", "STOPPED"},
-	{"StatusWarning", "WARNING"},
-}
-
-var serversetStatusJSON = []enumJSON{
-	{uint(StatusDead), []byte(`"DEAD"`)},
-	{uint(StatusStarting), []byte(`"STARTING"`)},
-	{uint(StatusAlive), []byte(`"ALIVE"`)},
-	{uint(StatusStopping), []byte(`"STOPPING"`)},
-	{uint(StatusStopped), []byte(`"STOPPED"`)},
-	{uint(StatusWarning), []byte(`"WARNING"`)},
-	{uint(StatusDead), []byte(`"dead"`)},
-	{uint(StatusStarting), []byte(`"starting"`)},
-	{uint(StatusAlive), []byte(`"alive"`)},
-	{uint(StatusStopping), []byte(`"stopping"`)},
-	{uint(StatusStopped), []byte(`"stopped"`)},
-	{uint(StatusWarning), []byte(`"warning"`)},
-	{uint(StatusDead), []byte("0")},
-	{uint(StatusStarting), []byte("1")},
-	{uint(StatusAlive), []byte("2")},
-	{uint(StatusStopping), []byte("3")},
-	{uint(StatusStopped), []byte("4")},
-	{uint(StatusWarning), []byte("5")},
+var serverSetStatusData = []roxyutil.EnumData{
+	{
+		GoName: "StatusDead",
+		Name:   "DEAD",
+		JSON:   []byte(`"DEAD"`),
+	},
+	{
+		GoName: "StatusStarting",
+		Name:   "STARTING",
+		JSON:   []byte(`"STARTING"`),
+	},
+	{
+		GoName: "StatusAlive",
+		Name:   "ALIVE",
+		JSON:   []byte(`"ALIVE"`),
+	},
+	{
+		GoName: "StatusStopping",
+		Name:   "STOPPING",
+		JSON:   []byte(`"STOPPING"`),
+	},
+	{
+		GoName: "StatusStopped",
+		Name:   "STOPPED",
+		JSON:   []byte(`"STOPPED"`),
+	},
+	{
+		GoName: "StatusWarning",
+		Name:   "WARNING",
+		JSON:   []byte(`"WARNING"`),
+	},
 }
 
 // GoString fulfills fmt.GoStringer.
 func (status ServerSetStatus) GoString() string {
-	if uint(status) >= uint(len(serversetStatusData)) {
-		panic(fmt.Errorf("invalid ServerSetStatus value %d", uint(status)))
-	}
-	return serversetStatusData[status].GoName
+	return roxyutil.DereferenceEnumData("ServerSetStatus", serverSetStatusData, uint(status)).GoName
 }
 
 // String fulfills fmt.Stringer.
 func (status ServerSetStatus) String() string {
-	if uint(status) >= uint(len(serversetStatusData)) {
-		panic(fmt.Errorf("invalid ServerSetStatus value %d", uint(status)))
-	}
-	return serversetStatusData[status].Name
+	return roxyutil.DereferenceEnumData("ServerSetStatus", serverSetStatusData, uint(status)).Name
 }
 
 // MarshalJSON fulfills json.Marshaler.
 func (status ServerSetStatus) MarshalJSON() ([]byte, error) {
-	return json.Marshal(status.String())
+	return roxyutil.MarshalEnumToJSON("ServerSetStatus", serverSetStatusData, uint(status))
 }
 
 // UnmarshalJSON fulfills json.Unmarshaler.
 func (status *ServerSetStatus) UnmarshalJSON(raw []byte) error {
-	if raw == nil {
-		panic(errors.New("raw is nil"))
-	}
-
-	if bytes.Equal(raw, constants.NullBytes) {
+	value, err := roxyutil.UnmarshalEnumFromJSON("ServerSetStatus", serverSetStatusData, raw)
+	if err == nil {
+		*status = ServerSetStatus(value)
 		return nil
 	}
-
-	*status = ^ServerSetStatus(0)
-
-	for _, row := range serversetStatusJSON {
-		if bytes.Equal(raw, row.bytes) {
-			*status = ServerSetStatus(row.index)
-			return nil
-		}
+	if err == roxyutil.ErrIsNull {
+		return nil
 	}
-
-	var str string
-	err0 := json.Unmarshal(raw, &str)
-	if err0 == nil {
-		for index, data := range serversetStatusData {
-			if strings.EqualFold(str, data.Name) || strings.EqualFold(str, data.GoName) {
-				*status = ServerSetStatus(index)
-				return nil
-			}
-		}
-		return fmt.Errorf("invalid ServerSetStatus value %q", str)
-	}
-
-	var num uint8
-	err1 := json.Unmarshal(raw, &num)
-	if err1 == nil {
-		if uint(num) < uint(len(serversetStatusData)) {
-			*status = ServerSetStatus(num)
-			return nil
-		}
-		return fmt.Errorf("invalid ServerSetStatus value %d", num)
-	}
-
-	return err0
+	*status = 0
+	return err
 
 }
 

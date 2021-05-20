@@ -2,6 +2,8 @@ package enums
 
 import (
 	"fmt"
+
+	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
 
 // type DigestType {{{
@@ -23,24 +25,29 @@ const (
 	DigestSHA256
 )
 
-var digestTypeData = []enumData{
-	{"DigestMD5", "md5"},
-	{"DigestSHA1", "sha1"},
-	{"DigestSHA256", "sha256"},
+var digestTypeData = []roxyutil.EnumData{
+	{
+		GoName: "DigestMD5",
+		Name:   "md5",
+	},
+	{
+		GoName: "DigestSHA1",
+		Name:   "sha1",
+	},
+	{
+		GoName: "DigestSHA256",
+		Name:   "sha256",
+	},
 }
 
 // GoString returns the Go constant name.
 func (t DigestType) GoString() string {
-	if uint(t) >= uint(len(digestTypeData)) {
-		return fmt.Sprintf("DigestType(%d)", uint(t))
-	}
-	return digestTypeData[t].GoName
+	return roxyutil.DereferenceEnumData("DigestType", digestTypeData, uint(t)).GoName
 }
 
 // String returns the HTTP "Digest" algorithm name.
 func (t DigestType) String() string {
-	// out of range => intentional panic
-	return digestTypeData[t].Name
+	return roxyutil.DereferenceEnumData("DigestType", digestTypeData, uint(t)).Name
 }
 
 var _ fmt.GoStringer = DigestType(0)

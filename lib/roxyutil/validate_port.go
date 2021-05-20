@@ -5,12 +5,14 @@ package roxyutil
 func ValidateNamedPort(str string) error {
 	if str == "" {
 		return PortError{
+			Type: NamedPort,
 			Port: str,
 			Err:  ErrExpectNonEmpty,
 		}
 	}
 	if !reSSPort.MatchString(str) {
 		return PortError{
+			Type: NamedPort,
 			Port: str,
 			Err: RegexpMatchError{
 				Input:   str,

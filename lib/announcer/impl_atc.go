@@ -3,7 +3,6 @@ package announcer
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	multierror "github.com/hashicorp/go-multierror"
@@ -67,9 +66,6 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 	checkAnnounce(impl.state)
 
 	tcpAddr := r.NamedAddr(impl.namedPort)
-	if tcpAddr == nil {
-		return fmt.Errorf("unknown port name %q", impl.namedPort)
-	}
 
 	cancelFn, errCh, err := impl.client.ServerAnnounce(
 		ctx,

@@ -108,7 +108,9 @@ func balanceImpl(bal BalancerType, err error, resolved []Resolved, rng *rand.Ran
 		}
 
 	default:
-		panic(fmt.Errorf("%#v not implemented", bal))
+		panic(roxyutil.CheckError{
+			Message: fmt.Sprintf("%#v not implemented", bal),
+		})
 	}
 
 	return Resolved{}, err

@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -188,28 +187,42 @@ func (cfg *ZKConfig) Parse(str string) error {
 	}
 
 	for _, item := range pieces[1:] {
-		switch {
-		case strings.HasPrefix(item, "sessionTimeout="):
-			cfg.SessionTimeout, err = time.ParseDuration(item[15:])
+		optName, optValue, optComplete, err := splitOption(item)
+		if err != nil {
+			return err
+		}
+
+		optErr := OptionError{
+			Name:     optName,
+			Value:    optValue,
+			Complete: optComplete,
+		}
+
+		switch optName {
+		case optionSessionTimeout:
+			cfg.SessionTimeout, err = time.ParseDuration(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "authtype="):
+		case optionAuthType:
 			cfg.Auth.Enabled = true
-			cfg.Auth.Scheme = item[9:]
+			cfg.Auth.Scheme = optValue
 
-		case strings.HasPrefix(item, "authdata="):
+		case optionAuthData:
 			cfg.Auth.Enabled = true
-			cfg.Auth.Raw, err = misc.TryBase64DecodeString(item[9:])
+			cfg.Auth.Raw, err = misc.TryBase64DecodeString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 
-		case strings.HasPrefix(item, "username="):
-			expanded, err := roxyutil.ExpandString(item[9:])
+		case optionUsername:
+			expanded, err := roxyutil.ExpandString(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 			cfg.Auth.Enabled = true
 			if cfg.Auth.Scheme == "" {
@@ -217,16 +230,18 @@ func (cfg *ZKConfig) Parse(str string) error {
 			}
 			cfg.Auth.Username = expanded
 
-		case strings.HasPrefix(item, "password="):
-			expanded, err := roxyutil.ExpandPassword(item[9:])
+		case optionPassword:
+			expanded, err := roxyutil.ExpandPassword(optValue)
 			if err != nil {
-				return err
+				optErr.Err = err
+				return optErr
 			}
 			cfg.Auth.Enabled = true
 			cfg.Auth.Password = expanded
 
 		default:
-			return fmt.Errorf("unknown option %q", item)
+			optErr.Err = UnknownOptionError{}
+			return optErr
 		}
 	}
 
@@ -377,18 +392,31 @@ func (cfg *ZKConfig) PostProcess() error {
 	}
 
 	if len(cfg.Servers) == 0 {
-		return errors.New("len(ZKConfig.Servers) == 0")
+		return roxyutil.StructFieldError{
+			Field: "ZKConfig.Servers",
+			Value: cfg.Servers,
+			Err:   roxyutil.ErrExpectNonEmptyList,
+		}
 	}
 
 	for index := range cfg.Servers {
 		server := cfg.Servers[index]
+
+		idxErr := roxyutil.ListIndexError{
+			List:  "ZKConfig.Servers",
+			Index: uint(index),
+			Value: server,
+		}
+
 		if server == "" {
-			return fmt.Errorf("ZKConfig.Servers[%d] == %q", index, server)
+			idxErr.Err = roxyutil.ErrExpectNonEmpty
+			return idxErr
 		}
 
 		host, port, err := misc.SplitHostPort(server, constants.PortZK)
 		if err != nil {
-			return err
+			idxErr.Err = err
+			return idxErr
 		}
 
 		cfg.Servers[index] = net.JoinHostPort(host, port)
@@ -462,7 +490,7 @@ func (cfg ZKConfig) Connect(ctx context.Context) (*zk.Conn, error) {
 		err = zkconn.AddAuth(cfg.Auth.Scheme, authRaw)
 		if err != nil {
 			zkconn.Close()
-			return nil, fmt.Errorf("failed to (*zk.Conn).AddAuth with scheme=%q: %w", cfg.Auth.Scheme, err)
+			return nil, ZKAddAuthError{AuthScheme: cfg.Auth.Scheme, Err: err}
 		}
 	}
 
