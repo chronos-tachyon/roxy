@@ -131,7 +131,6 @@ func (cfg *TLSServerConfig) Parse(str string) error {
 
 	cfg.Enabled = true
 
-	sawAllow := false
 	for _, item := range pieces[1:] {
 		optName, optValue, optComplete, err := splitOption(item)
 		if err != nil {
@@ -169,7 +168,6 @@ func (cfg *TLSServerConfig) Parse(str string) error {
 			cfg.ClientCA = optValue
 
 		case optionAllow:
-			sawAllow = true
 			err = cfg.AllowedNames.Parse(optValue)
 			if err != nil {
 				optErr.Err = err
@@ -180,10 +178,6 @@ func (cfg *TLSServerConfig) Parse(str string) error {
 			optErr.Err = UnknownOptionError{}
 			return optErr
 		}
-	}
-
-	if cfg.MutualTLS && !sawAllow {
-		_ = cfg.AllowedNames.Parse(certnames.ANY)
 	}
 
 	err = cfg.PostProcess()

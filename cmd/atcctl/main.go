@@ -49,7 +49,8 @@ const helpText = `atcctl [<flags>] <cmd> [<args>...]
 Commands available:
 	help
 	ping
-	reload
+	reload <rev>
+	flip
 	shutdown
 	healthcheck <subsystem>
 	set-health <subsystem> <value>
@@ -97,6 +98,8 @@ func main() {
 
 	expectedNArgs := 1
 	switch cmd {
+	case "reload":
+		expectedNArgs = 2
 	case "healthcheck":
 		expectedNArgs = 2
 	case "set-health":
@@ -167,11 +170,28 @@ func main() {
 		}
 
 	case "reload":
-		_, err := admin.Reload(ctx, &roxy_v0.ReloadRequest{})
+		rev, err := strconv.ParseInt(getopt.Arg(1), 10, 64)
+		if err != nil {
+			log.Logger.Fatal().
+				Str("input", getopt.Arg(1)).
+				Err(err).
+				Msg("invalid revision")
+		}
+		_, err = admin.Reload(ctx, &roxy_v0.ReloadRequest{Rev: rev})
 		if err != nil {
 			log.Logger.Fatal().
 				Str("rpcService", "roxy.v0.Admin").
 				Str("rpcMethod", "Reload").
+				Err(err).
+				Msg("RPC failed")
+		}
+
+	case "flip":
+		_, err := admin.Flip(ctx, &roxy_v0.FlipRequest{})
+		if err != nil {
+			log.Logger.Fatal().
+				Str("rpcService", "roxy.v0.Admin").
+				Str("rpcMethod", "Flip").
 				Err(err).
 				Msg("RPC failed")
 		}

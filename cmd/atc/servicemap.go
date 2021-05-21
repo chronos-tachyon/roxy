@@ -33,13 +33,13 @@ type ServiceData struct {
 	AvgDemandedCPQ             float64
 }
 
-func NewServiceMap(file MainFile) (*ServiceMap, error) {
+func NewServiceMap(file ServicesFile) (*ServiceMap, error) {
 	sm := &ServiceMap{
-		list:   make(ServiceNameList, 0, len(file.Services)),
-		byName: make(map[ServiceName]*ServiceData, len(file.Services)),
+		list:   make(ServiceNameList, 0, len(file)),
+		byName: make(map[ServiceName]*ServiceData, len(file)),
 	}
 
-	for name, config := range file.Services {
+	for name, config := range file {
 		err := roxyutil.ValidateATCServiceName(name)
 		if err != nil {
 			return nil, err

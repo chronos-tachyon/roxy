@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"sync"
 
+	"github.com/go-zookeeper/zk"
 	multierror "github.com/hashicorp/go-multierror"
 	v3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
@@ -21,9 +21,9 @@ import (
 const MaxNumATCs = uint(1 << 16)
 
 type Ref struct {
-	rootPath string
-	selfAddr *net.TCPAddr
-	etcd     *v3.Client
+	cfg    *GlobalConfigFile
+	zkConn *zk.Conn
+	etcd   *v3.Client
 
 	mu          sync.Mutex
 	cv          *sync.Cond
@@ -42,14 +42,16 @@ type PeerConnData struct {
 type Impl struct {
 	ref *Ref
 
-	cfgRoot RootFile
-	cfgMain MainFile
-	cfgCost CostFile
+	cfgPeers    PeersFile
+	cfgServices ServicesFile
+	cfgCost     CostFile
 
 	peerList   []*PeerData
 	peerMap    map[*net.TCPAddr]*PeerData
 	serviceMap *ServiceMap
 	costMap    *CostMap
+	selfIndex  uint
+	selfPeer   bool
 }
 
 type PeerData struct {
@@ -68,29 +70,23 @@ type SplitKey struct {
 	ShardID     ShardID
 }
 
-func (ref *Ref) Init(rootPath string, selfAddr *net.TCPAddr, etcd *v3.Client) {
-	selfAddr = misc.CanonicalizeTCPAddr(selfAddr)
-
-	if etcd == nil {
-		panic(errors.New("*v3.Client is nil"))
+func (ref *Ref) Init(file *GlobalConfigFile, zkConn *zk.Conn, etcd *v3.Client) {
+	if file == nil {
+		panic(errors.New("*GlobalConfigFile is nil"))
 	}
 
-	ref.rootPath = rootPath
-	ref.selfAddr = selfAddr
+	ref.cfg = file
+	ref.zkConn = zkConn
 	ref.etcd = etcd
 	ref.cv = sync.NewCond(&ref.mu)
 	ref.peerConnMap = make(map[*net.TCPAddr]*PeerConnData, 4)
-	ref.peerConnMap[selfAddr] = nil
+	ref.peerConnMap[ref.cfg.GRPCAddr] = nil
 	ref.sendDone = true
 	ref.recvDone = true
 }
 
-func (ref *Ref) RootConfigFilePath() string {
-	return ref.rootPath
-}
-
-func (ref *Ref) SelfAddr() *net.TCPAddr {
-	return ref.selfAddr
+func (ref *Ref) GlobalConfigFile() *GlobalConfigFile {
+	return ref.cfg
 }
 
 func (ref *Ref) Get() *Impl {
@@ -100,18 +96,10 @@ func (ref *Ref) Get() *Impl {
 	return impl
 }
 
-func (ref *Ref) Load(ctx context.Context) error {
-	next, err := ref.doLoadImpl(ctx)
+func (ref *Ref) Load(ctx context.Context, rev int64) error {
+	next, err := ref.loadImpl(ctx, rev)
 	if err != nil {
 		return err
-	}
-	ref.Prepare(next)
-	return nil
-}
-
-func (ref *Ref) Prepare(next *Impl) {
-	if next == nil {
-		panic(errors.New("*Impl is nil"))
 	}
 
 	ref.mu.Lock()
@@ -122,16 +110,18 @@ func (ref *Ref) Prepare(next *Impl) {
 	go ref.prepareThreadSend()
 	go ref.prepareThreadRecv()
 	ref.mu.Unlock()
+
+	return nil
 }
 
-func (ref *Ref) Flip() (prev *Impl) {
+func (ref *Ref) Flip() {
 	ref.mu.Lock()
 	ref.lockedAwaitReadyToFlip()
-	prev = ref.live
-	ref.live = ref.next
-	ref.next = nil
+	if ref.next != nil {
+		ref.live = ref.next
+		ref.next = nil
+	}
 	ref.mu.Unlock()
-	return prev
 }
 
 func (ref *Ref) TakeClientConn(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientConn, error) {
@@ -241,22 +231,36 @@ func (ref *Ref) lockedAwaitReadyToFlip() {
 	}
 }
 
-func (ref *Ref) doLoadImpl(ctx context.Context) (*Impl, error) {
-	impl := new(Impl)
+func (ref *Ref) loadImpl(ctx context.Context, rev int64) (*Impl, error) {
+	impl := &Impl{ref: ref}
 
-	impl.ref = ref
-
-	err := impl.doLoadRootFile()
+	var err error
+	impl.cfgPeers, err = ref.cfg.LoadPeersFile(ctx, ref.zkConn, ref.etcd, rev)
 	if err != nil {
 		return nil, err
 	}
 
-	err = impl.doLoadMainFile()
+	impl.cfgServices, err = ref.cfg.LoadServicesFile(ctx, ref.zkConn, ref.etcd, rev)
 	if err != nil {
 		return nil, err
 	}
 
-	err = impl.doLoadCostFile()
+	impl.cfgCost, err = ref.cfg.LoadCostFile(ctx, ref.zkConn, ref.etcd, rev)
+	if err != nil {
+		return nil, err
+	}
+
+	impl.selfPeer, impl.selfIndex, err = impl.processPeersFile()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.processServicesFile()
+	if err != nil {
+		return nil, err
+	}
+
+	err = impl.processCostFile()
 	if err != nil {
 		return nil, err
 	}
@@ -309,63 +313,34 @@ func (impl *Impl) CostMap() *CostMap {
 	return impl.costMap
 }
 
-func (impl *Impl) doLoadRootFile() error {
-	raw, err := ioutil.ReadFile(impl.ref.rootPath)
-	if err != nil {
-		return err
+func (impl *Impl) processPeersFile() (bool, uint, error) {
+	length := uint(len(impl.cfgPeers))
+
+	if length == 0 {
+		return false, 0, fmt.Errorf("not enough ATC servers: got 0, min 1")
 	}
 
-	err = misc.StrictUnmarshalJSON(raw, &impl.cfgRoot)
-	if err != nil {
-		return err
+	if length > MaxNumATCs {
+		return false, 0, fmt.Errorf("too many ATC servers: got %d, max %d", length, MaxNumATCs)
 	}
 
-	if impl.cfgRoot.MainFile == "" {
-		impl.cfgRoot.MainFile = "/etc/opt/atc/main.json"
-	}
-	if impl.cfgRoot.CostFile == "" {
-		impl.cfgRoot.CostFile = "/etc/opt/atc/cost.json"
-	}
-
-	return nil
-}
-
-func (impl *Impl) doLoadMainFile() error {
-	raw, err := ioutil.ReadFile(impl.cfgRoot.MainFile)
-	if err != nil {
-		return err
-	}
-
-	err = misc.StrictUnmarshalJSON(raw, &impl.cfgMain)
-	if err != nil {
-		return err
-	}
-
-	atcLength := uint(len(impl.cfgMain.Servers))
-	if atcLength > MaxNumATCs {
-		return fmt.Errorf("too many ATC servers: got %d, max %d", atcLength, MaxNumATCs)
-	}
-
-	impl.serviceMap, err = NewServiceMap(impl.cfgMain)
-	if err != nil {
-		return err
-	}
-
-	impl.peerList = make([]*PeerData, atcLength)
-	impl.peerMap = make(map[*net.TCPAddr]*PeerData, atcLength)
-	foundMatch := false
-	for index := uint(0); index < atcLength; index++ {
-		str := impl.cfgMain.Servers[index]
+	impl.peerList = make([]*PeerData, length)
+	impl.peerMap = make(map[*net.TCPAddr]*PeerData, length)
+	var selfPeer bool
+	var selfIndex uint = length
+	for index := uint(0); index < length; index++ {
+		str := impl.cfgPeers[index]
 
 		tcpAddr, err := misc.ParseTCPAddr(str, constants.PortATC)
 		if err != nil {
-			return err
+			return false, 0, err
 		}
 
 		tcpAddr = misc.CanonicalizeTCPAddr(tcpAddr)
 
-		if tcpAddr == impl.ref.selfAddr {
-			foundMatch = true
+		if tcpAddr == impl.ref.cfg.GRPCAddr {
+			selfPeer = true
+			selfIndex = index
 		}
 
 		data := &PeerData{Index: index, Addr: tcpAddr}
@@ -373,26 +348,27 @@ func (impl *Impl) doLoadMainFile() error {
 		impl.peerList[index] = data
 		impl.peerMap[tcpAddr] = data
 	}
-	if !foundMatch {
-		return fmt.Errorf("our TCP address (%v) is not listed in %q", impl.ref.selfAddr, impl.cfgRoot.MainFile)
+
+	return selfPeer, selfIndex, nil
+}
+
+func (impl *Impl) processServicesFile() error {
+	var err error
+	impl.serviceMap, err = NewServiceMap(impl.cfgServices)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (impl *Impl) doLoadCostFile() error {
-	raw, err := ioutil.ReadFile(impl.cfgRoot.CostFile)
-	if err != nil {
-		return err
-	}
-	err = misc.StrictUnmarshalJSON(raw, &impl.cfgCost)
-	if err != nil {
-		return err
-	}
+func (impl *Impl) processCostFile() error {
+	var err error
 	impl.costMap, err = NewCostMap(impl.cfgCost)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 

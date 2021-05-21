@@ -126,6 +126,7 @@ message Event {
 service Admin {
   rpc Ping (PingRequest) returns (PingResponse) {}
   rpc Reload (ReloadRequest) returns (ReloadResponse) {}
+  rpc Flip (FlipRequest) returns (FlipResponse) {}
   rpc Shutdown (ShutdownRequest) returns (ShutdownResponse) {}
   rpc SetHealth (SetHealthRequest) returns (SetHealthResponse) {}
 }
@@ -133,8 +134,14 @@ service Admin {
 message PingRequest {}
 message PingResponse {}
 
-message ReloadRequest {}
-message ReloadResponse {}
+message ReloadRequest {
+  int64 rev = 1;
+}
+message ReloadResponse {
+}
+
+message FlipRequest {}
+message FlipResponse {}
 
 message ShutdownRequest {}
 message ShutdownResponse {}

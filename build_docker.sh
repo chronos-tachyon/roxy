@@ -9,6 +9,7 @@ export LC_ALL="C"
 export TZ="Etc/UTC"
 
 readonly PACKAGE="chronostachyon/roxy"
+readonly PLATFORM_LIST=( linux/amd64 linux/arm64v8 )
 
 if [ "${RELEASE_MODE:-false}" = "true" ]; then
   FULL_VERSION="$GITHUB_REF"
@@ -30,68 +31,83 @@ else
   TAGS=( "$FULL_VERSION" "devel" )
 fi
 
-OS_ARCH_LIST=( linux/amd64 linux/arm64 )
-
-arch_from_goos_goarch() {
-  local GOOS="$1"
-  local GOARCH="$2"
-  case "${GOOS}/${GOARCH}" in
-    (linux/arm64)
-      echo arm64v8
-      ;;
-    (linux/*)
-      echo "$GOARCH"
-      ;;
-    (*)
-      echo "error: ${GOOS}/${GOARCH} not implemented" >&2
-      exit 1
-      ;;
-  esac
+run() {
+  echo "> $*"
+  "$@" || return $?
 }
 
-build_for_os_arch() {
-  local goos="$1"
-  local goarch="$2"
+build_for_platform() {
+  local platform="$1"
+  local platform_tag="${platform//\//-}"
+  local arch="${platform#*/}"
+  local -i rc=0
 
-  local dockerfile="Dockerfile"
-  local arch="$(arch_from_goos_goarch "$goos" "$goarch")"
+  declare -a args
 
-  declare -a flags
-  flags=(
-    --file="$dockerfile"
-    --build-arg=GOOS="$goos"
-    --build-arg=GOARCH="$goarch"
-    --build-arg=ARCH="$arch"
-    --build-arg=VERSION="$FULL_VERSION"
+  run \
+    docker buildx use "$platform_tag" \
+    || rc=$?
+
+  if [ $rc -ne 0 ]; then
+    run \
+      docker buildx create \
+        --name="$platform_tag" \
+        --driver="docker-container" \
+        --platform="$platform" \
+        --use
+  fi
+
+  args=( \
+    docker \
+    buildx \
+    build \
+    --file="Dockerfile" \
+    --platform="$platform" \
+    --build-arg=VERSION="$FULL_VERSION" \
+    --build-arg=ARCH="$arch" \
   )
   for tag in "${TAGS[@]}"; do
-    flags=( "${flags[@]}" --tag="${PACKAGE}:${arch}-${tag}" )
+    args=( \
+      "${args[@]}" \
+      --tag="${PACKAGE}:${platform_tag}-${tag}" \
+    )
   done
+  args=( \
+    "${args[@]}" \
+    --push \
+    . \
+  )
 
-  echo "> docker build ${flags[*]} ."
-  docker build "${flags[@]}" .
-
-  local tag
-  for tag in "${TAGS[@]}"; do
-    echo "> docker push ${PACKAGE}:${arch}-${tag}"
-    docker push "${PACKAGE}:${arch}-${tag}"
-  done
+  run "${args[@]}"
 }
 
-for OS_ARCH in linux/amd64 linux/arm64; do
-  GOOS="${OS_ARCH%/*}"
-  GOARCH="${OS_ARCH#*/}"
-  build_for_os_arch "$GOOS" "$GOARCH"
+for platform in "${PLATFORM_LIST[@]}"; do
+  build_for_platform "$platform"
 done
 
 for tag in "${TAGS[@]}"; do
-  ARGS=( "${PACKAGE}:${tag}" )
-  for OS_ARCH in linux/amd64 linux/arm64; do
-    GOOS="${OS_ARCH%/*}"
-    GOARCH="${OS_ARCH#*/}"
-    ARCH="$(arch_from_goos_goarch "$GOOS" "$GOARCH")"
-    ARGS=( "${ARGS[@]}" --amend "${PACKAGE}:${ARCH}-${tag}" )
+  run \
+    docker \
+    manifest \
+    rm \
+    "${PACKAGE}:${tag}" \
+    || true
+
+  args=( \
+    docker \
+    manifest \
+    create \
+    "${PACKAGE}:${tag}" \
+  )
+  for platform in "${PLATFORM_LIST[@]}"; do
+    platform_tag="${platform//\//-}"
+    args=( "${args[@]}" "${PACKAGE}:${platform_tag}-${tag}" )
   done
-  docker manifest create "${ARGS[@]}"
-  docker manifest push "${PACKAGE}:${tag}"
+  run "${args[@]}"
+
+  run \
+    docker \
+    manifest \
+    push \
+    "${PACKAGE}:${tag}"
 done

@@ -23,7 +23,7 @@ const ANY = "ANY"
 // CertNames is a set of permitted Subject Distinguished Name and Subject
 // Alternative Name components that a client certificate can match.
 type CertNames struct {
-	permitAll           bool
+	isSet               bool
 	organizations       map[string]struct{}
 	organizationalUnits map[string]struct{}
 	commonNames         map[string]struct{}
@@ -32,12 +32,12 @@ type CertNames struct {
 
 // IsPermitAll returns true if all certificates are permitted.
 func (cns CertNames) IsPermitAll() bool {
-	return cns.permitAll
+	return !cns.isSet
 }
 
 // Check returns true if the given cert matches at least one permitted name.
 func (cns CertNames) Check(cert *x509.Certificate) bool {
-	if cns.permitAll {
+	if !cns.isSet {
 		return true
 	}
 	if cns.organizations != nil {
@@ -85,7 +85,7 @@ func (cns CertNames) Check(cert *x509.Certificate) bool {
 // AppendTo efficiently appends the string representation to the given Builder.
 // See FromList for details about the format.
 func (cns CertNames) AppendTo(out *strings.Builder) {
-	if cns.permitAll {
+	if !cns.isSet {
 		out.WriteString(ANY)
 		return
 	}
@@ -131,7 +131,7 @@ func (cns CertNames) AppendTo(out *strings.Builder) {
 // String returns a colon-delimited list of permitted names, or "ANY" if all
 // certificates are permitted.  See FromList for details about the format.
 func (cns CertNames) String() string {
-	if cns.permitAll {
+	if !cns.isSet {
 		return ANY
 	}
 
@@ -162,7 +162,7 @@ func (cns CertNames) String() string {
 // List returns the list of permitted names, or ["ANY"] if all certificates are
 // permitted.  See FromList for details about the format.
 func (cns CertNames) List() []string {
-	if cns.permitAll {
+	if !cns.isSet {
 		return []string{ANY}
 	}
 
@@ -194,11 +194,11 @@ func (cns CertNames) List() []string {
 // about the format.
 func (cns *CertNames) Parse(str string) error {
 	if str == ANY {
-		*cns = CertNames{permitAll: true}
+		*cns = CertNames{}
 		return nil
 	}
 	if str == "" || str == ":" {
-		*cns = CertNames{}
+		*cns = CertNames{isSet: true}
 		return nil
 	}
 
@@ -225,7 +225,7 @@ func (cns *CertNames) Parse(str string) error {
 //	  a commonName or an emailAddress.
 //
 func (cns *CertNames) FromList(list []string) error {
-	*cns = CertNames{}
+	*cns = CertNames{isSet: true}
 	if len(list) == 0 {
 		return nil
 	}
@@ -241,8 +241,8 @@ func (cns *CertNames) FromList(list []string) error {
 		}
 
 		if item == ANY {
-			cns.permitAll = true
-			continue
+			*cns = CertNames{}
+			return nil
 		}
 
 		var key, value string

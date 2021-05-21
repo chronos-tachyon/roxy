@@ -24,6 +24,7 @@ const (
 const (
 	SchemeHTTP  = "http"
 	SchemeHTTPS = "https"
+	SchemeFile  = "file"
 )
 
 // SchemeEmpty et al are Target schemes.

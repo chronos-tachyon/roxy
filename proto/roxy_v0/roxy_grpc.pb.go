@@ -397,6 +397,7 @@ var AirTrafficControl_ServiceDesc = grpc.ServiceDesc{
 type AdminClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 	Reload(ctx context.Context, in *ReloadRequest, opts ...grpc.CallOption) (*ReloadResponse, error)
+	Flip(ctx context.Context, in *FlipRequest, opts ...grpc.CallOption) (*FlipResponse, error)
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
 	SetHealth(ctx context.Context, in *SetHealthRequest, opts ...grpc.CallOption) (*SetHealthResponse, error)
 }
@@ -427,6 +428,15 @@ func (c *adminClient) Reload(ctx context.Context, in *ReloadRequest, opts ...grp
 	return out, nil
 }
 
+func (c *adminClient) Flip(ctx context.Context, in *FlipRequest, opts ...grpc.CallOption) (*FlipResponse, error) {
+	out := new(FlipResponse)
+	err := c.cc.Invoke(ctx, "/roxy.v0.Admin/Flip", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *adminClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
 	out := new(ShutdownResponse)
 	err := c.cc.Invoke(ctx, "/roxy.v0.Admin/Shutdown", in, out, opts...)
@@ -451,6 +461,7 @@ func (c *adminClient) SetHealth(ctx context.Context, in *SetHealthRequest, opts 
 type AdminServer interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Reload(context.Context, *ReloadRequest) (*ReloadResponse, error)
+	Flip(context.Context, *FlipRequest) (*FlipResponse, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 	SetHealth(context.Context, *SetHealthRequest) (*SetHealthResponse, error)
 	mustEmbedUnimplementedAdminServer()
@@ -465,6 +476,9 @@ func (UnimplementedAdminServer) Ping(context.Context, *PingRequest) (*PingRespon
 }
 func (UnimplementedAdminServer) Reload(context.Context, *ReloadRequest) (*ReloadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Reload not implemented")
+}
+func (UnimplementedAdminServer) Flip(context.Context, *FlipRequest) (*FlipResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Flip not implemented")
 }
 func (UnimplementedAdminServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Shutdown not implemented")
@@ -521,6 +535,24 @@ func _Admin_Reload_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Admin_Flip_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FlipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).Flip(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.v0.Admin/Flip",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).Flip(ctx, req.(*FlipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Admin_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ShutdownRequest)
 	if err := dec(in); err != nil {
@@ -571,6 +603,10 @@ var Admin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Reload",
 			Handler:    _Admin_Reload_Handler,
+		},
+		{
+			MethodName: "Flip",
+			Handler:    _Admin_Flip_Handler,
 		},
 		{
 			MethodName: "Shutdown",

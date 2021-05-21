@@ -1,3 +1,8 @@
+v0.4.8
+  * Overhaul ATC configuration
+  * Overhaul Docker build to use buildx and --platform
+  * Bug fix: CertNames' zero value now defaults to "allow any" mode again
+
 v0.4.7
   * API tweaks for mainutil and roxyresolver.Target
   * Use structured errors in more places

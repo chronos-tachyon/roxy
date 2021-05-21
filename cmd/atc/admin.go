@@ -12,9 +12,11 @@ import (
 
 type AdminServer struct {
 	roxy_v0.UnimplementedAdminServer
+
+	ref *Ref
 }
 
-func (AdminServer) Ping(ctx context.Context, req *roxy_v0.PingRequest) (*roxy_v0.PingResponse, error) {
+func (s AdminServer) Ping(ctx context.Context, req *roxy_v0.PingRequest) (*roxy_v0.PingResponse, error) {
 	log.Logger.Info().
 		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "Ping").
@@ -24,7 +26,7 @@ func (AdminServer) Ping(ctx context.Context, req *roxy_v0.PingRequest) (*roxy_v0
 	return &roxy_v0.PingResponse{}, nil
 }
 
-func (AdminServer) Reload(ctx context.Context, req *roxy_v0.ReloadRequest) (*roxy_v0.ReloadResponse, error) {
+func (s AdminServer) Reload(ctx context.Context, req *roxy_v0.ReloadRequest) (*roxy_v0.ReloadResponse, error) {
 	log.Logger.Info().
 		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "Reload").
@@ -34,10 +36,27 @@ func (AdminServer) Reload(ctx context.Context, req *roxy_v0.ReloadRequest) (*rox
 	if err := gMultiServer.Reload(); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	if err := s.ref.Load(ctx, req.Rev); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
 	return &roxy_v0.ReloadResponse{}, nil
 }
 
-func (AdminServer) Shutdown(ctx context.Context, req *roxy_v0.ShutdownRequest) (*roxy_v0.ShutdownResponse, error) {
+func (s AdminServer) Flip(ctx context.Context, req *roxy_v0.FlipRequest) (*roxy_v0.FlipResponse, error) {
+	log.Logger.Info().
+		Str("rpcService", "roxy.v0.Admin").
+		Str("rpcMethod", "Flip").
+		Str("rpcInterface", "admin").
+		Msg("RPC")
+
+	s.ref.Flip()
+
+	return &roxy_v0.FlipResponse{}, nil
+}
+
+func (s AdminServer) Shutdown(ctx context.Context, req *roxy_v0.ShutdownRequest) (*roxy_v0.ShutdownResponse, error) {
 	log.Logger.Info().
 		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "Shutdown").
@@ -50,7 +69,7 @@ func (AdminServer) Shutdown(ctx context.Context, req *roxy_v0.ShutdownRequest) (
 	return &roxy_v0.ShutdownResponse{}, nil
 }
 
-func (AdminServer) SetHealth(ctx context.Context, req *roxy_v0.SetHealthRequest) (*roxy_v0.SetHealthResponse, error) {
+func (s AdminServer) SetHealth(ctx context.Context, req *roxy_v0.SetHealthRequest) (*roxy_v0.SetHealthResponse, error) {
 	log.Logger.Info().
 		Str("rpcService", "roxy.v0.Admin").
 		Str("rpcMethod", "SetHealth").

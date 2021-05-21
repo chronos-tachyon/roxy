@@ -36,8 +36,14 @@ func ExpandString(in string) (string, error) {
 }
 
 // ExpandPath expands ${ENV_VAR} references, ~ and ~user references, and makes
-// the path absolute.
+// the path absolute (by assuming it is relative to the current directory).
 func ExpandPath(in string) (string, error) {
+	return ExpandPathWithCWD(in, ".")
+}
+
+// ExpandPathWithCWD expands ${ENV_VAR} references, ~ and ~user references, and
+// makes the path absolute (by assuming it is relative to the given cwd).
+func ExpandPathWithCWD(in string, cwd string) (string, error) {
 	var errors []error
 
 	expanded, err := ExpandString(in)
@@ -78,12 +84,18 @@ func ExpandPath(in string) (string, error) {
 	}
 
 	if expanded != "" && expanded[0] != '\x00' && expanded[0] != '@' && !reURLScheme.MatchString(expanded) {
-		abs, err := PathAbs(expanded)
-		if err != nil {
-			errors = append(errors, err)
-			abs = expanded
+		if !filepath.IsAbs(expanded) {
+			expanded = filepath.Join(cwd, expanded)
 		}
-		expanded = filepath.Clean(abs)
+		if !filepath.IsAbs(expanded) {
+			abs, err := PathAbs(expanded)
+			if err != nil {
+				errors = append(errors, err)
+				abs = expanded
+			}
+			expanded = abs
+		}
+		expanded = filepath.Clean(expanded)
 	}
 
 	switch uint(len(errors)) {

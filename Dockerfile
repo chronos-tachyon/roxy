@@ -1,10 +1,10 @@
 # vim:set ft=dockerfile:
-ARG ARCH=amd64
-
-FROM golang:1.16-alpine3.13 AS builder
 ARG VERSION=unset
-ARG GOOS=linux
-ARG GOARCH=amd64
+ARG ARCH
+
+FROM --platform=$BUILDPLATFORM golang:1.16-alpine3.13 AS builder
+ARG VERSION
+ARG TARGETPLATFORM
 RUN ["apk", "add", "--no-cache", "libcap", "ca-certificates"]
 RUN ["/bin/sh", "-c", "update-ca-certificates 2>/dev/null || true"]
 RUN ["/bin/sh", "-c", "echo 'hosts: files dns' > /etc/nsswitch.conf"]
@@ -13,7 +13,12 @@ COPY ./ ./
 RUN set -euo pipefail; \
     umask 022; \
     export LC_ALL=C TZ=Etc/UTC; \
-    export GOPATH=/go GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0; \
+    export GOPATH=/go CGO_ENABLED=0; \
+    case "$TARGETPLATFORM" in \
+      (linux/amd64)   export GOOS=linux GOARCH=amd64 ;; \
+      (linux/arm64v8) export GOOS=linux GOARCH=arm64 ;; \
+      (*) echo "error: unknown platform $TARGETPLATFORM" >&1; exit 1;; \
+    esac; \
     if [ "${VERSION}" = "unset" ]; then \
       cat .version > lib/mainutil/version.txt; \
     else \
@@ -42,12 +47,15 @@ RUN set -euo pipefail; \
     cp /build/dist/roxy.mime.json /opt/roxy/share/misc/roxy.mime.json.example; \
     cp /build/dist/roxy.mime.json /etc/opt/roxy/mime.json.example; \
     cp /build/dist/roxy.mime.json /etc/opt/roxy/mime.json; \
-    cp /build/dist/atc.config.json /opt/roxy/share/misc/atc.config.json.example; \
-    cp /build/dist/atc.config.json /etc/opt/atc/config.json.example; \
-    cp /build/dist/atc.config.json /etc/opt/atc/config.json; \
-    cp /build/dist/atc.main.json /opt/roxy/share/misc/atc.main.json.example; \
-    cp /build/dist/atc.main.json /etc/opt/atc/main.json.example; \
-    cp /build/dist/atc.main.json /etc/opt/atc/main.json; \
+    cp /build/dist/atc.global.json /opt/roxy/share/misc/atc.global.json.example; \
+    cp /build/dist/atc.global.json /etc/opt/atc/global.json.example; \
+    cp /build/dist/atc.global.json /etc/opt/atc/global.json; \
+    cp /build/dist/atc.peers.json /opt/roxy/share/misc/atc.peers.json.example; \
+    cp /build/dist/atc.peers.json /etc/opt/atc/peers.json.example; \
+    cp /build/dist/atc.peers.json /etc/opt/atc/peers.json; \
+    cp /build/dist/atc.services.json /opt/roxy/share/misc/atc.services.json.example; \
+    cp /build/dist/atc.services.json /etc/opt/atc/services.json.example; \
+    cp /build/dist/atc.services.json /etc/opt/atc/services.json; \
     cp /build/dist/atc.cost.json /opt/roxy/share/misc/atc.cost.json.example; \
     cp /build/dist/atc.cost.json /etc/opt/atc/cost.json.example; \
     cp /build/dist/atc.cost.json /etc/opt/atc/cost.json; \
@@ -60,7 +68,7 @@ RUN set -euo pipefail; \
     chmod 0750 /var/opt/roxy/lib /var/opt/roxy/lib/acme /var/opt/roxy/lib/state; \
     chmod 2750 /var/opt/roxy/log
 
-FROM ${ARCH}/alpine:3.13 AS final
+FROM --platform=$TARGETPLATFORM ${ARCH}/alpine:3.13 AS final
 COPY --from=builder /srv/ /srv/
 COPY --from=builder /etc/passwd /etc/group /etc/nsswitch.conf /etc/
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
