@@ -137,9 +137,12 @@ var Web_ServiceDesc = grpc.ServiceDesc{
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AirTrafficControlClient interface {
 	Lookup(ctx context.Context, in *LookupRequest, opts ...grpc.CallOption) (*LookupResponse, error)
+	LookupClients(ctx context.Context, in *LookupClientsRequest, opts ...grpc.CallOption) (*LookupClientsResponse, error)
+	LookupServers(ctx context.Context, in *LookupServersRequest, opts ...grpc.CallOption) (*LookupServersResponse, error)
 	Find(ctx context.Context, in *FindRequest, opts ...grpc.CallOption) (*FindResponse, error)
 	ServerAnnounce(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ServerAnnounceClient, error)
 	ClientAssign(ctx context.Context, opts ...grpc.CallOption) (AirTrafficControl_ClientAssignClient, error)
+	Transfer(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*TransferResponse, error)
 }
 
 type airTrafficControlClient struct {
@@ -153,6 +156,24 @@ func NewAirTrafficControlClient(cc grpc.ClientConnInterface) AirTrafficControlCl
 func (c *airTrafficControlClient) Lookup(ctx context.Context, in *LookupRequest, opts ...grpc.CallOption) (*LookupResponse, error) {
 	out := new(LookupResponse)
 	err := c.cc.Invoke(ctx, "/roxy.v0.AirTrafficControl/Lookup", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *airTrafficControlClient) LookupClients(ctx context.Context, in *LookupClientsRequest, opts ...grpc.CallOption) (*LookupClientsResponse, error) {
+	out := new(LookupClientsResponse)
+	err := c.cc.Invoke(ctx, "/roxy.v0.AirTrafficControl/LookupClients", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *airTrafficControlClient) LookupServers(ctx context.Context, in *LookupServersRequest, opts ...grpc.CallOption) (*LookupServersResponse, error) {
+	out := new(LookupServersResponse)
+	err := c.cc.Invoke(ctx, "/roxy.v0.AirTrafficControl/LookupServers", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -230,14 +251,26 @@ func (x *airTrafficControlClientAssignClient) Recv() (*ClientAssignResponse, err
 	return m, nil
 }
 
+func (c *airTrafficControlClient) Transfer(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*TransferResponse, error) {
+	out := new(TransferResponse)
+	err := c.cc.Invoke(ctx, "/roxy.v0.AirTrafficControl/Transfer", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AirTrafficControlServer is the server API for AirTrafficControl service.
 // All implementations must embed UnimplementedAirTrafficControlServer
 // for forward compatibility
 type AirTrafficControlServer interface {
 	Lookup(context.Context, *LookupRequest) (*LookupResponse, error)
+	LookupClients(context.Context, *LookupClientsRequest) (*LookupClientsResponse, error)
+	LookupServers(context.Context, *LookupServersRequest) (*LookupServersResponse, error)
 	Find(context.Context, *FindRequest) (*FindResponse, error)
 	ServerAnnounce(AirTrafficControl_ServerAnnounceServer) error
 	ClientAssign(AirTrafficControl_ClientAssignServer) error
+	Transfer(context.Context, *TransferRequest) (*TransferResponse, error)
 	mustEmbedUnimplementedAirTrafficControlServer()
 }
 
@@ -248,6 +281,12 @@ type UnimplementedAirTrafficControlServer struct {
 func (UnimplementedAirTrafficControlServer) Lookup(context.Context, *LookupRequest) (*LookupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Lookup not implemented")
 }
+func (UnimplementedAirTrafficControlServer) LookupClients(context.Context, *LookupClientsRequest) (*LookupClientsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LookupClients not implemented")
+}
+func (UnimplementedAirTrafficControlServer) LookupServers(context.Context, *LookupServersRequest) (*LookupServersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LookupServers not implemented")
+}
 func (UnimplementedAirTrafficControlServer) Find(context.Context, *FindRequest) (*FindResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Find not implemented")
 }
@@ -256,6 +295,9 @@ func (UnimplementedAirTrafficControlServer) ServerAnnounce(AirTrafficControl_Ser
 }
 func (UnimplementedAirTrafficControlServer) ClientAssign(AirTrafficControl_ClientAssignServer) error {
 	return status.Errorf(codes.Unimplemented, "method ClientAssign not implemented")
+}
+func (UnimplementedAirTrafficControlServer) Transfer(context.Context, *TransferRequest) (*TransferResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Transfer not implemented")
 }
 func (UnimplementedAirTrafficControlServer) mustEmbedUnimplementedAirTrafficControlServer() {}
 
@@ -284,6 +326,42 @@ func _AirTrafficControl_Lookup_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AirTrafficControlServer).Lookup(ctx, req.(*LookupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AirTrafficControl_LookupClients_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LookupClientsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AirTrafficControlServer).LookupClients(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.v0.AirTrafficControl/LookupClients",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AirTrafficControlServer).LookupClients(ctx, req.(*LookupClientsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AirTrafficControl_LookupServers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LookupServersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AirTrafficControlServer).LookupServers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.v0.AirTrafficControl/LookupServers",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AirTrafficControlServer).LookupServers(ctx, req.(*LookupServersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -358,6 +436,24 @@ func (x *airTrafficControlClientAssignServer) Recv() (*ClientAssignRequest, erro
 	return m, nil
 }
 
+func _AirTrafficControl_Transfer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransferRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AirTrafficControlServer).Transfer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.v0.AirTrafficControl/Transfer",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AirTrafficControlServer).Transfer(ctx, req.(*TransferRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AirTrafficControl_ServiceDesc is the grpc.ServiceDesc for AirTrafficControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -370,8 +466,20 @@ var AirTrafficControl_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AirTrafficControl_Lookup_Handler,
 		},
 		{
+			MethodName: "LookupClients",
+			Handler:    _AirTrafficControl_LookupClients_Handler,
+		},
+		{
+			MethodName: "LookupServers",
+			Handler:    _AirTrafficControl_LookupServers_Handler,
+		},
+		{
 			MethodName: "Find",
 			Handler:    _AirTrafficControl_Find_Handler,
+		},
+		{
+			MethodName: "Transfer",
+			Handler:    _AirTrafficControl_Transfer_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -398,6 +506,7 @@ type AdminClient interface {
 	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 	Reload(ctx context.Context, in *ReloadRequest, opts ...grpc.CallOption) (*ReloadResponse, error)
 	Flip(ctx context.Context, in *FlipRequest, opts ...grpc.CallOption) (*FlipResponse, error)
+	Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error)
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
 	SetHealth(ctx context.Context, in *SetHealthRequest, opts ...grpc.CallOption) (*SetHealthResponse, error)
 }
@@ -437,6 +546,15 @@ func (c *adminClient) Flip(ctx context.Context, in *FlipRequest, opts ...grpc.Ca
 	return out, nil
 }
 
+func (c *adminClient) Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error) {
+	out := new(CommitResponse)
+	err := c.cc.Invoke(ctx, "/roxy.v0.Admin/Commit", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *adminClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
 	out := new(ShutdownResponse)
 	err := c.cc.Invoke(ctx, "/roxy.v0.Admin/Shutdown", in, out, opts...)
@@ -462,6 +580,7 @@ type AdminServer interface {
 	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	Reload(context.Context, *ReloadRequest) (*ReloadResponse, error)
 	Flip(context.Context, *FlipRequest) (*FlipResponse, error)
+	Commit(context.Context, *CommitRequest) (*CommitResponse, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 	SetHealth(context.Context, *SetHealthRequest) (*SetHealthResponse, error)
 	mustEmbedUnimplementedAdminServer()
@@ -479,6 +598,9 @@ func (UnimplementedAdminServer) Reload(context.Context, *ReloadRequest) (*Reload
 }
 func (UnimplementedAdminServer) Flip(context.Context, *FlipRequest) (*FlipResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flip not implemented")
+}
+func (UnimplementedAdminServer) Commit(context.Context, *CommitRequest) (*CommitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Commit not implemented")
 }
 func (UnimplementedAdminServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Shutdown not implemented")
@@ -553,6 +675,24 @@ func _Admin_Flip_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Admin_Commit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).Commit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.v0.Admin/Commit",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).Commit(ctx, req.(*CommitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Admin_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ShutdownRequest)
 	if err := dec(in); err != nil {
@@ -607,6 +747,10 @@ var Admin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Flip",
 			Handler:    _Admin_Flip_Handler,
+		},
+		{
+			MethodName: "Commit",
+			Handler:    _Admin_Commit_Handler,
 		},
 		{
 			MethodName: "Shutdown",

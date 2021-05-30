@@ -112,12 +112,12 @@ func ParseATCTarget(rt Target) (lbName, lbLocation, lbUnique string, balancer Ba
 // custom WatchingResolver with the "atc" scheme.
 func MakeATCResolveFunc(client *atcclient.ATCClient, lbName, lbLocation, lbUnique string, dsc bool, serverName string) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
-		cancelFn, eventCh, errCh, err := client.ClientAssign(ctx, &roxy_v0.ClientAssignRequest_First{
+		cancelFn, eventCh, errCh, err := client.ClientAssign(ctx, &roxy_v0.ClientData{
 			ServiceName: lbName,
 			ShardId:     0,
+			HasShardId:  false,
 			Location:    lbLocation,
 			Unique:      lbUnique,
-			HasShardId:  false,
 		})
 		if err != nil {
 			return nil, err

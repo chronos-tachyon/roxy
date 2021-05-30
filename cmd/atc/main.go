@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"time"
@@ -17,15 +18,13 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
-var (
-	gMultiServer  mainutil.MultiServer
-	gHealthServer mainutil.HealthServer
-)
+var gMultiServer mainutil.MultiServer
 
 var (
 	flagConfig string = "/etc/opt/atc/global.json"
@@ -97,7 +96,14 @@ func main() {
 			Err(err).
 			Msg("failed to connect")
 	}
-	defer zkConn.Close()
+	if zkConn != nil {
+		gMultiServer.OnExit(func(context.Context) error {
+			zkConn.Close()
+			return nil
+		})
+
+		ctx = roxyresolver.WithZKConn(ctx, zkConn)
+	}
 
 	etcd, err := cfg.Etcd.Connect(ctx)
 	if err != nil {
@@ -108,14 +114,18 @@ func main() {
 			Err(err).
 			Msg("failed to connect")
 	}
-	defer func() {
-		_ = etcd.Close()
-	}()
+	if etcd != nil {
+		gMultiServer.OnExit(func(context.Context) error {
+			return etcd.Close()
+		})
+
+		ctx = roxyresolver.WithEtcdV3Client(ctx, etcd)
+	}
 
 	var ref Ref
 	ref.Init(cfg, zkConn, etcd)
 
-	err = ref.Load(ctx, 0)
+	err = ref.Load(ctx, 0, 0)
 	if err != nil {
 		log.Logger.Fatal().
 			Str("path", flagConfig).
@@ -123,7 +133,21 @@ func main() {
 			Msg("--config: failed to load")
 	}
 
-	ref.Flip()
+	err = ref.Flip(ctx, 0)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("path", flagConfig).
+			Err(err).
+			Msg("--config: failed to activate")
+	}
+
+	err = ref.Commit(ctx, 0)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("path", flagConfig).
+			Err(err).
+			Msg("--config: failed to commit")
+	}
 
 	promHandler := promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
@@ -145,12 +169,12 @@ func main() {
 	}
 
 	adminServer := grpc.NewServer(adminServerOpts...)
-	grpc_health_v1.RegisterHealthServer(adminServer, &gHealthServer)
+	grpc_health_v1.RegisterHealthServer(adminServer, gMultiServer.HealthServer())
 	roxy_v0.RegisterAdminServer(adminServer, AdminServer{ref: &ref})
 	roxy_v0.RegisterAirTrafficControlServer(adminServer, &ATCServer{ref: &ref, admin: true})
 
 	grpcServer := grpc.NewServer(grpcServerOpts...)
-	grpc_health_v1.RegisterHealthServer(grpcServer, &gHealthServer)
+	grpc_health_v1.RegisterHealthServer(grpcServer, gMultiServer.HealthServer())
 	roxy_v0.RegisterAirTrafficControlServer(grpcServer, &ATCServer{ref: &ref, admin: false})
 
 	var promListener net.Listener
@@ -189,19 +213,18 @@ func main() {
 
 	gMultiServer.OnReload(mainutil.RotateLogs)
 
-	gMultiServer.OnRun(func() {
-		log.Logger.Info().
-			Msg("Running")
+	gMultiServer.SetHealth("", true)
+	gMultiServer.WatchHealth(func(subsystemName string, isHealthy bool, isStopped bool) {
+		if subsystemName == "" {
+			atcclient.SetIsServing(isHealthy)
+		}
 	})
 
-	gHealthServer.Set("", true)
-	gMultiServer.OnShutdown(func(alreadyTermed bool) error {
-		gHealthServer.Stop()
-		return nil
-	})
-
-	_ = gMultiServer.Run()
-
-	log.Logger.Info().
-		Msg("Exit")
+	err = gMultiServer.Run(ctx)
+	if err != nil {
+		log.Logger.Error().
+			Err(err).
+			Msg("Run")
+		return
+	}
 }

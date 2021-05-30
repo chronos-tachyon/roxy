@@ -302,7 +302,8 @@ func (cfg *TLSServerConfig) PostProcess() error {
 	return nil
 }
 
-// MakeTLS constructs the configured *tls.Config.
+// MakeTLS constructs the configured *tls.Config, or returns nil if TLS is
+// disabled.
 func (cfg TLSServerConfig) MakeTLS() (*tls.Config, error) {
 	if !cfg.Enabled {
 		return nil, nil

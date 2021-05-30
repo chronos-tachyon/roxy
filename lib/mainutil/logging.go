@@ -2,6 +2,7 @@ package mainutil
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -131,7 +132,7 @@ func DoneLogging() {
 
 // RotateLogs rotates the logfile, if that operation makes sense in the current
 // logging configuration.
-func RotateLogs() error {
+func RotateLogs(ctx context.Context) error {
 	if gLogger != nil {
 		if err := gLogger.Rotate(); err != nil {
 			log.Logger.Error().

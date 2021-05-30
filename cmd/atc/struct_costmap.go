@@ -3,14 +3,9 @@ package main
 import (
 	"fmt"
 	"math"
-	"sort"
 
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
-
-type Location string
-
-type GraphID uint32
 
 type CostMap struct {
 	costByPair map[Location]map[Location]float32
@@ -232,32 +227,3 @@ func (cm *CostMap) compute(file CostFile) error {
 
 	return nil
 }
-
-type LocationAndCost struct {
-	Location Location
-	Cost     float32
-}
-
-type LocationAndCostList []LocationAndCost
-
-func (list LocationAndCostList) Len() int {
-	return len(list)
-}
-
-func (list LocationAndCostList) Swap(i, j int) {
-	list[i], list[j] = list[j], list[i]
-}
-
-func (list LocationAndCostList) Less(i, j int) bool {
-	a, b := list[i], list[j]
-	if a.Cost != b.Cost {
-		return a.Cost < b.Cost
-	}
-	return a.Location < b.Location
-}
-
-func (list LocationAndCostList) Sort() {
-	sort.Sort(list)
-}
-
-var _ sort.Interface = LocationAndCostList(nil)

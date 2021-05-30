@@ -23,15 +23,17 @@ import (
 var reSchemeAndPath = regexp.MustCompile(`^([A-Za-z][0-9A-Za-z+-]*):(.*)$`)
 
 type GlobalConfigFile struct {
-	ZK           mainutil.ZKConfig     `json:"zk"`
-	Etcd         mainutil.EtcdConfig   `json:"etcd"`
-	ListenGRPC   mainutil.ListenConfig `json:"listen"`
-	ListenAdmin  mainutil.ListenConfig `json:"listenAdmin"`
-	ListenProm   mainutil.ListenConfig `json:"listenPrometheus"`
-	PeersFile    string                `json:"peersFile"`
-	ServicesFile string                `json:"servicesFile"`
-	CostFile     string                `json:"costFile"`
-	GRPCAddr     *net.TCPAddr          `json:"-"`
+	ZK           mainutil.ZKConfig        `json:"zk"`
+	Etcd         mainutil.EtcdConfig      `json:"etcd"`
+	ListenGRPC   mainutil.ListenConfig    `json:"listen"`
+	ListenAdmin  mainutil.ListenConfig    `json:"listenAdmin"`
+	ListenProm   mainutil.ListenConfig    `json:"listenPrometheus"`
+	PeersFile    string                   `json:"peersFile"`
+	ServicesFile string                   `json:"servicesFile"`
+	CostFile     string                   `json:"costFile"`
+	AllowedPeers certnames.CertNames      `json:"allowedPeers"`
+	PeerTLS      mainutil.TLSClientConfig `json:"peerTLS"`
+	GRPCAddr     *net.TCPAddr             `json:"-"`
 }
 
 type PeersFile []string

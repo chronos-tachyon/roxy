@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
@@ -225,23 +224,15 @@ func (cfg GRPCClientConfig) Dial(ctx context.Context, opts ...grpc.DialOption) (
 		return nil, nil
 	}
 
-	dialOpts := make([]grpc.DialOption, 2, 2+len(opts))
-	dialOpts[0] = roxyresolver.WithStandardResolvers(ctx)
-	if cfg.TLS.Enabled {
-		tlsConfig, err := cfg.TLS.MakeTLS(cfg.Target.ServerName)
-		if err != nil {
-			return nil, err
-		}
-		dialOpts[1] = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
-	} else {
-		dialOpts[1] = grpc.WithInsecure()
-	}
-	dialOpts = append(dialOpts, opts...)
-
-	cc, err := grpc.DialContext(ctx, cfg.Target.String(), dialOpts...)
+	tlsDialOpt, err := cfg.TLS.MakeDialOption(cfg.Target.ServerName)
 	if err != nil {
 		return nil, err
 	}
 
-	return cc, nil
+	dialOpts := make([]grpc.DialOption, 2, 2+len(opts))
+	dialOpts[0] = roxyresolver.WithStandardResolvers(ctx)
+	dialOpts[1] = tlsDialOpt
+	dialOpts = append(dialOpts, opts...)
+
+	return grpc.DialContext(ctx, cfg.Target.String(), dialOpts...)
 }

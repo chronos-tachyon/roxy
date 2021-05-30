@@ -1,3 +1,14 @@
+v0.5.0
+  * Implement first draft of ATC ServerAnnounce
+  * Implement first draft of ATC traffic migration
+  * Add ATC Transfer, LookupClients, LookupServers RPCs
+  * Enhance ATC Lookup RPC
+  * Rearrange ATC config loading into "reload" (pre-load new config), "flip"
+    (activate new config), and "commit" (retire old config)
+  * Eliminate mainutil.HealthServer and fold into mainutil.MultiServer
+  * Add context.Context argument to all mainutil.MultiServer hooks
+  * Add new mainutil.MultiServer hooks OnPreRun and OnPreShutdown
+
 v0.4.8
   * Overhaul ATC configuration
   * Overhaul Docker build to use buildx and --platform

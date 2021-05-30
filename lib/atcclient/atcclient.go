@@ -24,7 +24,7 @@ import (
 
 // ReportInterval is the time interval between reports sent within
 // ServerAnnounce and ClientAssign.
-const ReportInterval = 10 * time.Second
+const ReportInterval = 1 * time.Second
 
 var gBackoff expbackoff.ExpBackoff = expbackoff.BuildDefault()
 
@@ -329,7 +329,7 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 	// end critical section 1
 	// }}}
 
-	dialOpts := make([]grpc.DialOption, 1)
+	dialOpts := make([]grpc.DialOption, 3)
 	if c.tc == nil {
 		dialOpts[0] = grpc.WithInsecure()
 	} else {
@@ -339,6 +339,8 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 		}
 		dialOpts[0] = grpc.WithTransportCredentials(credentials.NewTLS(tc))
 	}
+	dialOpts[1] = grpc.WithBlock()
+	dialOpts[2] = grpc.FailOnNonTempDialError(true)
 
 	log.Logger.Trace().
 		Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
@@ -399,7 +401,7 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 // should be withdrawn, and the caller must also ensure that the returned error
 // channel is drained in a timely manner.  The error channel will be closed
 // once all goroutines and other internal resources have been released.
-func (c *ATCClient) ServerAnnounce(ctx context.Context, first *roxy_v0.ServerAnnounceRequest_First) (context.CancelFunc, <-chan error, error) {
+func (c *ATCClient) ServerAnnounce(ctx context.Context, first *roxy_v0.ServerData) (context.CancelFunc, <-chan error, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
 
@@ -407,10 +409,10 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, first *roxy_v0.ServerAnn
 		panic(errors.New("context.Context is nil"))
 	}
 	if first == nil {
-		panic(errors.New("*roxy_v0.ServerAnnounceRequest_First is nil"))
+		panic(errors.New("*roxy_v0.ServerData is nil"))
 	}
 
-	first = proto.Clone(first).(*roxy_v0.ServerAnnounceRequest_First)
+	first = proto.Clone(first).(*roxy_v0.ServerData)
 	key := serviceKey{first.ServiceName, first.ShardId}
 
 	addr, err := c.Find(ctx, key.name, key.shardID, true)
@@ -422,15 +424,6 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, first *roxy_v0.ServerAnn
 	if err != nil {
 		return nil, nil, err
 	}
-
-	ctx, cancelFn := context.WithCancel(ctx)
-
-	needCancel := true
-	defer func() {
-		if needCancel {
-			cancelFn()
-		}
-	}()
 
 	log.Logger.Trace().
 		Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
@@ -454,39 +447,12 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, first *roxy_v0.ServerAnn
 		return nil, nil, err
 	}
 
-	log.Logger.Trace().
-		Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
-		Str("type", "ATCClient").
-		Str("method", "ServerAnnounce").
-		Str("func", "ServerAnnounce.Send").
-		Int("counter", 0).
-		Interface("req", first).
-		Msg("Call")
-
-	costData := GetCostData()
-	err = sac.Send(&roxy_v0.ServerAnnounceRequest{
-		First:       first,
-		CostCounter: costData.Counter,
-		IsServing:   true,
-	})
-	if err != nil {
-		log.Logger.Trace().
-			Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
-			Str("type", "ATCClient").
-			Str("method", "ServerAnnounce").
-			Str("func", "ServerAnnounce.Send").
-			Int("counter", 0).
-			Err(err).
-			Msg("Error")
-
-		return nil, nil, err
-	}
-
 	active := &activeServerAnnounce{
 		c:      c,
 		ctx:    ctx,
 		first:  first,
 		key:    key,
+		stopCh: make(chan struct{}),
 		syncCh: make(chan struct{}, 1),
 		errCh:  make(chan error),
 		cc:     cc,
@@ -494,11 +460,19 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, first *roxy_v0.ServerAnn
 		sac:    sac,
 	}
 
+	active.doSend(first, false)
+
+	active.wid = WatchIsServing(func(bool) {
+		sendSync(active.syncCh)
+	})
+
 	c.wg.Add(2)
 	go active.sendThread()
 	go active.recvThread()
 
-	needCancel = false
+	cancelFn := context.CancelFunc(func() {
+		close(active.stopCh)
+	})
 	return cancelFn, active.errCh, nil
 }
 
@@ -506,7 +480,7 @@ func (c *ATCClient) ServerAnnounce(ctx context.Context, first *roxy_v0.ServerAnn
 // returns with no error, then the caller must call the returned CancelFunc
 // when it is no longer interested in receiving Events, and the caller is also
 // responsible for draining both channels in a timely manner.
-func (c *ATCClient) ClientAssign(ctx context.Context, first *roxy_v0.ClientAssignRequest_First) (context.CancelFunc, <-chan []*roxy_v0.Event, <-chan error, error) {
+func (c *ATCClient) ClientAssign(ctx context.Context, first *roxy_v0.ClientData) (context.CancelFunc, <-chan []*roxy_v0.Event, <-chan error, error) {
 	c.wg.Add(1)
 	defer c.wg.Done()
 
@@ -514,10 +488,10 @@ func (c *ATCClient) ClientAssign(ctx context.Context, first *roxy_v0.ClientAssig
 		panic(errors.New("context.Context is nil"))
 	}
 	if first == nil {
-		panic(errors.New("*roxy_v0.ClientAssignRequest_First is nil"))
+		panic(errors.New("*roxy_v0.ClientData is nil"))
 	}
 
-	first = proto.Clone(first).(*roxy_v0.ClientAssignRequest_First)
+	first = proto.Clone(first).(*roxy_v0.ClientData)
 	key := serviceKey{first.ServiceName, first.ShardId}
 
 	addr, err := c.Find(ctx, key.name, key.shardID, true)
@@ -560,11 +534,9 @@ func (c *ATCClient) ClientAssign(ctx context.Context, first *roxy_v0.ClientAssig
 		Interface("req", first).
 		Msg("Call")
 
-	costData := GetCostData()
 	err = cac.Send(&roxy_v0.ClientAssignRequest{
-		First:                         first,
-		CostCounter:                   costData.Counter,
-		DemandedCostPerSecondEstimate: costData.PerSecond,
+		First:       first,
+		CostCounter: GetCostCounter(),
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -583,7 +555,7 @@ func (c *ATCClient) ClientAssign(ctx context.Context, first *roxy_v0.ClientAssig
 		cac:     cac,
 	}
 
-	c.wg.Add(1)
+	c.wg.Add(2)
 	go active.sendThread()
 	go active.recvThread()
 
@@ -663,10 +635,12 @@ func (cd *connData) Wait() {
 type activeServerAnnounce struct {
 	c      *ATCClient
 	ctx    context.Context
-	first  *roxy_v0.ServerAnnounceRequest_First
+	first  *roxy_v0.ServerData
 	key    serviceKey
+	stopCh chan struct{}
 	syncCh chan struct{}
 	errCh  chan error
+	wid    WatchID
 
 	mu  sync.Mutex
 	cc  *grpc.ClientConn
@@ -674,13 +648,75 @@ type activeServerAnnounce struct {
 	sac roxy_v0.AirTrafficControl_ServerAnnounceClient
 }
 
+func (active *activeServerAnnounce) doSend(first *roxy_v0.ServerData, final bool) {
+	active.mu.Lock()
+	defer active.mu.Unlock()
+
+	if active.sac == nil {
+		return
+	}
+
+	costCounter := GetCostCounter()
+	isServing := false
+	if !final {
+		isServing = IsServing()
+	}
+
+	log.Logger.Trace().
+		Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
+		Str("type", "ATCClient").
+		Str("method", "ServerAnnounce").
+		Str("func", "ServerAnnounce.Send").
+		Msg("Call")
+
+	err := active.sac.Send(&roxy_v0.ServerAnnounceRequest{
+		First:       first,
+		CostCounter: costCounter,
+		IsServing:   isServing,
+	})
+	if err != nil {
+		log.Logger.Trace().
+			Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
+			Str("type", "ATCClient").
+			Str("method", "ServerAnnounce").
+			Str("func", "ServerAnnounce.Send").
+			Err(err).
+			Msg("Error")
+
+		active.errCh <- err
+	}
+
+	if final {
+		log.Logger.Trace().
+			Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
+			Str("type", "ATCClient").
+			Str("method", "ServerAnnounce").
+			Str("func", "ServerAnnounce.CloseSend").
+			Msg("Call")
+
+		err = active.sac.CloseSend()
+		if err != nil {
+			log.Logger.Trace().
+				Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
+				Str("type", "ATCClient").
+				Str("method", "ServerAnnounce").
+				Str("func", "ServerAnnounce.CloseSend").
+				Err(err).
+				Msg("Error")
+
+			active.errCh <- err
+		}
+	}
+}
+
 func (active *activeServerAnnounce) sendThread() {
 	defer active.c.wg.Done()
 
-	for {
-		t := time.NewTimer(ReportInterval)
+	looping := true
+	for looping {
+		active.doSend(nil, false)
 
-		ok := true
+		t := time.NewTimer(ReportInterval)
 		select {
 		case <-active.ctx.Done():
 			t.Stop()
@@ -688,44 +724,22 @@ func (active *activeServerAnnounce) sendThread() {
 
 		case <-active.c.closeCh:
 			t.Stop()
-			return
+			looping = false
+
+		case <-active.stopCh:
+			t.Stop()
+			looping = false
 
 		case <-active.syncCh:
 			t.Stop()
-			ok = false
 
 		case <-t.C:
 			// pass
 		}
-
-		active.mu.Lock()
-		if ok && active.sac != nil {
-			log.Logger.Trace().
-				Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
-				Str("type", "ATCClient").
-				Str("method", "ServerAnnounce").
-				Str("func", "ServerAnnounce.Send").
-				Msg("Call")
-
-			costData := GetCostData()
-			err := active.sac.Send(&roxy_v0.ServerAnnounceRequest{
-				CostCounter: costData.Counter,
-				IsServing:   true,
-			})
-			if err != nil {
-				log.Logger.Trace().
-					Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
-					Str("type", "ATCClient").
-					Str("method", "ServerAnnounce").
-					Str("func", "ServerAnnounce.Send").
-					Err(err).
-					Msg("Error")
-
-				active.errCh <- err
-			}
-		}
-		active.mu.Unlock()
+		drainSyncChannel(active.syncCh)
 	}
+
+	active.doSend(nil, true)
 }
 
 func (active *activeServerAnnounce) recvThread() {
@@ -735,6 +749,8 @@ func (active *activeServerAnnounce) recvThread() {
 			active.c.wg.Add(1)
 			go saRecvUntilEOF(&active.c.wg, active.sac)
 		}
+		CancelWatchIsServing(active.wid)
+		drainSyncChannel(active.syncCh)
 		close(active.syncCh)
 		close(active.errCh)
 		active.cc = nil
@@ -749,7 +765,24 @@ func (active *activeServerAnnounce) recvThread() {
 	var retries int
 	var addr *net.TCPAddr
 
+	isStopped := func() bool {
+		select {
+		case <-active.ctx.Done():
+			return true
+		case <-active.c.closeCh:
+			return true
+		case <-active.stopCh:
+			return true
+		default:
+			return false
+		}
+	}
+
 	for {
+		if isStopped() {
+			return
+		}
+
 		log.Logger.Trace().
 			Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
 			Str("type", "ATCClient").
@@ -760,13 +793,24 @@ func (active *activeServerAnnounce) recvThread() {
 
 		resp, err := active.sac.Recv()
 
-		if err == nil {
+		switch {
+		case err == nil:
 			retries = 0
 			addr = goAwayToTCPAddr(resp.GoAway)
 			active.c.updateServiceData(active.key, addr)
 			active.c.wg.Add(1)
 			go saRecvUntilEOF(&active.c.wg, active.sac)
-		} else {
+
+		case err == io.EOF:
+			// pass
+
+		case errors.Is(err, context.Canceled):
+			// pass
+
+		case errors.Is(err, context.DeadlineExceeded):
+			// pass
+
+		default:
 			log.Logger.Trace().
 				Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
 				Str("type", "ATCClient").
@@ -781,11 +825,7 @@ func (active *activeServerAnnounce) recvThread() {
 			}
 		}
 
-		active.c.mu.Lock()
-		closed := active.c.closed
-		active.c.mu.Unlock()
-
-		if closed {
+		if isStopped() {
 			return
 		}
 
@@ -804,11 +844,7 @@ func (active *activeServerAnnounce) recvThread() {
 			retries++
 			ok := true
 
-			active.c.mu.Lock()
-			closed := active.c.closed
-			active.c.mu.Unlock()
-
-			if closed {
+			if isStopped() {
 				return
 			}
 
@@ -863,32 +899,10 @@ func (active *activeServerAnnounce) recvThread() {
 				handleError("ServerAnnounce", err)
 			}
 
-			if ok {
-				log.Logger.Trace().
-					Str("package", "github.com/chronos-tachyon/roxy/lib/atcclient").
-					Str("type", "ATCClient").
-					Str("method", "ServerAnnounce").
-					Str("func", "ServerAnnounce.Send").
-					Int("counter", counter).
-					Interface("req", active.first).
-					Msg("Call")
-
-				costData := GetCostData()
-				err = active.sac.Send(&roxy_v0.ServerAnnounceRequest{
-					First:       active.first,
-					CostCounter: costData.Counter,
-					IsServing:   true,
-				})
-				handleError("ServerAnnounce.Send", err)
-			}
-
 			active.mu.Unlock()
 
 			if ok {
-				select {
-				case active.syncCh <- struct{}{}:
-				default:
-				}
+				sendSync(active.syncCh)
 				break
 			}
 		}
@@ -909,7 +923,7 @@ func saRecvUntilEOF(wg *sync.WaitGroup, sac roxy_v0.AirTrafficControl_ServerAnno
 type activeClientAssign struct {
 	c       *ATCClient
 	ctx     context.Context
-	first   *roxy_v0.ClientAssignRequest_First
+	first   *roxy_v0.ClientData
 	key     serviceKey
 	syncCh  chan struct{}
 	eventCh chan []*roxy_v0.Event
@@ -944,6 +958,7 @@ func (active *activeClientAssign) sendThread() {
 		case <-t.C:
 			// pass
 		}
+		drainSyncChannel(active.syncCh)
 
 		active.mu.Lock()
 		if ok && active.cac != nil {
@@ -954,10 +969,8 @@ func (active *activeClientAssign) sendThread() {
 				Str("func", "ClientAssign.Send").
 				Msg("Call")
 
-			costData := GetCostData()
 			err := active.cac.Send(&roxy_v0.ClientAssignRequest{
-				CostCounter:                   costData.Counter,
-				DemandedCostPerSecondEstimate: costData.PerSecond,
+				CostCounter: GetCostCounter(),
 			})
 			if err != nil {
 				log.Logger.Trace().
@@ -1126,11 +1139,9 @@ func (active *activeClientAssign) recvThread() {
 					Interface("req", active.first).
 					Msg("Call")
 
-				costData := GetCostData()
 				err = active.cac.Send(&roxy_v0.ClientAssignRequest{
-					First:                         active.first,
-					CostCounter:                   costData.Counter,
-					DemandedCostPerSecondEstimate: costData.PerSecond,
+					First:       active.first,
+					CostCounter: GetCostCounter(),
 				})
 				handleError("ClientAssign.Send", err)
 			}
@@ -1177,5 +1188,24 @@ func backoff(ctx context.Context, counter int) bool {
 
 	case <-t.C:
 		return true
+	}
+}
+
+func sendSync(syncCh chan<- struct{}) {
+	select {
+	case syncCh <- struct{}{}:
+	default:
+	}
+}
+
+func drainSyncChannel(syncCh <-chan struct{}) {
+	looping := true
+	for looping {
+		select {
+		case _, ok := <-syncCh:
+			looping = ok
+		default:
+			looping = false
+		}
 	}
 }

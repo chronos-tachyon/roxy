@@ -2,7 +2,6 @@ package mainutil
 
 import (
 	"context"
-	"sync"
 
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
@@ -10,127 +9,68 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type (
-	healthCheckRequest  = grpc_health_v1.HealthCheckRequest
-	healthCheckResponse = grpc_health_v1.HealthCheckResponse
-)
-
-const (
-	hcrNotServing = grpc_health_v1.HealthCheckResponse_NOT_SERVING
-	hcrServing    = grpc_health_v1.HealthCheckResponse_SERVING
-)
-
-// HealthServer is an implementation of a grpc.health.v1.Health server.
-type HealthServer struct {
+type healthServer struct {
 	grpc_health_v1.UnimplementedHealthServer
 
-	mu        sync.Mutex
-	byService map[string]*serviceHealth
-	stopped   bool
+	m *MultiServer
 }
 
-type serviceHealth struct {
-	cv *sync.Cond
-	ok bool
-}
-
-// Set changes the health status for the named subsystem.  If the subsystem
-// does not yet exist, it is automatically created.
-func (s *HealthServer) Set(subsystemName string, healthy bool) {
-	s.mu.Lock()
-	if s.byService == nil {
-		s.byService = make(map[string]*serviceHealth, 16)
-	}
-	h := s.byService[subsystemName]
-	if h == nil {
-		h = &serviceHealth{
-			cv: sync.NewCond(&s.mu),
-			ok: healthy,
-		}
-		s.byService[subsystemName] = h
-	} else {
-		h.ok = healthy
-		h.cv.Broadcast()
-	}
-	s.mu.Unlock()
-}
-
-// Stop marks all subsystems as unhealthy.
-func (s *HealthServer) Stop() {
-	s.mu.Lock()
-	s.stopped = true
-	for _, h := range s.byService {
-		h.ok = false
-		h.cv.Broadcast()
-	}
-	s.mu.Unlock()
-}
-
-// Check implements the /grpc.health.v1.Health/Check method.
-func (s *HealthServer) Check(ctx context.Context, req *healthCheckRequest) (*healthCheckResponse, error) {
+func (s healthServer) Check(
+	ctx context.Context,
+	req *grpc_health_v1.HealthCheckRequest,
+) (*grpc_health_v1.HealthCheckResponse, error) {
 	log.Logger.Debug().
 		Str("rpcService", "grpc.health.v1.Health").
 		Str("rpcMethod", "Check").
 		Msg("RPC")
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	h := s.byService[req.Service]
-	if h == nil {
+	isHealthy, found := s.m.GetHealth(req.Service)
+	if !found {
 		return nil, status.Errorf(codes.NotFound, "unknown subsystem %q", req.Service)
 	}
-	status := hcrNotServing
-	if h.ok {
-		status = hcrServing
-	}
-	return &healthCheckResponse{Status: status}, nil
+	return makeResponse(isHealthy), nil
 }
 
-// Watch implements the /grpc.health.v1.Health/Watch method.
-func (s *HealthServer) Watch(req *healthCheckRequest, ws grpc_health_v1.Health_WatchServer) error {
+func (s healthServer) Watch(
+	req *grpc_health_v1.HealthCheckRequest,
+	ws grpc_health_v1.Health_WatchServer,
+) error {
 	log.Logger.Debug().
 		Str("rpcService", "grpc.health.v1.Health").
 		Str("rpcMethod", "Watch").
 		Msg("RPC")
 
-	s.mu.Lock()
-	h := s.byService[req.Service]
-	if h == nil {
-		s.mu.Unlock()
+	_, found := s.m.GetHealth(req.Service)
+	if !found {
 		return status.Errorf(codes.NotFound, "unknown subsystem %q", req.Service)
 	}
-	ok := h.ok
-	stopped := s.stopped
-	s.mu.Unlock()
 
-	status := hcrNotServing
-	if ok {
-		status = hcrServing
-	}
-	if err := ws.Send(&healthCheckResponse{Status: status}); err != nil {
-		return err
-	}
+	ch := make(chan bool, 1)
 
-	for !stopped {
-		s.mu.Lock()
-		for !s.stopped && ok == h.ok {
-			h.cv.Wait()
-		}
-		didChange := (ok != h.ok)
-		ok = h.ok
-		stopped = s.stopped
-		s.mu.Unlock()
-
-		if didChange {
-			status := hcrNotServing
-			if ok {
-				status = hcrServing
-			}
-			if err := ws.Send(&healthCheckResponse{Status: status}); err != nil {
-				return err
+	id := s.m.WatchHealth(func(subsystemName string, isHealthy bool, isStopped bool) {
+		if subsystemName == req.Service {
+			ch <- isHealthy
+			if isStopped {
+				close(ch)
 			}
 		}
+	})
+
+	for isHealthy := range ch {
+		if err := ws.Send(makeResponse(isHealthy)); err != nil {
+			s.m.CancelWatchHealth(id)
+			close(ch)
+			return err
+		}
 	}
+
 	return nil
+}
+
+func makeResponse(isHealthy bool) *grpc_health_v1.HealthCheckResponse {
+	status := grpc_health_v1.HealthCheckResponse_NOT_SERVING
+	if isHealthy {
+		status = grpc_health_v1.HealthCheckResponse_SERVING
+	}
+	return &grpc_health_v1.HealthCheckResponse{Status: status}
 }

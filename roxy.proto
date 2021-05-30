@@ -2,10 +2,12 @@ syntax = "proto3";
 
 option go_package = "github.com/chronos-tachyon/roxy/proto/roxy_v0";
 
+import "google/protobuf/timestamp.proto";
+
 package roxy.v0;
 
 service Web {
-  rpc Serve (stream WebMessage) returns (stream WebMessage) {}
+  rpc Serve (stream WebMessage) returns (stream WebMessage);
 }
 
 message WebMessage {
@@ -20,23 +22,22 @@ message KeyValue {
 }
 
 service AirTrafficControl {
-  rpc Lookup (LookupRequest) returns (LookupResponse) {}
-  rpc Find (FindRequest) returns (FindResponse) {}
-  rpc ServerAnnounce (stream ServerAnnounceRequest) returns (stream ServerAnnounceResponse) {}
-  rpc ClientAssign (stream ClientAssignRequest) returns (stream ClientAssignResponse) {}
+  rpc Lookup (LookupRequest) returns (LookupResponse);
+  rpc LookupClients (LookupClientsRequest) returns (LookupClientsResponse);
+  rpc LookupServers (LookupServersRequest) returns (LookupServersResponse);
+  rpc Find (FindRequest) returns (FindResponse);
+  rpc ServerAnnounce (stream ServerAnnounceRequest) returns (stream ServerAnnounceResponse);
+  rpc ClientAssign (stream ClientAssignRequest) returns (stream ClientAssignResponse);
+  rpc Transfer (TransferRequest) returns (TransferResponse);
 }
 
 message LookupRequest {
   string service_name = 1;
+  uint32 shard_id = 2;
+  bool has_shard_id = 3;
 }
 
 message LookupResponse {
-  message Dynamic {
-    uint32 current_num_servers = 1;
-    uint32 current_num_clients = 2;
-    double current_cps_supplied = 3;
-    double current_cps_demanded = 4;
-  }
   repeated string allowed_client_names = 1;
   repeated string allowed_server_names = 2;
   uint32 expected_num_clients_per_shard = 3;
@@ -45,12 +46,35 @@ message LookupResponse {
   uint32 num_shards = 6;
   double avg_supplied_cost_per_second_per_server = 7;
   double avg_demanded_cost_per_query = 8;
-  Dynamic dynamic = 32;
+  repeated ShardData shards = 32;
+}
+
+message LookupClientsRequest {
+  string service_name = 1;
+  uint32 shard_id = 2;
+  bool has_shard_id = 3;
+  string unique = 4;
+}
+
+message LookupClientsResponse {
+  repeated ClientData clients = 1;
+}
+
+message LookupServersRequest {
+  string service_name = 1;
+  uint32 shard_id = 2;
+  bool has_shard_id = 3;
+  string unique = 4;
+}
+
+message LookupServersResponse {
+  repeated ServerData servers = 1;
 }
 
 message FindRequest {
   string service_name = 1;
   uint32 shard_id = 2;
+  bool has_shard_id = 3;
 }
 
 message FindResponse {
@@ -58,19 +82,7 @@ message FindResponse {
 }
 
 message ServerAnnounceRequest {
-  message First {
-    string service_name = 1;
-    uint32 shard_id = 2;
-    string location = 3;
-    string unique = 4;
-    string server_name = 5;
-    bytes ip = 6;
-    string zone = 7;
-    uint32 port = 8;
-    uint32 supplied_cost_per_second = 14;
-    bool has_shard_id = 15;
-  }
-  First first = 1;
+  ServerData first = 1;
   uint64 cost_counter = 2;
   bool is_serving = 3;
 }
@@ -80,21 +92,72 @@ message ServerAnnounceResponse {
 }
 
 message ClientAssignRequest {
-  message First {
-    string service_name = 1;
-    uint32 shard_id = 2;
-    string location = 3;
-    string unique = 4;
-    bool has_shard_id = 15;
-  }
-  First first = 1;
+  ClientData first = 1;
   uint64 cost_counter = 2;
-  double demanded_cost_per_second_estimate = 3;
 }
 
 message ClientAssignResponse {
   GoAway go_away = 1;
   repeated Event events = 2;
+}
+
+message TransferRequest {
+  uint64 config_id = 1;
+  string service_name = 2;
+  uint32 shard_id = 3;
+  bool has_shard_id = 4;
+  repeated ClientData clients = 5;
+  repeated ServerData servers = 6;
+}
+
+message TransferResponse {
+}
+
+message ShardData {
+  string service_name = 1;
+  uint32 shard_id = 2;
+  bool has_shard_id = 3;
+  uint32 num_clients = 4;
+  uint32 num_servers = 5;
+  double declared_demand_cost_per_second = 6;
+  double measured_demand_cost_per_second = 7;
+  double declared_supply_cost_per_second = 8;
+  double measured_supply_cost_per_second = 9;
+}
+
+message ClientData {
+  string service_name = 1;
+  uint32 shard_id = 2;
+  bool has_shard_id = 3;
+  string unique = 4;
+  string location = 5;
+  double declared_cost_per_second = 10;
+  double measured_cost_per_second = 11;
+  bool is_alive = 12;
+  bool is_serving = 13;
+  repeated Sample history = 14;
+}
+
+message ServerData {
+  string service_name = 1;
+  uint32 shard_id = 2;
+  bool has_shard_id = 3;
+  string unique = 4;
+  string location = 5;
+  string server_name = 6;
+  bytes ip = 7;
+  string zone = 8;
+  uint32 port = 9;
+  double declared_cost_per_second = 10;
+  double measured_cost_per_second = 11;
+  bool is_alive = 12;
+  bool is_serving = 13;
+  repeated Sample history = 14;
+}
+
+message Sample {
+  google.protobuf.Timestamp timestamp = 1;
+  uint64 counter = 2;
 }
 
 message GoAway {
@@ -124,24 +187,35 @@ message Event {
 }
 
 service Admin {
-  rpc Ping (PingRequest) returns (PingResponse) {}
-  rpc Reload (ReloadRequest) returns (ReloadResponse) {}
-  rpc Flip (FlipRequest) returns (FlipResponse) {}
-  rpc Shutdown (ShutdownRequest) returns (ShutdownResponse) {}
-  rpc SetHealth (SetHealthRequest) returns (SetHealthResponse) {}
+  rpc Ping (PingRequest) returns (PingResponse);
+  rpc Reload (ReloadRequest) returns (ReloadResponse);
+  rpc Flip (FlipRequest) returns (FlipResponse);
+  rpc Commit (CommitRequest) returns (CommitResponse);
+  rpc Shutdown (ShutdownRequest) returns (ShutdownResponse);
+  rpc SetHealth (SetHealthRequest) returns (SetHealthResponse);
 }
 
 message PingRequest {}
 message PingResponse {}
 
 message ReloadRequest {
-  int64 rev = 1;
+  uint64 id = 1;
+  int64 rev = 2;
 }
 message ReloadResponse {
 }
 
-message FlipRequest {}
-message FlipResponse {}
+message FlipRequest {
+  uint64 id = 1;
+}
+message FlipResponse {
+}
+
+message CommitRequest {
+  uint64 id = 1;
+}
+message CommitResponse {
+}
 
 message ShutdownRequest {}
 message ShutdownResponse {}

@@ -69,16 +69,17 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 
 	cancelFn, errCh, err := impl.client.ServerAnnounce(
 		ctx,
-		&roxy_v0.ServerAnnounceRequest_First{
-			ServiceName: impl.serviceName,
-			ShardId:     r.ShardID,
-			Location:    impl.location,
-			Unique:      impl.unique,
-			ServerName:  r.ServerName,
-			Ip:          []byte(tcpAddr.IP),
-			Zone:        tcpAddr.Zone,
-			Port:        uint32(tcpAddr.Port),
-			HasShardId:  r.HasShardID,
+		&roxy_v0.ServerData{
+			ServiceName:           impl.serviceName,
+			ShardId:               r.ShardID,
+			HasShardId:            r.HasShardID,
+			Unique:                impl.unique,
+			Location:              impl.location,
+			ServerName:            r.ServerName,
+			Ip:                    []byte(tcpAddr.IP),
+			Zone:                  tcpAddr.Zone,
+			Port:                  uint32(tcpAddr.Port),
+			DeclaredCostPerSecond: GetDeclaredCPS(ctx),
 		},
 	)
 	if err != nil {

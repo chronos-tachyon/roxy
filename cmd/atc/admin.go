@@ -33,11 +33,11 @@ func (s AdminServer) Reload(ctx context.Context, req *roxy_v0.ReloadRequest) (*r
 		Str("rpcInterface", "admin").
 		Msg("RPC")
 
-	if err := gMultiServer.Reload(); err != nil {
+	if err := gMultiServer.Reload(ctx); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	if err := s.ref.Load(ctx, req.Rev); err != nil {
+	if err := s.ref.Load(ctx, req.Id, req.Rev); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -51,9 +51,27 @@ func (s AdminServer) Flip(ctx context.Context, req *roxy_v0.FlipRequest) (*roxy_
 		Str("rpcInterface", "admin").
 		Msg("RPC")
 
-	s.ref.Flip()
+	err := s.ref.Flip(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
 
 	return &roxy_v0.FlipResponse{}, nil
+}
+
+func (s AdminServer) Commit(ctx context.Context, req *roxy_v0.CommitRequest) (*roxy_v0.CommitResponse, error) {
+	log.Logger.Info().
+		Str("rpcService", "roxy.v0.Admin").
+		Str("rpcMethod", "Commit").
+		Str("rpcInterface", "admin").
+		Msg("RPC")
+
+	err := s.ref.Commit(ctx, req.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &roxy_v0.CommitResponse{}, nil
 }
 
 func (s AdminServer) Shutdown(ctx context.Context, req *roxy_v0.ShutdownRequest) (*roxy_v0.ShutdownResponse, error) {
@@ -63,7 +81,7 @@ func (s AdminServer) Shutdown(ctx context.Context, req *roxy_v0.ShutdownRequest)
 		Str("rpcInterface", "admin").
 		Msg("RPC")
 
-	if err := gMultiServer.Shutdown(true); err != nil {
+	if err := gMultiServer.Shutdown(ctx, true); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return &roxy_v0.ShutdownResponse{}, nil
@@ -78,6 +96,6 @@ func (s AdminServer) SetHealth(ctx context.Context, req *roxy_v0.SetHealthReques
 		Bool("healthy", req.IsHealthy).
 		Msg("RPC")
 
-	gHealthServer.Set(req.SubsystemName, req.IsHealthy)
+	gMultiServer.SetHealth(req.SubsystemName, req.IsHealthy)
 	return &roxy_v0.SetHealthResponse{}, nil
 }

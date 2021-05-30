@@ -10,6 +10,9 @@ import (
 	"io/ioutil"
 	"strings"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -329,7 +332,8 @@ func (cfg *TLSClientConfig) PostProcess() error {
 	return nil
 }
 
-// MakeTLS constructs the configured *tls.Config.
+// MakeTLS constructs the configured *tls.Config, or returns nil if TLS is
+// disabled.
 func (cfg TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 	if !cfg.Enabled {
 		return nil, nil
@@ -421,4 +425,20 @@ func (cfg TLSClientConfig) MakeTLS(serverName string) (*tls.Config, error) {
 	}
 
 	return out, nil
+}
+
+// MakeDialOption returns a grpc.DialOption that uses the result of MakeTLS as
+// TLS transport credentials, or returns grpc.WithInsecure() if TLS is
+// disabled.
+func (cfg TLSClientConfig) MakeDialOption(serverName string) (grpc.DialOption, error) {
+	tc, err := cfg.MakeTLS(serverName)
+	if err != nil {
+		return grpc.EmptyDialOption{}, err
+	}
+
+	if tc == nil {
+		return grpc.WithInsecure(), nil
+	}
+
+	return grpc.WithTransportCredentials(credentials.NewTLS(tc)), nil
 }

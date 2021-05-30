@@ -31,7 +31,7 @@ func (AdminServer) Reload(ctx context.Context, req *roxy_v0.ReloadRequest) (*rox
 		Str("rpcInterface", "admin").
 		Msg("RPC")
 
-	if err := gMultiServer.Reload(); err != nil {
+	if err := gMultiServer.Reload(ctx); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return &roxy_v0.ReloadResponse{}, nil
@@ -44,7 +44,7 @@ func (AdminServer) Shutdown(ctx context.Context, req *roxy_v0.ShutdownRequest) (
 		Str("rpcInterface", "admin").
 		Msg("RPC")
 
-	if err := gMultiServer.Shutdown(true); err != nil {
+	if err := gMultiServer.Shutdown(ctx, true); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return &roxy_v0.ShutdownResponse{}, nil
@@ -59,6 +59,6 @@ func (AdminServer) SetHealth(ctx context.Context, req *roxy_v0.SetHealthRequest)
 		Bool("healthy", req.IsHealthy).
 		Msg("RPC")
 
-	gHealthServer.Set(req.SubsystemName, req.IsHealthy)
+	gMultiServer.SetHealth(req.SubsystemName, req.IsHealthy)
 	return &roxy_v0.SetHealthResponse{}, nil
 }

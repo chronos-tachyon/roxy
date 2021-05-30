@@ -62,10 +62,7 @@ func init() {
 	getopt.FlagLong(&flagUniqueFile, "unique-file", 'U', "file containing a unique ID for the ATC announcer")
 }
 
-var (
-	gMultiServer  mainutil.MultiServer
-	gHealthServer mainutil.HealthServer
-)
+var gMultiServer mainutil.MultiServer
 
 func main() {
 	getopt.Parse()
@@ -78,6 +75,8 @@ func main() {
 	mainutil.InitContext()
 	defer mainutil.CancelRootContext()
 	ctx := mainutil.RootContext()
+
+	ctx = announcer.WithDeclaredCPS(ctx, 64.0)
 
 	mainutil.SetUniqueFile(flagUniqueFile)
 
@@ -113,14 +112,8 @@ func main() {
 	}
 
 	ann := new(announcer.Announcer)
-	gHealthServer.Set("", true)
 
-	gMultiServer.OnShutdown(func(alreadyTermed bool) error {
-		gHealthServer.Stop()
-		return nil
-	})
-
-	zkconn, err := zac.Connect(ctx)
+	zkConn, err := zac.Connect(ctx)
 	if err != nil {
 		log.Logger.Fatal().
 			Str("subsystem", "zk").
@@ -129,12 +122,15 @@ func main() {
 			Msg("--zk: failed to connect to ZooKeeper")
 	}
 
-	if zkconn != nil {
-		defer zkconn.Close()
+	if zkConn != nil {
+		gMultiServer.OnExit(func(context.Context) error {
+			zkConn.Close()
+			return nil
+		})
 
-		ctx = roxyresolver.WithZKConn(ctx, zkconn)
+		ctx = roxyresolver.WithZKConn(ctx, zkConn)
 
-		if err := zac.AddTo(zkconn, ann); err != nil {
+		if err := zac.AddTo(zkConn, ann); err != nil {
 			log.Logger.Fatal().
 				Str("subsystem", "zk").
 				Interface("config", zac).
@@ -153,9 +149,9 @@ func main() {
 	}
 
 	if etcd != nil {
-		defer func() {
-			_ = etcd.Close()
-		}()
+		gMultiServer.OnExit(func(context.Context) error {
+			return etcd.Close()
+		})
 
 		ctx = roxyresolver.WithEtcdV3Client(ctx, etcd)
 
@@ -178,9 +174,9 @@ func main() {
 	}
 
 	if atcClient != nil {
-		defer func() {
-			_ = atcClient.Close()
-		}()
+		gMultiServer.OnExit(func(context.Context) error {
+			return atcClient.Close()
+		})
 
 		ctx = roxyresolver.WithATCClient(ctx, atcClient)
 
@@ -210,7 +206,7 @@ func main() {
 
 	grpcServerOpts = interceptor.ServerOptions(grpcServerOpts...)
 	grpcServer := grpc.NewServer(grpcServerOpts...)
-	grpc_health_v1.RegisterHealthServer(grpcServer, &gHealthServer)
+	grpc_health_v1.RegisterHealthServer(grpcServer, gMultiServer.HealthServer())
 	roxy_v0.RegisterWebServer(grpcServer, &webServerServer{corpus: corpus})
 
 	httpListener, err := httpListenConfig.Listen(ctx)
@@ -231,63 +227,42 @@ func main() {
 			Msg("failed to Listen")
 	}
 
+	var r membership.Roxy
+	r.Ready = true
+	r.AdditionalPorts = make(map[string]uint16, 2)
+	if tcpAddr, ok := httpListener.Addr().(*net.TCPAddr); ok {
+		r.IP = tcpAddr.IP
+		r.Zone = tcpAddr.Zone
+		r.PrimaryPort = uint16(tcpAddr.Port)
+		r.AdditionalPorts[constants.SubsystemHTTP] = uint16(tcpAddr.Port)
+	}
+	if tcpAddr, ok := grpcListener.Addr().(*net.TCPAddr); ok {
+		r.IP = tcpAddr.IP
+		r.Zone = tcpAddr.Zone
+		r.PrimaryPort = uint16(tcpAddr.Port)
+		r.AdditionalPorts[constants.SubsystemGRPC] = uint16(tcpAddr.Port)
+	}
+
 	gMultiServer.AddHTTPServer(constants.SubsystemHTTP, httpServer, httpListener)
 	gMultiServer.AddGRPCServer(constants.SubsystemGRPC, grpcServer, grpcListener)
-
-	gMultiServer.OnRun(func() {
-		var r membership.Roxy
-		r.Ready = true
-		r.AdditionalPorts = make(map[string]uint16, 2)
-		if tcpAddr, ok := httpListener.Addr().(*net.TCPAddr); ok {
-			r.IP = tcpAddr.IP
-			r.Zone = tcpAddr.Zone
-			r.PrimaryPort = uint16(tcpAddr.Port)
-			r.AdditionalPorts[constants.SubsystemHTTP] = uint16(tcpAddr.Port)
-		}
-		if tcpAddr, ok := grpcListener.Addr().(*net.TCPAddr); ok {
-			r.IP = tcpAddr.IP
-			r.Zone = tcpAddr.Zone
-			r.PrimaryPort = uint16(tcpAddr.Port)
-			r.AdditionalPorts[constants.SubsystemGRPC] = uint16(tcpAddr.Port)
-		}
-		if err := ann.Announce(ctx, &r); err != nil {
-			log.Logger.Fatal().
-				Err(err).
-				Msg("failed to Announce")
-		}
-	})
-
-	gMultiServer.OnShutdown(func(alreadyTermed bool) error {
-		var action string
-		var err error
-		if alreadyTermed {
-			action = "Close"
-			err = ann.Close()
-		} else {
-			action = "Withdraw"
-			err = ann.Withdraw(ctx)
-		}
-		if err != nil {
-			log.Logger.Error().
-				Str("action", action).
-				Err(err).
-				Msg("failed to withdraw one or more announcements")
-			return err
-		}
-		return nil
-	})
+	gMultiServer.AddAnnouncer(ann, &r)
 
 	gMultiServer.OnReload(mainutil.RotateLogs)
 
-	gMultiServer.OnRun(func() {
-		log.Logger.Info().
-			Msg("Running")
+	gMultiServer.SetHealth("", true)
+	gMultiServer.WatchHealth(func(subsystemName string, isHealthy bool, isStopped bool) {
+		if subsystemName == "" {
+			atcclient.SetIsServing(isHealthy)
+		}
 	})
 
-	_ = gMultiServer.Run()
-
-	log.Logger.Info().
-		Msg("Exit")
+	err = gMultiServer.Run(ctx)
+	if err != nil {
+		log.Logger.Error().
+			Err(err).
+			Msg("Run")
+		return
+	}
 }
 
 func processFlags(

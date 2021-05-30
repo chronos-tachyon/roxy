@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/go-zookeeper/zk v1.0.2
+	github.com/golang/protobuf v1.5.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/pborman/getopt/v2 v2.1.0
 	github.com/prometheus/client_golang v1.10.0

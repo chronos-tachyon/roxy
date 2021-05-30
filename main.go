@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
+	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -28,9 +30,8 @@ import (
 )
 
 var (
-	gRef          Ref
-	gMultiServer  mainutil.MultiServer
-	gHealthServer mainutil.HealthServer
+	gRef         Ref
+	gMultiServer mainutil.MultiServer
 
 	gDialer = net.Dialer{Timeout: 5 * time.Second}
 )
@@ -94,7 +95,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gMultiServer.OnExit(func() error {
+	gMultiServer.OnExit(func(ctx context.Context) error {
 		if err := gRef.Close(); err != nil {
 			log.Logger.Error().
 				Err(err).
@@ -105,7 +106,7 @@ func main() {
 	})
 
 	adminServer := grpc.NewServer(adminServerOpts...)
-	grpc_health_v1.RegisterHealthServer(adminServer, &gHealthServer)
+	grpc_health_v1.RegisterHealthServer(adminServer, gMultiServer.HealthServer())
 	roxy_v0.RegisterAdminServer(adminServer, AdminServer{})
 
 	var promHandler http.Handler
@@ -196,7 +197,7 @@ func main() {
 
 	gMultiServer.OnReload(mainutil.RotateLogs)
 
-	gMultiServer.OnReload(func() error {
+	gMultiServer.OnReload(func(ctx context.Context) error {
 		if err := gRef.Load(ctx, flagConfig); err != nil {
 			log.Logger.Error().
 				Str("path", flagConfig).
@@ -207,21 +208,20 @@ func main() {
 		return nil
 	})
 
-	gMultiServer.OnRun(func() {
-		log.Logger.Info().
-			Msg("Running")
+	gMultiServer.SetHealth("", true)
+	gMultiServer.WatchHealth(func(subsystemName string, isHealthy bool, isStopped bool) {
+		if subsystemName == "" {
+			atcclient.SetIsServing(isHealthy)
+		}
 	})
 
-	gHealthServer.Set("", true)
-	gMultiServer.OnShutdown(func(alreadyTermed bool) error {
-		gHealthServer.Stop()
-		return nil
-	})
-
-	_ = gMultiServer.Run()
-
-	log.Logger.Info().
-		Msg("Exit")
+	err = gMultiServer.Run(ctx)
+	if err != nil {
+		log.Logger.Error().
+			Err(err).
+			Msg("Run")
+		return
+	}
 }
 
 func processFlags(
