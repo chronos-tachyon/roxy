@@ -120,6 +120,7 @@ func (t DNSTarget) AsTarget() Target {
 	}
 }
 
+// NetResolver returns the appropriate *net.Resolver for this target.
 func (t DNSTarget) NetResolver() *net.Resolver {
 	return makeNetResolver(t.ResolverAddr)
 }

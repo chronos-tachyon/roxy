@@ -134,6 +134,7 @@ func (t SRVTarget) AsTarget() Target {
 	}
 }
 
+// NetResolver returns the appropriate *net.Resolver for this target.
 func (t SRVTarget) NetResolver() *net.Resolver {
 	return makeNetResolver(t.ResolverAddr)
 }

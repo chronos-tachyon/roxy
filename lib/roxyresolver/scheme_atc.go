@@ -31,7 +31,7 @@ type ATCTarget struct {
 	CPS         float64
 }
 
-// ParseATCTarget breaks apart a Target into component data.
+// FromTarget breaks apart a Target into component data.
 func (t *ATCTarget) FromTarget(rt Target) error {
 	*t = ATCTarget{}
 
