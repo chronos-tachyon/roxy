@@ -24,6 +24,7 @@
 //	commit id                                tell ATC to commit to an activated config
 //	shutdown                                 tell ATC to exit
 //	healthcheck [name]                       check the health of the named subsystem(*)
+//	healthwatch [name]                       watch the health of the named subsystem(*)
 //	set-health name y/n                      set the health of the named subsystem
 //	lookup service [shard]                   perform a /roxy.v0.AirTrafficControl/Lookup RPC
 //	lookup-clients service [shard] [unique]  perform a /roxy.v0.AirTrafficControl/LookupClients RPC
@@ -39,16 +40,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strconv"
+	"sync"
+	"syscall"
 
 	getopt "github.com/pborman/getopt/v2"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
@@ -64,6 +71,7 @@ Commands available:
 	commit <id>
 	shutdown
 	healthcheck [<subsystem>]
+	healthwatch [<subsystem>]
 	set-health <subsystem> <value>
 	lookup <service> [<shard-id>]
 	lookup-clients <service> <shard-id> [<unique>]
@@ -82,6 +90,7 @@ const (
 	cmdCommit        = "commit"
 	cmdShutdown      = "shutdown"
 	cmdHealthCheck   = "healthcheck"
+	cmdHealthWatch   = "healthwatch"
 	cmdSetHealth     = "set-health"
 	cmdLookup        = "lookup"
 	cmdLookupClients = "lookup-clients"
@@ -105,6 +114,11 @@ type commandRecord struct {
 }
 
 var aliasMap = map[string]string{
+	"health":        cmdHealthCheck,
+	"health-check":  cmdHealthCheck,
+	"check-health":  cmdHealthCheck,
+	"health-watch":  cmdHealthWatch,
+	"watch-health":  cmdHealthWatch,
 	"lookup-client": cmdLookupClients,
 	"lookup-server": cmdLookupServers,
 }
@@ -137,6 +151,11 @@ var commandMap = map[string]commandRecord{
 	},
 	cmdHealthCheck: {
 		fn:       doHealthCheck,
+		minNArgs: 1,
+		maxNArgs: 2,
+	},
+	cmdHealthWatch: {
+		fn:       doHealthWatch,
 		minNArgs: 1,
 		maxNArgs: 2,
 	},
@@ -218,9 +237,30 @@ func main() {
 		atc:    roxy_v0.NewAirTrafficControlClient(cc),
 	}
 
+	exitCh := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+	signal.Ignore(syscall.SIGHUP)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		select {
+		case <-sigCh:
+			signal.Stop(sigCh)
+			mainutil.CancelRootContext()
+		case <-exitCh:
+			// pass
+		}
+		wg.Done()
+	}()
+
 	event := log.Logger.Info()
 	event = fn(ctx, c, event, args)
 	event.Msg("OK")
+
+	close(exitCh)
+	wg.Wait()
 }
 
 func doPing(ctx context.Context, c clients, event *zerolog.Event, args []string) *zerolog.Event {
@@ -343,6 +383,46 @@ func doHealthCheck(ctx context.Context, c clients, event *zerolog.Event, args []
 			Msg("RPC failed")
 	}
 	event = event.Str("status", resp.Status.String())
+
+	return event
+}
+
+func doHealthWatch(ctx context.Context, c clients, event *zerolog.Event, args []string) *zerolog.Event {
+	subsystemName := args[0]
+
+	wc, err := c.health.Watch(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: subsystemName,
+	})
+	if err != nil {
+		log.Logger.Fatal().
+			Str("rpcService", "grpc.health.v1.Health").
+			Str("rpcMethod", "Watch").
+			Err(err).
+			Msg("RPC failed")
+	}
+
+	looping := true
+	for looping {
+		resp, err := wc.Recv()
+		s, ok := status.FromError(err)
+		switch {
+		case err == nil:
+			fmt.Println(resp.Status.String())
+		case err == io.EOF:
+			looping = false
+		case errors.Is(err, context.Canceled):
+			looping = false
+		case ok && s.Code() == codes.Canceled:
+			looping = false
+		default:
+			log.Logger.Fatal().
+				Str("rpcService", "grpc.health.v1.Health").
+				Str("rpcMethod", "Watch").
+				Str("func", "WatchClient.Recv").
+				Err(err).
+				Msg("RPC failed")
+		}
+	}
 
 	return event
 }
