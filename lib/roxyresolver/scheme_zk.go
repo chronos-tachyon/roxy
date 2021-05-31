@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"math/rand"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -17,6 +18,94 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
+
+// ZKTarget represents a parsed target spec for the "zk" scheme.
+type ZKTarget struct {
+	Path       string
+	Port       string
+	ServerName string
+	Balancer   BalancerType
+}
+
+// FromTarget breaks apart a Target into component data.
+func (t *ZKTarget) FromTarget(rt Target) error {
+	*t = ZKTarget{}
+
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*t = ZKTarget{}
+		}
+	}()
+
+	if rt.Authority != "" {
+		err := roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
+		return err
+	}
+
+	pathAndPort := rt.Endpoint
+	if pathAndPort == "" {
+		err := roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		return err
+	}
+
+	var hasPort bool
+	if i := strings.IndexByte(pathAndPort, ':'); i >= 0 {
+		t.Path, t.Port, hasPort = pathAndPort[:i], pathAndPort[i+1:], true
+	} else {
+		t.Path, t.Port, hasPort = pathAndPort, "", false
+	}
+
+	err := roxyutil.ValidateZKPath(t.Path)
+	if err != nil {
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
+		return err
+	}
+
+	if hasPort {
+		err = roxyutil.ValidateNamedPort(t.Port)
+		if err != nil {
+			err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
+			return err
+		}
+	}
+
+	t.ServerName = rt.Query.Get("serverName")
+
+	if str := rt.Query.Get("balancer"); str != "" {
+		err = t.Balancer.Parse(str)
+		if err != nil {
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
+			return err
+		}
+	}
+
+	wantZero = false
+	return nil
+}
+
+// AsTarget recombines the component data into a Target.
+func (t ZKTarget) AsTarget() Target {
+	query := make(url.Values, 2)
+	query.Set("balancer", t.Balancer.String())
+	if t.ServerName != "" {
+		query.Set("serverName", t.ServerName)
+	}
+
+	var endpoint string
+	endpoint = t.Path
+	if t.Port != "" {
+		endpoint = t.Path + ":" + t.Port
+	}
+
+	return Target{
+		Scheme:     constants.SchemeZK,
+		Endpoint:   endpoint,
+		Query:      query,
+		ServerName: t.ServerName,
+		HasSlash:   true,
+	}
+}
 
 // NewZKBuilder constructs a new gRPC resolver.Builder for the "zk" scheme.
 func NewZKBuilder(ctx context.Context, rng *rand.Rand, zkConn *zk.Conn, serviceConfigJSON string) resolver.Builder {
@@ -40,7 +129,8 @@ func NewZKResolver(opts Options) (Resolver, error) {
 		panic(errors.New("*zk.Conn is nil"))
 	}
 
-	zkPath, zkPort, balancer, serverName, err := ParseZKTarget(opts.Target)
+	var t ZKTarget
+	err := t.FromTarget(opts.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -48,65 +138,16 @@ func NewZKResolver(opts Options) (Resolver, error) {
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:     opts.Context,
 		Random:      opts.Random,
-		Balancer:    balancer,
-		ResolveFunc: MakeZKResolveFunc(zkConn, zkPath, zkPort, serverName),
+		Balancer:    t.Balancer,
+		ResolveFunc: MakeZKResolveFunc(zkConn, t),
 	})
-}
-
-// ParseZKTarget breaks apart a Target into component data.
-func ParseZKTarget(rt Target) (zkPath string, zkPort string, balancer BalancerType, serverName string, err error) {
-	if rt.Authority != "" {
-		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
-		return
-	}
-
-	pathAndPort := rt.Endpoint
-	if pathAndPort == "" {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
-		return
-	}
-
-	var hasPort bool
-	if i := strings.IndexByte(pathAndPort, ':'); i >= 0 {
-		zkPath, zkPort, hasPort = pathAndPort[:i], pathAndPort[i+1:], false
-	} else {
-		zkPath, zkPort, hasPort = pathAndPort, "", true
-	}
-
-	if !strings.HasPrefix(zkPath, "/") {
-		zkPath = "/" + zkPath
-	}
-	err = roxyutil.ValidateZKPath(zkPath)
-	if err != nil {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
-		return
-	}
-	if hasPort {
-		err = roxyutil.ValidateNamedPort(zkPort)
-		if err != nil {
-			err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
-			return
-		}
-	}
-
-	if str := rt.Query.Get("balancer"); str != "" {
-		err = balancer.Parse(str)
-		if err != nil {
-			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
-			return
-		}
-	}
-
-	serverName = rt.Query.Get("serverName")
-
-	return
 }
 
 // MakeZKResolveFunc constructs a WatchingResolveFunc for building your own
 // custom WatchingResolver with the "zk" scheme.
-func MakeZKResolveFunc(zkConn *zk.Conn, zkPath string, zkPort string, serverName string) WatchingResolveFunc {
+func MakeZKResolveFunc(zkConn *zk.Conn, t ZKTarget) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, backoff expbackoff.ExpBackoff) (<-chan []Event, error) {
-		children, _, zch, err := zkConn.ChildrenW(zkPath)
+		children, _, zch, err := zkConn.ChildrenW(t.Path)
 		err = MapZKError(err)
 		if err != nil {
 			return nil, err
@@ -118,14 +159,14 @@ func MakeZKResolveFunc(zkConn *zk.Conn, zkPath string, zkPort string, serverName
 		alive := make(map[string]struct{}, 16)
 
 		for _, child := range children {
-			childPath := path.Join(zkPath, child)
+			childPath := path.Join(t.Path, child)
 			alive[childPath] = struct{}{}
 			wg.Add(1)
-			go zkChildThread(ctx, wg, backoff, zkConn, zkPort, serverName, childEventCh, childDoneCh, childPath)
+			go zkChildThread(ctx, wg, backoff, zkConn, t.Port, t.ServerName, childEventCh, childDoneCh, childPath)
 		}
 
 		wg.Add(1)
-		go zkParentThread(ctx, wg, backoff, zkConn, zkPath, zkPort, serverName, zch, childEventCh, childDoneCh, ch, alive)
+		go zkParentThread(ctx, wg, backoff, zkConn, t.Path, t.Port, t.ServerName, zch, childEventCh, childDoneCh, ch, alive)
 
 		return ch, nil
 	}
@@ -166,7 +207,8 @@ func (b zkBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts re
 		return nil, err
 	}
 
-	zkPath, zkPort, _, serverName, err := ParseZKTarget(rt)
+	var t ZKTarget
+	err := t.FromTarget(rt)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +216,7 @@ func (b zkBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts re
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:           b.ctx,
 		Random:            b.rng,
-		ResolveFunc:       MakeZKResolveFunc(b.zkConn, zkPath, zkPort, serverName),
+		ResolveFunc:       MakeZKResolveFunc(b.zkConn, t),
 		ClientConn:        cc,
 		ServiceConfigJSON: b.serviceConfigJSON,
 	})

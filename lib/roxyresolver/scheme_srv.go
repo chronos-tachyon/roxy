@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,6 +15,128 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
+
+// SRVTarget represents a parsed target spec for the "srv" scheme.
+type SRVTarget struct {
+	ResolverAddr     *net.TCPAddr
+	Domain           string
+	Service          string
+	ServerName       string
+	Balancer         BalancerType
+	PollInterval     time.Duration
+	CooldownInterval time.Duration
+}
+
+// FromTarget breaks apart a Target into component data.
+func (t *SRVTarget) FromTarget(rt Target) error {
+	*t = SRVTarget{}
+
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*t = SRVTarget{}
+		}
+	}()
+
+	var err error
+
+	t.ResolverAddr, err = parseNetResolver(rt.Authority)
+	if err != nil {
+		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: err}
+		return err
+	}
+
+	domainAndService := rt.Endpoint
+	if domainAndService == "" {
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		return err
+	}
+
+	if i := strings.IndexByte(domainAndService, '/'); i >= 0 {
+		t.Domain, t.Service = domainAndService[:i], domainAndService[i+1:]
+	} else {
+		t.Domain, t.Service = domainAndService, ""
+	}
+
+	if j := strings.IndexByte(t.Service, '/'); j >= 0 {
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectOneSlash}
+		return err
+	}
+
+	if t.Domain == "" {
+		err = roxyutil.HostError{Host: t.Domain, Err: roxyutil.ErrExpectNonEmpty}
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
+		return err
+	}
+
+	t.ServerName = rt.Query.Get("serverName")
+
+	if str := rt.Query.Get("balancer"); str != "" {
+		err = t.Balancer.Parse(str)
+		if err != nil {
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
+			return err
+		}
+	}
+
+	if str := rt.Query.Get("pollInterval"); str != "" {
+		t.PollInterval, err = time.ParseDuration(str)
+		if err != nil {
+			err = roxyutil.QueryParamError{Name: "pollInterval", Value: str, Err: err}
+			return err
+		}
+	}
+
+	if str := rt.Query.Get("cooldownInterval"); str != "" {
+		t.CooldownInterval, err = time.ParseDuration(str)
+		if err != nil {
+			err = roxyutil.QueryParamError{Name: "cooldownInterval", Value: str, Err: err}
+			return err
+		}
+	}
+
+	wantZero = false
+	return nil
+}
+
+// AsTarget recombines the component data into a Target.
+func (t SRVTarget) AsTarget() Target {
+	query := make(url.Values, 4)
+	query.Set("balancer", t.Balancer.String())
+	if t.ServerName != "" {
+		query.Set("serverName", t.ServerName)
+	}
+	if t.PollInterval != 0 {
+		query.Set("pollInterval", t.PollInterval.String())
+	}
+	if t.CooldownInterval != 0 {
+		query.Set("cooldownInterval", t.CooldownInterval.String())
+	}
+
+	var authority string
+	if t.ResolverAddr != nil {
+		authority = t.ResolverAddr.String()
+	}
+
+	var endpoint string
+	endpoint = t.Domain
+	if t.Service != "" {
+		endpoint = t.Domain + "/" + t.Service
+	}
+
+	return Target{
+		Scheme:     constants.SchemeSRV,
+		Authority:  authority,
+		Endpoint:   endpoint,
+		Query:      query,
+		ServerName: t.ServerName,
+		HasSlash:   true,
+	}
+}
+
+func (t SRVTarget) NetResolver() *net.Resolver {
+	return makeNetResolver(t.ResolverAddr)
+}
 
 // NewSRVBuilder constructs a new gRPC resolver.Builder for the "srv" scheme.
 func NewSRVBuilder(ctx context.Context, rng *rand.Rand, serviceConfigJSON string) resolver.Builder {
@@ -29,7 +152,8 @@ func NewSRVResolver(opts Options) (Resolver, error) {
 		panic(errors.New("context.Context is nil"))
 	}
 
-	res, name, service, balancer, pollInterval, cdInterval, serverName, err := ParseSRVTarget(opts.Target)
+	var t SRVTarget
+	err := t.FromTarget(opts.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -37,85 +161,26 @@ func NewSRVResolver(opts Options) (Resolver, error) {
 	return NewPollingResolver(PollingResolverOptions{
 		Context:          opts.Context,
 		Random:           opts.Random,
-		PollInterval:     pollInterval,
-		CooldownInterval: cdInterval,
-		Balancer:         balancer,
-		ResolveFunc:      MakeSRVResolveFunc(opts.Context, res, name, service, serverName),
+		PollInterval:     t.PollInterval,
+		CooldownInterval: t.CooldownInterval,
+		Balancer:         t.Balancer,
+		ResolveFunc:      MakeSRVResolveFunc(opts.Context, t),
 	})
-}
-
-// ParseSRVTarget breaks apart a Target into component data.
-func ParseSRVTarget(rt Target) (res *net.Resolver, name string, service string, balancer BalancerType, pollInterval time.Duration, cdInterval time.Duration, serverName string, err error) {
-	res, err = parseNetResolver(rt.Authority)
-	if err != nil {
-		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: err}
-		return
-	}
-
-	nameAndService := rt.Endpoint
-	if nameAndService == "" {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
-		return
-	}
-
-	i := strings.IndexByte(nameAndService, '/')
-	if i >= 0 {
-		name, service = nameAndService[:i], nameAndService[i+1:]
-	} else {
-		name, service = nameAndService, ""
-	}
-	if j := strings.IndexByte(service, '/'); j >= 0 {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectOneSlash}
-		return
-	}
-
-	if name == "" {
-		err = roxyutil.EndpointError{
-			Endpoint: rt.Endpoint,
-			Err:      roxyutil.HostError{Host: name, Err: roxyutil.ErrExpectNonEmpty},
-		}
-		return
-	}
-
-	if str := rt.Query.Get("balancer"); str != "" {
-		err = balancer.Parse(str)
-		if err != nil {
-			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
-			return
-		}
-	}
-
-	if str := rt.Query.Get("pollInterval"); str != "" {
-		pollInterval, err = time.ParseDuration(str)
-		if err != nil {
-			err = roxyutil.QueryParamError{Name: "pollInterval", Value: str, Err: err}
-			return
-		}
-	}
-
-	if str := rt.Query.Get("cooldownInterval"); str != "" {
-		cdInterval, err = time.ParseDuration(str)
-		if err != nil {
-			err = roxyutil.QueryParamError{Name: "cooldownInterval", Value: str, Err: err}
-			return
-		}
-	}
-
-	serverName = rt.Query.Get("serverName")
-
-	return
 }
 
 // MakeSRVResolveFunc constructs a PollingResolveFunc for building your own
 // custom PollingResolver with the "srv" scheme.
-func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, service string, serverName string) PollingResolveFunc {
+func MakeSRVResolveFunc(ctx context.Context, t SRVTarget) PollingResolveFunc {
+	res := t.NetResolver()
+	domain := t.Domain
 	proto := constants.NetTCP
+	service := t.Service
 	if service == "" {
 		proto = ""
 	}
 	return func() ([]Resolved, error) {
 		// Resolve the SRV records.
-		_, records, err := roxyutil.LookupSRV(ctx, res, service, proto, name)
+		_, records, err := roxyutil.LookupSRV(ctx, res, service, proto, domain)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +194,7 @@ func MakeSRVResolveFunc(ctx context.Context, res *net.Resolver, name string, ser
 				return nil, err
 			}
 
-			srvServerName := serverName
+			srvServerName := t.ServerName
 			if srvServerName == "" {
 				srvServerName = strings.TrimRight(record.Target, ".")
 			}
@@ -185,7 +250,8 @@ func (b srvBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts r
 		return nil, err
 	}
 
-	res, name, service, _, pollInterval, cdInterval, serverName, err := ParseSRVTarget(rt)
+	var t SRVTarget
+	err := t.FromTarget(rt)
 	if err != nil {
 		return nil, err
 	}
@@ -193,9 +259,9 @@ func (b srvBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts r
 	return NewPollingResolver(PollingResolverOptions{
 		Context:           b.ctx,
 		Random:            b.rng,
-		PollInterval:      pollInterval,
-		CooldownInterval:  cdInterval,
-		ResolveFunc:       MakeSRVResolveFunc(b.ctx, res, name, service, serverName),
+		PollInterval:      t.PollInterval,
+		CooldownInterval:  t.CooldownInterval,
+		ResolveFunc:       MakeSRVResolveFunc(b.ctx, t),
 		ClientConn:        cc,
 		ServiceConfigJSON: b.serviceConfigJSON,
 	})

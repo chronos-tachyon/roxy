@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -15,6 +16,96 @@ import (
 	"github.com/chronos-tachyon/roxy/lib/expbackoff"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
+
+// EtcdTarget represents a parsed target spec for the "etcd" scheme.
+type EtcdTarget struct {
+	Path       string
+	Port       string
+	ServerName string
+	Balancer   BalancerType
+}
+
+// FromTarget breaks apart a Target into component data.
+func (t *EtcdTarget) FromTarget(rt Target) error {
+	*t = EtcdTarget{}
+
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*t = EtcdTarget{}
+		}
+	}()
+
+	if rt.Authority != "" {
+		err := roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
+		return err
+	}
+
+	pathAndPort := rt.Endpoint
+	if pathAndPort == "" {
+		err := roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		return err
+	}
+
+	var hasPort bool
+	if i := strings.IndexByte(pathAndPort, ':'); i >= 0 {
+		t.Path, t.Port, hasPort = pathAndPort[:i], pathAndPort[i+1:], true
+	} else {
+		t.Path, t.Port, hasPort = pathAndPort, "", false
+	}
+
+	if !strings.HasSuffix(t.Path, "/") {
+		t.Path += "/"
+	}
+	err := roxyutil.ValidateEtcdPath(t.Path)
+	if err != nil {
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
+		return err
+	}
+	if hasPort {
+		err = roxyutil.ValidateNamedPort(t.Port)
+		if err != nil {
+			err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
+			return err
+		}
+	}
+
+	t.ServerName = rt.Query.Get("serverName")
+
+	if str := rt.Query.Get("balancer"); str != "" {
+		err = t.Balancer.Parse(str)
+		if err != nil {
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
+			return err
+		}
+	}
+
+	wantZero = false
+	return nil
+}
+
+// AsTarget recombines the component data into a Target.
+func (t EtcdTarget) AsTarget() Target {
+	query := make(url.Values, 2)
+	query.Set("balancer", t.Balancer.String())
+	if t.ServerName != "" {
+		query.Set("serverName", t.ServerName)
+	}
+
+	var endpoint string
+	endpoint = t.Path
+	if t.Port != "" {
+		endpoint = t.Path + ":" + t.Port
+	}
+
+	return Target{
+		Scheme:     constants.SchemeEtcd,
+		Endpoint:   endpoint,
+		Query:      query,
+		ServerName: t.ServerName,
+		HasSlash:   true,
+	}
+}
 
 // NewEtcdBuilder constructs a new gRPC resolver.Builder for the "etcd" scheme.
 func NewEtcdBuilder(ctx context.Context, rng *rand.Rand, etcd *v3.Client, serviceConfigJSON string) resolver.Builder {
@@ -38,7 +129,8 @@ func NewEtcdResolver(opts Options) (Resolver, error) {
 		panic(errors.New("*v3.Client is nil"))
 	}
 
-	etcdPath, etcdPort, balancer, serverName, err := ParseEtcdTarget(opts.Target)
+	var t EtcdTarget
+	err := t.FromTarget(opts.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -46,69 +138,20 @@ func NewEtcdResolver(opts Options) (Resolver, error) {
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:     opts.Context,
 		Random:      opts.Random,
-		Balancer:    balancer,
-		ResolveFunc: MakeEtcdResolveFunc(etcd, etcdPath, etcdPort, serverName),
+		Balancer:    t.Balancer,
+		ResolveFunc: MakeEtcdResolveFunc(etcd, t),
 	})
-}
-
-// ParseEtcdTarget breaks apart a Target into component data.
-func ParseEtcdTarget(rt Target) (etcdPath string, etcdPort string, balancer BalancerType, serverName string, err error) {
-	if rt.Authority != "" {
-		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
-		return
-	}
-
-	pathAndPort := rt.Endpoint
-	if pathAndPort == "" {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
-		return
-	}
-
-	var hasPort bool
-	if i := strings.IndexByte(pathAndPort, ':'); i >= 0 {
-		etcdPath, etcdPort, hasPort = pathAndPort[:i], pathAndPort[i+1:], true
-	} else {
-		etcdPath, etcdPort, hasPort = pathAndPort, "", false
-	}
-
-	if !strings.HasSuffix(etcdPath, "/") {
-		etcdPath += "/"
-	}
-	err = roxyutil.ValidateEtcdPath(etcdPath)
-	if err != nil {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
-		return
-	}
-	if hasPort {
-		err = roxyutil.ValidateNamedPort(etcdPort)
-		if err != nil {
-			err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
-			return
-		}
-	}
-
-	if str := rt.Query.Get("balancer"); str != "" {
-		err = balancer.Parse(str)
-		if err != nil {
-			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
-			return
-		}
-	}
-
-	serverName = rt.Query.Get("serverName")
-
-	return
 }
 
 // MakeEtcdResolveFunc constructs a WatchingResolveFunc for building your own
 // custom WatchingResolver with the "etcd" scheme.
-func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPath string, etcdPort string, serverName string) WatchingResolveFunc {
+func MakeEtcdResolveFunc(etcdClient *v3.Client, t EtcdTarget) WatchingResolveFunc {
 	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
 		ch := make(chan []Event)
 
 		resp, err := etcdClient.KV.Get(
 			ctx,
-			etcdPath,
+			t.Path,
 			v3.WithPrefix(),
 			v3.WithSerializable())
 		err = MapEtcdError(err)
@@ -119,7 +162,7 @@ func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPath string, etcdPort string
 
 		wch := etcdClient.Watcher.Watch(
 			ctx,
-			etcdPath,
+			t.Path,
 			v3.WithPrefix(),
 			v3.WithRev(resp.Header.Revision+1))
 
@@ -133,7 +176,7 @@ func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPath string, etcdPort string
 			if len(resp.Kvs) != 0 {
 				events := make([]Event, 0, len(resp.Kvs))
 				for _, kv := range resp.Kvs {
-					if ev := etcdMapEvent(etcdPort, serverName, v3.EventTypePut, kv); ev.Type != NoOpEvent {
+					if ev := etcdMapEvent(t.Port, t.ServerName, v3.EventTypePut, kv); ev.Type != NoOpEvent {
 						events = append(events, ev)
 					}
 				}
@@ -156,7 +199,7 @@ func MakeEtcdResolveFunc(etcdClient *v3.Client, etcdPath string, etcdPort string
 					}
 					events := make([]Event, 0, n)
 					for _, wev := range wresp.Events {
-						if ev := etcdMapEvent(etcdPort, serverName, wev.Type, wev.Kv); ev.Type != NoOpEvent {
+						if ev := etcdMapEvent(t.Port, t.ServerName, wev.Type, wev.Kv); ev.Type != NoOpEvent {
 							events = append(events, ev)
 						}
 					}
@@ -200,7 +243,8 @@ func (b etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts 
 		return nil, err
 	}
 
-	etcdPath, etcdPort, _, serverName, err := ParseEtcdTarget(rt)
+	var t EtcdTarget
+	err := t.FromTarget(rt)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +252,7 @@ func (b etcdBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts 
 	return NewWatchingResolver(WatchingResolverOptions{
 		Context:           b.ctx,
 		Random:            b.rng,
-		ResolveFunc:       MakeEtcdResolveFunc(b.etcd, etcdPath, etcdPort, serverName),
+		ResolveFunc:       MakeEtcdResolveFunc(b.etcd, t),
 		ClientConn:        cc,
 		ServiceConfigJSON: b.serviceConfigJSON,
 	})

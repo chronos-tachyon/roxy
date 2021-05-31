@@ -42,9 +42,9 @@ func makeStaticRecordsForIP(host string, port string, serverName string) []Resol
 	return records
 }
 
-func parseNetResolver(str string) (*net.Resolver, error) {
+func parseNetResolver(str string) (*net.TCPAddr, error) {
 	if str == "" {
-		return &net.Resolver{}, nil
+		return nil, nil
 	}
 
 	tcpAddr, err := misc.ParseTCPAddr(str, constants.PortDNS)
@@ -52,11 +52,18 @@ func parseNetResolver(str string) (*net.Resolver, error) {
 		return nil, err
 	}
 
-	address := tcpAddr.String()
-	dialFunc := func(ctx context.Context, network string, _ string) (net.Conn, error) {
-		var defaultDialer net.Dialer
-		return defaultDialer.DialContext(ctx, network, address)
-	}
+	return tcpAddr, nil
+}
 
-	return &net.Resolver{PreferGo: true, Dial: dialFunc}, nil
+func makeNetResolver(tcpAddr *net.TCPAddr) *net.Resolver {
+	res := &net.Resolver{}
+	if tcpAddr != nil {
+		address := tcpAddr.String()
+		res.PreferGo = true
+		res.Dial = func(ctx context.Context, network string, _ string) (net.Conn, error) {
+			var defaultDialer net.Dialer
+			return defaultDialer.DialContext(ctx, network, address)
+		}
+	}
+	return res
 }

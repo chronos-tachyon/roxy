@@ -537,6 +537,28 @@ var _ error = ATCServiceNameError{}
 
 // }}}
 
+// type ATCShardIDError {{{
+
+// ATCShardIDError represents failure to parse an ATC shard ID.
+type ATCShardIDError struct {
+	ShardID string
+	Err     error
+}
+
+// Error fulfills the error interface.
+func (err ATCShardIDError) Error() string {
+	return fmt.Sprintf("invalid ATC shard ID %q: %v", err.ShardID, err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err ATCShardIDError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = ATCShardIDError{}
+
+// }}}
+
 // type ATCLocationError {{{
 
 // ATCLocationError represents failure to parse an ATC location.

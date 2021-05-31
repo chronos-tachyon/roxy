@@ -256,53 +256,58 @@ func (rt *Target) postProcessUnix() error {
 	if rt.HasSlash && (rt.Endpoint == "" || (rt.Endpoint[0] != '/' && rt.Endpoint[0] != '@' && rt.Endpoint[0] != '\x00')) {
 		rt.Endpoint = "/" + rt.Endpoint
 	}
-	unixAddr, _, serverName, err := ParseUnixTarget(*rt)
+	var t UnixTarget
+	err := t.FromTarget(*rt)
 	if err != nil {
 		return err
 	}
-	if unixAddr.Name != "" && unixAddr.Name[0] == '\x00' {
+	if t.IsAbstract {
 		rt.Scheme = constants.SchemeUnixAbstract
-		rt.Endpoint = unixAddr.Name[1:]
+		rt.Endpoint = t.Addr.Name[1:]
 	}
 	rt.Authority = ""
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 
 func (rt *Target) postProcessUnixAbstract() error {
-	_, _, serverName, err := ParseUnixTarget(*rt)
+	var t UnixTarget
+	err := t.FromTarget(*rt)
 	if err != nil {
 		return err
 	}
 	rt.Authority = ""
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 
 func (rt *Target) postProcessIP() error {
-	_, _, serverName, err := ParseIPTarget(*rt, constants.PortHTTPS)
+	var t IPTarget
+	err := t.FromTarget(*rt, constants.PortHTTPS)
 	if err != nil {
 		return err
 	}
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 
 func (rt *Target) postProcessDNS() error {
-	_, _, _, _, _, _, serverName, err := ParseDNSTarget(*rt, constants.PortHTTPS)
+	var t DNSTarget
+	err := t.FromTarget(*rt, constants.PortHTTPS)
 	if err != nil {
 		return err
 	}
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 
 func (rt *Target) postProcessSRV() error {
-	_, _, _, _, _, _, serverName, err := ParseSRVTarget(*rt)
+	var t SRVTarget
+	err := t.FromTarget(*rt)
 	if err != nil {
 		return err
 	}
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 
@@ -310,29 +315,32 @@ func (rt *Target) postProcessZK() error {
 	if rt.HasSlash && (rt.Endpoint == "" || rt.Endpoint[0] != '/') {
 		rt.Endpoint = "/" + rt.Endpoint
 	}
-	_, _, _, serverName, err := ParseZKTarget(*rt)
+	var t ZKTarget
+	err := t.FromTarget(*rt)
 	if err != nil {
 		return err
 	}
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 
 func (rt *Target) postProcessEtcd() error {
-	_, _, _, serverName, err := ParseEtcdTarget(*rt)
+	var t EtcdTarget
+	err := t.FromTarget(*rt)
 	if err != nil {
 		return err
 	}
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 
 func (rt *Target) postProcessATC() error {
-	_, _, _, _, _, serverName, err := ParseATCTarget(*rt)
+	var t ATCTarget
+	err := t.FromTarget(*rt)
 	if err != nil {
 		return err
 	}
-	rt.ServerName = serverName
+	rt.ServerName = t.ServerName
 	return nil
 }
 

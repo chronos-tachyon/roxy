@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/url"
+	"strings"
 
 	"google.golang.org/grpc/resolver"
 
@@ -11,6 +13,88 @@ import (
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
+
+// IPTarget represents a parsed target spec for the "ip" scheme.
+type IPTarget struct {
+	Addrs      []*net.TCPAddr
+	ServerName string
+	Balancer   BalancerType
+}
+
+// FromTarget breaks apart a Target into component data.
+func (t *IPTarget) FromTarget(rt Target, defaultPort string) error {
+	*t = IPTarget{}
+
+	wantZero := true
+	defer func() {
+		if wantZero {
+			*t = IPTarget{}
+		}
+	}()
+
+	if rt.Authority != "" {
+		err := roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
+		return err
+	}
+
+	ipPortListStr, err := roxyutil.ExpandString(rt.Endpoint)
+	if err != nil {
+		err := roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
+		return err
+	}
+	if ipPortListStr == "" {
+		err := roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		return err
+	}
+
+	t.Addrs, err = misc.ParseTCPAddrList(ipPortListStr, defaultPort)
+	if err != nil {
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
+		return err
+	}
+	if len(t.Addrs) == 0 {
+		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
+		return err
+	}
+
+	t.ServerName = rt.Query.Get("serverName")
+	if t.ServerName == "" && len(t.Addrs) == 1 {
+		t.ServerName = t.Addrs[0].IP.String()
+	}
+
+	if str := rt.Query.Get("balancer"); str != "" {
+		err = t.Balancer.Parse(str)
+		if err != nil {
+			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
+			return err
+		}
+	}
+
+	wantZero = false
+	return nil
+}
+
+// AsTarget recombines the component data into a Target.
+func (t IPTarget) AsTarget() Target {
+	query := make(url.Values, 2)
+	query.Set("balancer", t.Balancer.String())
+	if t.ServerName != "" {
+		query.Set("serverName", t.ServerName)
+	}
+
+	addrStrings := make([]string, len(t.Addrs))
+	for index, addr := range t.Addrs {
+		addrStrings[index] = addr.String()
+	}
+
+	return Target{
+		Scheme:     constants.SchemeIP,
+		Endpoint:   strings.Join(addrStrings, ","),
+		Query:      query,
+		ServerName: t.ServerName,
+		HasSlash:   true,
+	}
+}
 
 // NewIPBuilder constructs a new gRPC resolver.Builder for the "ip" scheme.
 func NewIPBuilder(rng *rand.Rand, serviceConfigJSON string) resolver.Builder {
@@ -24,57 +108,18 @@ func NewIPResolver(opts Options) (Resolver, error) {
 		defaultPort = constants.PortHTTPS
 	}
 
-	tcpAddrs, balancer, serverName, err := ParseIPTarget(opts.Target, defaultPort)
+	var t IPTarget
+	err := t.FromTarget(opts.Target, defaultPort)
 	if err != nil {
 		return nil, err
 	}
 
-	records := makeIPRecords(tcpAddrs, serverName)
+	records := makeIPRecords(t.Addrs, t.ServerName)
 	return NewStaticResolver(StaticResolverOptions{
 		Random:   opts.Random,
-		Balancer: balancer,
+		Balancer: t.Balancer,
 		Records:  records,
 	})
-}
-
-// ParseIPTarget breaks apart a Target into component data.
-func ParseIPTarget(rt Target, defaultPort string) (tcpAddrs []*net.TCPAddr, balancer BalancerType, serverName string, err error) {
-	if rt.Authority != "" {
-		err = roxyutil.AuthorityError{Authority: rt.Authority, Err: roxyutil.ErrExpectEmpty}
-		return
-	}
-
-	ipPortListStr, err := roxyutil.ExpandString(rt.Endpoint)
-	if err != nil {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
-		return
-	}
-	if ipPortListStr == "" {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
-		return
-	}
-
-	tcpAddrs, err = misc.ParseTCPAddrList(ipPortListStr, defaultPort)
-	if err != nil {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
-		return
-	}
-	if len(tcpAddrs) == 0 {
-		err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: roxyutil.ErrExpectNonEmpty}
-		return
-	}
-
-	if str := rt.Query.Get("balancer"); str != "" {
-		err = balancer.Parse(str)
-		if err != nil {
-			err = roxyutil.QueryParamError{Name: "balancer", Value: str, Err: err}
-			return
-		}
-	}
-
-	serverName = rt.Query.Get("serverName")
-
-	return
 }
 
 // type ipBuilder {{{
@@ -94,12 +139,13 @@ func (b ipBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts re
 		return nil, err
 	}
 
-	tcpAddrs, _, serverName, err := ParseIPTarget(rt, constants.PortHTTPS)
+	var t IPTarget
+	err := t.FromTarget(rt, constants.PortHTTPS)
 	if err != nil {
 		return nil, err
 	}
 
-	records := makeIPRecords(tcpAddrs, serverName)
+	records := makeIPRecords(t.Addrs, t.ServerName)
 	return NewStaticResolver(StaticResolverOptions{
 		Random:            b.rng,
 		Records:           records,

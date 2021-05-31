@@ -4,12 +4,199 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/url"
 	"reflect"
 	"testing"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 )
+
+func TestUnixTarget_RoundTrip(t *testing.T) {
+	type testRow struct {
+		Input   string
+		RoxyIn  Target
+		Unix    UnixTarget
+		RoxyOut Target
+		Output  string
+	}
+
+	testData := []testRow{
+		{
+			Input: "unix:/path/to/socket",
+			RoxyIn: Target{
+				Scheme:     constants.SchemeUnix,
+				Endpoint:   "/path/to/socket",
+				ServerName: "localhost",
+				HasSlash:   false,
+			},
+			Unix: UnixTarget{
+				Addr:       &net.UnixAddr{Net: constants.NetUnix, Name: "/path/to/socket"},
+				IsAbstract: false,
+				ServerName: "localhost",
+				Balancer:   RandomBalancer,
+			},
+			RoxyOut: Target{
+				Scheme:     constants.SchemeUnix,
+				Endpoint:   "/path/to/socket",
+				Query:      url.Values{"balancer": []string{"random"}},
+				ServerName: "localhost",
+				HasSlash:   true,
+			},
+			Output: "unix:////path/to/socket?balancer=random",
+		},
+		{
+			Input: "unix:/path/to/socket?serverName=example.com&balancer=rr",
+			RoxyIn: Target{
+				Scheme:     constants.SchemeUnix,
+				Endpoint:   "/path/to/socket",
+				ServerName: "example.com",
+				Query:      url.Values{"balancer": []string{"rr"}, "serverName": []string{"example.com"}},
+				HasSlash:   false,
+			},
+			Unix: UnixTarget{
+				Addr:       &net.UnixAddr{Net: constants.NetUnix, Name: "/path/to/socket"},
+				IsAbstract: false,
+				ServerName: "example.com",
+				Balancer:   RoundRobinBalancer,
+			},
+			RoxyOut: Target{
+				Scheme:     constants.SchemeUnix,
+				Endpoint:   "/path/to/socket",
+				Query:      url.Values{"balancer": []string{"roundRobin"}, "serverName": []string{"example.com"}},
+				ServerName: "example.com",
+				HasSlash:   true,
+			},
+			Output: "unix:////path/to/socket?balancer=roundRobin&serverName=example.com",
+		},
+		{
+			Input: "unix://localhost/path/to/socket?serverName=example.com",
+			RoxyIn: Target{
+				Scheme:     constants.SchemeUnix,
+				Endpoint:   "/path/to/socket",
+				ServerName: "example.com",
+				Query:      url.Values{"serverName": []string{"example.com"}},
+				HasSlash:   true,
+			},
+			Unix: UnixTarget{
+				Addr:       &net.UnixAddr{Net: constants.NetUnix, Name: "/path/to/socket"},
+				IsAbstract: false,
+				ServerName: "example.com",
+				Balancer:   RandomBalancer,
+			},
+			RoxyOut: Target{
+				Scheme:     constants.SchemeUnix,
+				Endpoint:   "/path/to/socket",
+				Query:      url.Values{"balancer": []string{"random"}, "serverName": []string{"example.com"}},
+				ServerName: "example.com",
+				HasSlash:   true,
+			},
+			Output: "unix:////path/to/socket?balancer=random&serverName=example.com",
+		},
+		{
+			Input: "unix:@abstract-name",
+			RoxyIn: Target{
+				Scheme:     constants.SchemeUnixAbstract,
+				Endpoint:   "abstract-name",
+				ServerName: "localhost",
+				HasSlash:   false,
+			},
+			Unix: UnixTarget{
+				Addr:       &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-name"},
+				IsAbstract: true,
+				ServerName: "localhost",
+				Balancer:   RandomBalancer,
+			},
+			RoxyOut: Target{
+				Scheme:     constants.SchemeUnixAbstract,
+				Endpoint:   "abstract-name",
+				Query:      url.Values{"balancer": []string{"random"}},
+				ServerName: "localhost",
+				HasSlash:   true,
+			},
+			Output: "unix-abstract:///abstract-name?balancer=random",
+		},
+		{
+			Input: "unix-abstract:abstract-name?serverName=localhost",
+			RoxyIn: Target{
+				Scheme:     constants.SchemeUnixAbstract,
+				Endpoint:   "abstract-name",
+				Query:      url.Values{"serverName": []string{"localhost"}},
+				ServerName: "localhost",
+				HasSlash:   false,
+			},
+			Unix: UnixTarget{
+				Addr:       &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-name"},
+				IsAbstract: true,
+				ServerName: "localhost",
+				Balancer:   RandomBalancer,
+			},
+			RoxyOut: Target{
+				Scheme:     constants.SchemeUnixAbstract,
+				Endpoint:   "abstract-name",
+				Query:      url.Values{"balancer": []string{"random"}},
+				ServerName: "localhost",
+				HasSlash:   true,
+			},
+			Output: "unix-abstract:///abstract-name?balancer=random",
+		},
+		{
+			Input: "unix-abstract://localhost/abstract-name",
+			RoxyIn: Target{
+				Scheme:     constants.SchemeUnixAbstract,
+				Endpoint:   "abstract-name",
+				ServerName: "localhost",
+				HasSlash:   true,
+			},
+			Unix: UnixTarget{
+				Addr:       &net.UnixAddr{Net: constants.NetUnix, Name: "\x00abstract-name"},
+				IsAbstract: true,
+				ServerName: "localhost",
+				Balancer:   RandomBalancer,
+			},
+			RoxyOut: Target{
+				Scheme:     constants.SchemeUnixAbstract,
+				Endpoint:   "abstract-name",
+				Query:      url.Values{"balancer": []string{"random"}},
+				ServerName: "localhost",
+				HasSlash:   true,
+			},
+			Output: "unix-abstract:///abstract-name?balancer=random",
+		},
+	}
+
+	for _, row := range testData {
+		t.Run(row.Input, func(t *testing.T) {
+			var roxyIn Target
+			if err := roxyIn.Parse(row.Input); err != nil {
+				t.Errorf("Target.Parse failed: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(roxyIn, row.RoxyIn) {
+				t.Errorf("Target.Parse returned %#v, expected %#v", roxyIn, row.RoxyIn)
+			}
+
+			var target UnixTarget
+			if err := target.FromTarget(roxyIn); err != nil {
+				t.Errorf("UnixTarget.FromTarget failed: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(target, row.Unix) {
+				t.Errorf("UnixTarget.FromTarget returned %#v, expected %#v", target, row.Unix)
+			}
+
+			roxyOut := target.AsTarget()
+			if !reflect.DeepEqual(roxyOut, row.RoxyOut) {
+				t.Errorf("UnixTarget.AsTarget returned %#v, expected %#v", roxyOut, row.RoxyOut)
+			}
+
+			output := roxyOut.String()
+			if output != row.Output {
+				t.Errorf("Target.String returned %q, expected %q", output, row.Output)
+			}
+		})
+	}
+}
 
 func TestNewUnixResolver(t *testing.T) {
 	var cancelFn context.CancelFunc
