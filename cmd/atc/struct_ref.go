@@ -344,7 +344,7 @@ func (ref *Ref) migrationThread(
 	cc, atc, err := ref.PeerConn(ctx, peerData.Addr)
 	if err != nil {
 		log.Logger.Error().
-			Str("addr", peerData.Addr.String()).
+			Stringer("addr", peerData.Addr).
 			Err(err).
 			Msg("Ref.PeerConn failed")
 	}
@@ -352,7 +352,7 @@ func (ref *Ref) migrationThread(
 	defer func() {
 		if err := cc.Close(); err != nil {
 			log.Logger.Error().
-				Str("addr", peerData.Addr.String()).
+				Stringer("addr", peerData.Addr).
 				Err(err).
 				Msg("grpc.ClientConn.Close failed")
 		}
@@ -414,8 +414,8 @@ func (ref *Ref) migrationThread(
 			_, err := atc.Transfer(ctx, req)
 			if err != nil {
 				log.Logger.Error().
-					Str("addr", peerData.Addr.String()).
-					Interface("key", shardData.Key()).
+					Stringer("addr", peerData.Addr).
+					Stringer("key", shardData.Key()).
 					Err(err).
 					Msg("AirTrafficControl.Transfer RPC failed")
 			}

@@ -71,6 +71,7 @@ func (t *SRVTarget) FromTarget(rt Target) error {
 
 	t.ServerName = rt.Query.Get("serverName")
 
+	t.Balancer = SRVBalancer
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = t.Balancer.Parse(str)
 		if err != nil {
@@ -102,7 +103,9 @@ func (t *SRVTarget) FromTarget(rt Target) error {
 // AsTarget recombines the component data into a Target.
 func (t SRVTarget) AsTarget() Target {
 	query := make(url.Values, 4)
-	query.Set("balancer", t.Balancer.String())
+	if t.Balancer != SRVBalancer {
+		query.Set("balancer", t.Balancer.String())
+	}
 	if t.ServerName != "" {
 		query.Set("serverName", t.ServerName)
 	}

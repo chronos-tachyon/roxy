@@ -52,22 +52,22 @@ func (s *ATCServer) Lookup(ctx context.Context, req *roxy_v0.LookupRequest) (*ro
 		AvgDemandedCostPerQuery:           svc.AvgDemandedCPQ,
 	}
 
-	if req.HasShardId {
-		shardData := s.ref.Shard(key)
-		if shardData != nil {
-			resp.Shards = append(resp.Shards, shardData.ToProto())
-		}
-	} else {
-		shardLimit := ShardID(svc.EffectiveNumShards())
+	if svc.IsSharded && !req.HasShardId {
+		shardLimit := ShardID(svc.NumShards)
 		s.ref.mu.Lock()
 		for id := ShardID(0); id < shardLimit; id++ {
-			key2 := Key{key.ServiceName, id}
+			key2 := Key{key.ServiceName, id, true}
 			shardData := s.ref.shardsByKey[key2]
 			if shardData != nil {
 				resp.Shards = append(resp.Shards, shardData.ToProto())
 			}
 		}
 		s.ref.mu.Unlock()
+	} else {
+		shardData := s.ref.Shard(key)
+		if shardData != nil {
+			resp.Shards = append(resp.Shards, shardData.ToProto())
+		}
 	}
 
 	return resp, nil
@@ -301,7 +301,7 @@ func (s *ATCServer) ServerAnnounce(sas roxy_v0.AirTrafficControl_ServerAnnounceS
 					Str("rpcService", "roxy.v0.AirTrafficControl").
 					Str("rpcMethod", "ServerAnnounce").
 					Str("rpcInterface", "primary").
-					Str("statusCode", codes.NotFound.String()).
+					Stringer("statusCode", codes.NotFound).
 					Msg("Return")
 
 				return status.Errorf(codes.NotFound, "Key %v no longer exists", shardData.Key())

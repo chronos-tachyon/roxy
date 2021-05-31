@@ -94,6 +94,7 @@ message ServerAnnounceResponse {
 message ClientAssignRequest {
   ClientData first = 1;
   uint64 cost_counter = 2;
+  bool is_serving = 3;
 }
 
 message ClientAssignResponse {

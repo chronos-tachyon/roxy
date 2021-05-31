@@ -203,7 +203,7 @@ func (impl *Impl) doComputeRanges() error {
 
 	var currKey Key
 	if !currHasLo && currIndex == 0 {
-		currKey = Key{"", 0}
+		currKey = Key{"", 0, false}
 	} else if !currHasLo {
 		currKey = impl.PeerList[currIndex-1].Range.Hi
 	} else {
@@ -213,7 +213,7 @@ func (impl *Impl) doComputeRanges() error {
 	for currIndex < peerLen {
 		currData := impl.PeerList[currIndex]
 		currData.Range.Lo = currKey
-		currKey.ShardID++
+		currKey = currKey.Next()
 		currData.Range.Hi = currKey
 		currIndex++
 	}

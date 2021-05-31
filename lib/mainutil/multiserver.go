@@ -403,7 +403,7 @@ func (m *MultiServer) Run(ctx context.Context) error {
 
 			case sig := <-sigCh:
 				log.Logger.Info().
-					Str("sig", sig.String()).
+					Stringer("sig", sig).
 					Msg("got signal")
 				switch sig {
 				case syscall.SIGINT:

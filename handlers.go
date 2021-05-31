@@ -320,7 +320,7 @@ func (h RootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c = c.Str("ip", addrWithNoPort(cc.RemoteAddr))
 	c = c.Str("method", r.Method)
 	c = c.Str("host", r.Host)
-	c = c.Str("url", r.URL.String())
+	c = c.Stringer("url", r.URL)
 	if value := r.Header.Get(constants.HeaderUserAgent); value != "" {
 		c = c.Str("userAgent", value)
 	}
@@ -515,7 +515,7 @@ func (SecureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rc.Request.URL.Scheme = constants.SchemeHTTPS
 	rc.Request.URL.Host = rc.Request.Host
 	rc.Logger.Warn().
-		Str("mutatedURL", rc.Request.URL.String()).
+		Stringer("mutatedURL", rc.Request.URL).
 		Msg("no matching frontend")
 }
 
@@ -995,7 +995,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	once.Do(func() {})
 	if addr != nil {
 		rc.Logger.UpdateContext(func(c zerolog.Context) zerolog.Context {
-			return c.Str("backend", addr.String())
+			return c.Stringer("backend", addr)
 		})
 	}
 	if err != nil {

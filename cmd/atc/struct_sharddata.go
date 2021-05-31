@@ -24,7 +24,7 @@ type ShardData struct {
 }
 
 func (shardData *ShardData) Key() Key {
-	return Key{shardData.ServiceName, shardData.ShardID}
+	return Key{shardData.ServiceName, shardData.ShardID, shardData.HasShardID}
 }
 
 func (shardData *ShardData) Client(unique string) *ClientData {

@@ -20,10 +20,11 @@ func TestSRVTarget_RoundTrip(t *testing.T) {
 
 	testData := []testRow{
 		{
-			Input: "srv:example.com/http",
+			Input: "srv:example.com/http?balancer=rand",
 			RoxyIn: Target{
 				Scheme:     constants.SchemeSRV,
 				Endpoint:   "example.com/http",
+				Query:      url.Values{"balancer": []string{"rand"}},
 				ServerName: "",
 				HasSlash:   false,
 			},
@@ -48,6 +49,7 @@ func TestSRVTarget_RoundTrip(t *testing.T) {
 				Scheme:     constants.SchemeSRV,
 				Authority:  "8.8.8.8",
 				Endpoint:   "example.com/http",
+				Query:      url.Values(nil),
 				ServerName: "",
 				HasSlash:   true,
 			},
@@ -56,17 +58,17 @@ func TestSRVTarget_RoundTrip(t *testing.T) {
 				Domain:       "example.com",
 				Service:      "http",
 				ServerName:   "",
-				Balancer:     RandomBalancer,
+				Balancer:     SRVBalancer,
 			},
 			RoxyOut: Target{
 				Scheme:     constants.SchemeSRV,
 				Authority:  "8.8.8.8:53",
 				Endpoint:   "example.com/http",
-				Query:      url.Values{"balancer": []string{"random"}},
+				Query:      url.Values{},
 				ServerName: "",
 				HasSlash:   true,
 			},
-			Output: "srv://8.8.8.8:53/example.com/http?balancer=random",
+			Output: "srv://8.8.8.8:53/example.com/http",
 		},
 		{
 			Input: "srv:///_service._tcp.example.com?serverName=example.com",
@@ -81,16 +83,16 @@ func TestSRVTarget_RoundTrip(t *testing.T) {
 				Domain:     "_service._tcp.example.com",
 				Service:    "",
 				ServerName: "example.com",
-				Balancer:   RandomBalancer,
+				Balancer:   SRVBalancer,
 			},
 			RoxyOut: Target{
 				Scheme:     constants.SchemeSRV,
 				Endpoint:   "_service._tcp.example.com",
-				Query:      url.Values{"balancer": []string{"random"}, "serverName": []string{"example.com"}},
+				Query:      url.Values{"serverName": []string{"example.com"}},
 				ServerName: "example.com",
 				HasSlash:   true,
 			},
-			Output: "srv:///_service._tcp.example.com?balancer=random&serverName=example.com",
+			Output: "srv:///_service._tcp.example.com?serverName=example.com",
 		},
 	}
 

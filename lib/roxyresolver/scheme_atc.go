@@ -96,6 +96,7 @@ func (t *ATCTarget) FromTarget(rt Target) error {
 
 	t.ServerName = rt.Query.Get("serverName")
 
+	t.Balancer = WeightedRoundRobinBalancer
 	if str := rt.Query.Get("balancer"); str != "" {
 		err = t.Balancer.Parse(str)
 		if err != nil {
@@ -119,7 +120,9 @@ func (t *ATCTarget) FromTarget(rt Target) error {
 // AsTarget recombines the component data into a Target.
 func (t ATCTarget) AsTarget() Target {
 	query := make(url.Values, 5)
-	query.Set("balancer", t.Balancer.String())
+	if t.Balancer != WeightedRoundRobinBalancer {
+		query.Set("balancer", t.Balancer.String())
+	}
 	if t.ServerName != "" {
 		query.Set("serverName", t.ServerName)
 	}
@@ -350,6 +353,15 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 			Type:              NewServiceConfigEvent,
 			ServiceConfigJSON: event.ServiceConfigJson,
 		})
+
+	case roxy_v0.Event_DELETE_ALL_IPS:
+		for unique := range byUnique {
+			delete(byUnique, unique)
+			out = append(out, Event{
+				Type: DeleteEvent,
+				Key:  unique,
+			})
+		}
 	}
 
 	return out

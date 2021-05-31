@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 
 	"google.golang.org/grpc/codes"
@@ -16,6 +15,8 @@ type ServiceMap struct {
 	list   ServiceNameList
 	byName map[ServiceName]*ServiceData
 }
+
+type EnumerateFunc func(key Key, svc *ServiceData)
 
 func NewServiceMap(file ServicesFile) (*ServiceMap, error) {
 	sm := &ServiceMap{
@@ -33,7 +34,7 @@ func NewServiceMap(file ServicesFile) (*ServiceMap, error) {
 			return nil, fmt.Errorf("Service %q: NumShards %d > %d", name, config.NumShards, MaxNumShards)
 		}
 
-		data := &ServiceData{
+		svc := &ServiceData{
 			AllowedClientNames:         config.AllowedClientNames,
 			AllowedServerNames:         config.AllowedServerNames,
 			ExpectedNumClientsPerShard: config.ExpectedNumClientsPerShard,
@@ -44,13 +45,13 @@ func NewServiceMap(file ServicesFile) (*ServiceMap, error) {
 			AvgDemandedCPQ:             config.AvgDemandedCPQ,
 		}
 
-		if !data.IsSharded {
-			data.NumShards = 0
+		if !svc.IsSharded {
+			svc.NumShards = 0
 		}
 
 		serviceName := ServiceName(name)
 		sm.list = append(sm.list, serviceName)
-		sm.byName[serviceName] = data
+		sm.byName[serviceName] = svc
 	}
 
 	sm.list.Sort()
@@ -70,33 +71,29 @@ func (sm *ServiceMap) Range() Range {
 
 	if length == 0 {
 		return Range{
-			Lo: Key{ServiceName: "", ShardID: 0},
-			Hi: Key{ServiceName: "\x7f", ShardID: 0},
+			Lo: Key{"", 0, false},
+			Hi: Key{"\U0010ffff", 0, false},
 		}
 	}
 
 	firstName := sm.list[0]
+	firstData := sm.byName[firstName]
+	lo := Key{firstName, 0, firstData.IsSharded}
+
 	lastName := sm.list[length-1]
 	lastData := sm.byName[lastName]
-	limitShardID := ShardID(lastData.EffectiveNumShards())
-	return Range{
-		Lo: Key{ServiceName: firstName, ShardID: 0},
-		Hi: Key{ServiceName: lastName, ShardID: limitShardID},
-	}
+	lastLimit := ShardID(lastData.EffectiveNumShards())
+	hi := Key{lastName, lastLimit - 1, lastData.IsSharded}.Next()
+
+	return Range{Lo: lo, Hi: hi}
 }
 
-func (sm *ServiceMap) Enumerate(fn func(key Key, data *ServiceData)) {
-	r := Range{
-		Lo: Key{ServiceName: "", ShardID: 0},
-		Hi: Key{ServiceName: "\x7f", ShardID: 0},
-	}
-	sm.EnumerateRange(r, fn)
+func (sm *ServiceMap) Enumerate(fn EnumerateFunc) {
+	sm.EnumerateRange(sm.Range(), fn)
 }
 
-func (sm *ServiceMap) EnumerateRange(r Range, fn func(key Key, data *ServiceData)) {
-	if fn == nil {
-		panic(errors.New("fn is nil"))
-	}
+func (sm *ServiceMap) EnumerateRange(r Range, fn EnumerateFunc) {
+	roxyutil.AssertNotNil(&fn)
 
 	length := uint(len(sm.list))
 	if length == 0 {
@@ -106,32 +103,38 @@ func (sm *ServiceMap) EnumerateRange(r Range, fn func(key Key, data *ServiceData
 	firstIndex, found := sm.list.Search(r.Lo.ServiceName)
 	for index := firstIndex; index < length; index++ {
 		serviceName := sm.list[index]
-		data := sm.byName[serviceName]
+		svc := sm.byName[serviceName]
 
-		numShards := data.EffectiveNumShards()
-		limit := Key{ServiceName: serviceName, ShardID: ShardID(numShards)}
-		key := Key{ServiceName: serviceName, ShardID: 0}
-		if found && index == firstIndex {
+		key := Key{serviceName, 0, svc.IsSharded}
+		if found && index == firstIndex && key.HasShardID && r.Lo.HasShardID {
 			key.ShardID = r.Lo.ShardID
 		}
 
-		for {
-			if !key.Less(r.Hi) {
-				return
+		if !key.Less(r.Hi) {
+			break
+		}
+
+		if key.HasShardID {
+			shardLimit := ShardID(svc.NumShards)
+			limit := Key{serviceName, shardLimit, true}
+			if !limit.Less(r.Hi) {
+				limit = r.Hi
 			}
-			if !key.Less(limit) {
-				break
+
+			for key.Less(limit) {
+				fn(key, svc)
+				key.ShardID++
 			}
-			fn(key, data)
-			key.ShardID++
+		} else {
+			fn(key, svc)
 		}
 	}
 }
 
 func (sm *ServiceMap) ExpectedStatsTotal() Stats {
 	var sum Stats
-	for _, data := range sm.byName {
-		sum = sum.Add(data.ExpectedStats())
+	for _, svc := range sm.byName {
+		sum = sum.Add(svc.ExpectedStats())
 	}
 	return sum
 }
@@ -146,31 +149,31 @@ func (sm *ServiceMap) ExpectedStatsByRange(r Range) Stats {
 	firstIndex, found := sm.list.Search(r.Lo.ServiceName)
 	for index := firstIndex; index < length; index++ {
 		serviceName := sm.list[index]
-		data := sm.byName[serviceName]
+		svc := sm.byName[serviceName]
 
-		numShards := ShardID(data.EffectiveNumShards())
-
-		minKey := Key{ServiceName: serviceName, ShardID: 0}
-		if found && index == firstIndex {
-			minKey = r.Lo
+		key := Key{serviceName, 0, svc.IsSharded}
+		if found && index == firstIndex && key.HasShardID && r.Lo.HasShardID {
+			key.ShardID = r.Lo.ShardID
 		}
 
-		limitKey := Key{ServiceName: serviceName, ShardID: numShards}
-		if serviceName > r.Hi.ServiceName {
-			limitKey = minKey
-		} else if serviceName == r.Hi.ServiceName && limitKey.ShardID > r.Hi.ShardID {
-			limitKey = r.Hi
+		if !key.Less(r.Hi) {
+			break
 		}
 
-		if minKey.ShardID >= limitKey.ShardID {
-			continue
+		var actualNumShards uint = 1
+		if svc.IsSharded {
+			shardLimit := ShardID(svc.NumShards)
+			limit := Key{serviceName, shardLimit, true}
+			if !limit.Less(r.Hi) {
+				limit = r.Hi
+			}
+
+			if key.ShardID <= limit.ShardID {
+				actualNumShards = uint(limit.ShardID - key.ShardID)
+			}
 		}
 
-		actualNumShards := uint(limitKey.ShardID - minKey.ShardID)
-		sum = sum.Add(
-			data.
-				ExpectedStatsPerShard().
-				Scale(actualNumShards))
+		sum = sum.Add(svc.ExpectedStatsPerShard().Scale(actualNumShards))
 	}
 	return sum
 }
@@ -181,7 +184,7 @@ func (sm *ServiceMap) CheckInput(reqServiceName string, reqShardID uint32, reqHa
 	if reqHasShardID {
 		shardID = ShardID(reqShardID)
 	}
-	key := Key{serviceName, shardID}
+	key := Key{serviceName, shardID, reqHasShardID}
 
 	svc := sm.Get(serviceName)
 	if svc == nil {

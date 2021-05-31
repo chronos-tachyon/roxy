@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"sync"
+	"sync/atomic"
 
 	multierror "github.com/hashicorp/go-multierror"
 	"google.golang.org/grpc/attributes"
@@ -53,13 +53,6 @@ var _ balancer.Builder = atcBalancerBuilder{}
 
 // type atcBalancer {{{
 
-// TODO: implement sharding
-//
-// Raises the question of how to compute atcBalancer.state, as
-// ConnectivityStateEvaluator doesn't understand sharding.  Could use CSE for
-// each shard, but would need to aggregate the states for all shards into a
-// master state.
-
 type atcBalancer struct {
 	cc       balancer.ClientConn
 	opts     balancer.BuildOptions
@@ -70,6 +63,11 @@ type atcBalancer struct {
 	scStates map[balancer.SubConn]connectivity.State
 	picker   balancer.Picker
 	errs     multierror.Error
+}
+
+type subConnInfo struct {
+	sc    balancer.SubConn
+	attrs *attributes.Attributes
 }
 
 func (bal *atcBalancer) UpdateClientConnState(ccs balancer.ClientConnState) error {
@@ -195,10 +193,12 @@ func (bal *atcBalancer) regeneratePicker() balancer.Picker {
 		return errPicker{err: balancer.ErrNoSubConnAvailable}
 	}
 
+	perm := computePermImpl(WeightedRoundRobinBalancer, dataList, bal.rng)
+
 	return &atcPicker{
 		scList:   scList,
 		dataList: dataList,
-		next:     uint(bal.rng.Intn(len(scList))),
+		perm:     perm,
 	}
 }
 
@@ -211,16 +211,13 @@ var _ balancer.Balancer = (*atcBalancer)(nil)
 type atcPicker struct {
 	scList   []balancer.SubConn
 	dataList []Resolved
-	mu       sync.Mutex
-	next     uint
+	perm     []int
+	nextRR   uint32
 }
 
 func (p *atcPicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
-	p.mu.Lock()
-	index := p.next
-	p.next = (p.next + 1) % uint(len(p.scList))
-	p.mu.Unlock()
-
+	k := (atomic.AddUint32(&p.nextRR, 1) - 1) % uint32(len(p.perm))
+	index := p.perm[k]
 	sc := p.scList[index]
 	return balancer.PickResult{SubConn: sc}, nil
 }
@@ -246,9 +243,4 @@ var _ balancer.Picker = errPicker{}
 func noAttrs(addr resolver.Address) resolver.Address {
 	addr.Attributes = nil
 	return addr
-}
-
-type subConnInfo struct {
-	sc    balancer.SubConn
-	attrs *attributes.Attributes
 }

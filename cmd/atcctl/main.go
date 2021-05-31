@@ -382,7 +382,7 @@ func doHealthCheck(ctx context.Context, c clients, event *zerolog.Event, args []
 			Err(err).
 			Msg("RPC failed")
 	}
-	event = event.Str("status", resp.Status.String())
+	event = event.Stringer("status", resp.Status)
 
 	return event
 }
