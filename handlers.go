@@ -694,13 +694,6 @@ func (h *FileSystemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.FileInfo) {
 	hdrs := rc.Writer.Header()
 
-	var (
-		cachePossible bool
-		cacheHit      bool
-		tookSlowPath  bool
-		body          io.ReadSeeker = f
-	)
-
 	contentType, contentLang, contentEnc := DetectMimeProperties(rc.Impl, rc.Logger, h.fs, rc.Request.URL.Path)
 	hdrs.Set(constants.HeaderContentType, contentType)
 	if contentLang != "" {
@@ -731,130 +724,23 @@ func (h *FileSystemHandler) ServeFile(rc *RequestContext, f http.File, fi fs.Fil
 
 	size := fi.Size()
 	mtime := fi.ModTime()
-	if size <= maxCacheSize {
-		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-			cachePossible = true
-			key := cacheKey{st.Dev, st.Ino}
 
-			gFileCacheMu.Lock()
-			row, found := gFileCacheMap[key]
-			gFileCacheMu.Unlock()
-
-			if found && size == int64(len(row.bytes)) && mtime.Equal(row.mtime) {
-				cacheHit = true
-			} else {
-				raw, err := ioutil.ReadAll(f)
-				if err != nil {
-					rc.Writer.WriteError(http.StatusInternalServerError)
-					rc.Logger.Error().
-						Err(err).
-						Msg("failed to read file")
-					return
-				}
-
-				size = int64(len(raw))
-				md5raw := md5.Sum(raw)
-				sha1raw := sha1.Sum(raw)
-				sha256raw := sha256.Sum256(raw)
-
-				md5sum := base64.StdEncoding.EncodeToString(md5raw[:])
-				sha1sum := base64.StdEncoding.EncodeToString(sha1raw[:])
-				sha256sum := base64.StdEncoding.EncodeToString(sha256raw[:])
-
-				row = cacheRow{
-					bytes:     raw,
-					mtime:     mtime,
-					md5sum:    md5sum,
-					sha1sum:   sha1sum,
-					sha256sum: sha256sum,
-				}
-
-				gFileCacheMu.Lock()
-				if existing, found := gFileCacheMap[key]; found {
-					gFileCacheBytes -= int64(len(existing.bytes))
-				}
-				gFileCacheMap[key] = row
-				gFileCacheBytes += int64(len(row.bytes))
-				gFileCacheMu.Unlock()
-			}
-
-			setDigestHeader(hdrs, enums.DigestMD5, row.md5sum)
-			setDigestHeader(hdrs, enums.DigestSHA1, row.sha1sum)
-			setDigestHeader(hdrs, enums.DigestSHA256, row.sha256sum)
-
-			body = bytes.NewReader(row.bytes)
-		}
+	cachePossible, cacheHit, body, size, err := readFileFromCache(rc.Logger, f, fi, size, mtime, hdrs, maxCacheSize)
+	if err != nil {
+		rc.Writer.WriteError(http.StatusInternalServerError)
+		return
 	}
 
+	var tookSlowPath bool
 	if !cachePossible {
-		var (
-			haveMD5    bool
-			haveSHA1   bool
-			haveSHA256 bool
-		)
-
-		if raw, err := readXattr(f, xattrMd5sum); err == nil {
-			md5sum := hexToBase64(string(raw))
-			setDigestHeader(hdrs, enums.DigestMD5, md5sum)
-			haveMD5 = true
+		tookSlowPath, err = readFileFromFS(rc.Logger, f, fi, size, mtime, hdrs, maxComputeDigestSize)
+		if err != nil {
+			rc.Writer.WriteError(http.StatusInternalServerError)
+			return
 		}
-
-		if raw, err := readXattr(f, xattrSha1sum); err == nil {
-			sha1sum := hexToBase64(string(raw))
-			setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
-			haveSHA1 = true
-		}
-
-		if raw, err := readXattr(f, xattrSha256sum); err == nil {
-			sha256sum := hexToBase64(string(raw))
-			setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
-			haveSHA256 = true
-		}
-
-		if raw, err := readXattr(f, xattrEtag); err == nil {
-			etag := string(raw)
-			hdrs.Set(constants.HeaderETag, etag)
-		}
-
-		if !haveMD5 && !haveSHA1 && !haveSHA256 && fi.Size() <= maxComputeDigestSize {
-			if _, err := f.Seek(0, io.SeekStart); err == nil {
-				md5writer := md5.New()
-				sha1writer := sha1.New()
-				sha256writer := sha256.New()
-
-				mw := io.MultiWriter(md5writer, sha1writer, sha256writer)
-				_, err = io.Copy(mw, f)
-				if err != nil {
-					rc.Writer.WriteError(http.StatusInternalServerError)
-					rc.Logger.Error().
-						Err(err).
-						Msg("failed to read file contents")
-					return
-				}
-
-				_, err = f.Seek(0, io.SeekStart)
-				if err != nil {
-					rc.Writer.WriteError(http.StatusInternalServerError)
-					rc.Logger.Error().
-						Err(err).
-						Msg("failed to seek to beginning")
-					return
-				}
-
-				md5sum := base64.StdEncoding.EncodeToString(md5writer.Sum(nil))
-				sha1sum := base64.StdEncoding.EncodeToString(sha1writer.Sum(nil))
-				sha256sum := base64.StdEncoding.EncodeToString(sha256writer.Sum(nil))
-
-				setDigestHeader(hdrs, enums.DigestMD5, md5sum)
-				setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
-				setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
-				tookSlowPath = true
-			}
-		}
-
 	}
 
-	setETagHeader(hdrs, "", fi.ModTime())
+	setETagHeader(hdrs, "", mtime)
 	hdrs.Set(constants.HeaderContentLen, strconv.FormatInt(size, 10))
 
 	rc.Logger.Debug().
@@ -1661,4 +1547,179 @@ func modeString(unixMode uint32) string {
 	}
 
 	return string(realMode[:])
+}
+
+func readFileFromCache(
+	logger zerolog.Logger,
+	f http.File,
+	fi fs.FileInfo,
+	sizeIn int64,
+	mtime time.Time,
+	hdrs http.Header,
+	maxCacheSize int64,
+) (
+	cachePossible bool,
+	cacheHit bool,
+	body io.ReadSeeker,
+	size int64,
+	err error,
+) {
+	body = f
+	size = sizeIn
+	if size > maxCacheSize {
+		return
+	}
+
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return
+	}
+
+	cachePossible = true
+	key := cacheKey{st.Dev, st.Ino}
+
+	gFileCacheMu.Lock()
+	row, found := gFileCacheMap[key]
+	gFileCacheMu.Unlock()
+
+	if found && size == int64(len(row.bytes)) && mtime.Equal(row.mtime) {
+		cacheHit = true
+	} else {
+		var raw []byte
+		raw, err = ioutil.ReadAll(f)
+		if err != nil {
+			logger.Error().
+				Err(err).
+				Msg("failed to read file")
+			return
+		}
+
+		size = int64(len(raw))
+		md5raw := md5.Sum(raw)
+		sha1raw := sha1.Sum(raw)
+		sha256raw := sha256.Sum256(raw)
+
+		md5sum := base64.StdEncoding.EncodeToString(md5raw[:])
+		sha1sum := base64.StdEncoding.EncodeToString(sha1raw[:])
+		sha256sum := base64.StdEncoding.EncodeToString(sha256raw[:])
+
+		row = cacheRow{
+			bytes:     raw,
+			mtime:     mtime,
+			md5sum:    md5sum,
+			sha1sum:   sha1sum,
+			sha256sum: sha256sum,
+		}
+
+		gFileCacheMu.Lock()
+		if existing, found := gFileCacheMap[key]; found {
+			gFileCacheBytes -= int64(len(existing.bytes))
+		}
+		gFileCacheMap[key] = row
+		gFileCacheBytes += int64(len(row.bytes))
+		gFileCacheMu.Unlock()
+	}
+
+	setDigestHeader(hdrs, enums.DigestMD5, row.md5sum)
+	setDigestHeader(hdrs, enums.DigestSHA1, row.sha1sum)
+	setDigestHeader(hdrs, enums.DigestSHA256, row.sha256sum)
+
+	body = bytes.NewReader(row.bytes)
+	return
+}
+
+func readFileFromFS(
+	logger zerolog.Logger,
+	f http.File,
+	fi fs.FileInfo,
+	size int64,
+	mtime time.Time,
+	hdrs http.Header,
+	maxComputeDigestSize int64,
+) (
+	tookSlowPath bool,
+	err error,
+) {
+	var raw []byte
+
+	haveMD5 := false
+	raw, err = readXattr(f, xattrMd5sum)
+	if err == nil {
+		md5sum := hexToBase64(string(raw))
+		setDigestHeader(hdrs, enums.DigestMD5, md5sum)
+		haveMD5 = true
+	}
+	err = nil
+
+	haveSHA1 := false
+	raw, err = readXattr(f, xattrSha1sum)
+	if err == nil {
+		sha1sum := hexToBase64(string(raw))
+		setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
+		haveSHA1 = true
+	}
+	err = nil
+
+	haveSHA256 := false
+	raw, err = readXattr(f, xattrSha256sum)
+	if err == nil {
+		sha256sum := hexToBase64(string(raw))
+		setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
+		haveSHA256 = true
+	}
+	err = nil
+
+	raw, err = readXattr(f, xattrEtag)
+	if err == nil {
+		etag := string(raw)
+		hdrs.Set(constants.HeaderETag, etag)
+	}
+	err = nil
+
+	if haveMD5 || haveSHA1 || haveSHA256 {
+		return
+	}
+
+	if size > maxComputeDigestSize {
+		return
+	}
+
+	_, err = f.Seek(0, io.SeekStart)
+	if err != nil {
+		err = nil
+		return
+	}
+
+	tookSlowPath = true
+
+	md5writer := md5.New()
+	sha1writer := sha1.New()
+	sha256writer := sha256.New()
+
+	mw := io.MultiWriter(md5writer, sha1writer, sha256writer)
+	_, err = io.Copy(mw, f)
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Msg("failed to read file contents")
+		return
+	}
+
+	_, err = f.Seek(0, io.SeekStart)
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Msg("failed to seek to beginning")
+		return
+	}
+
+	md5sum := base64.StdEncoding.EncodeToString(md5writer.Sum(nil))
+	sha1sum := base64.StdEncoding.EncodeToString(sha1writer.Sum(nil))
+	sha256sum := base64.StdEncoding.EncodeToString(sha256writer.Sum(nil))
+
+	setDigestHeader(hdrs, enums.DigestMD5, md5sum)
+	setDigestHeader(hdrs, enums.DigestSHA1, sha1sum)
+	setDigestHeader(hdrs, enums.DigestSHA256, sha256sum)
+
+	return
 }

@@ -21,7 +21,7 @@ linters:
 
 linters-settings:
   gocyclo:
-    min-complexity: 30
+    min-complexity: 25
   staticcheck:
     go: "1.16"
   unused:

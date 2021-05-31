@@ -51,37 +51,69 @@ func (cm *CostMap) Cost(src Location, dst Location) (cost float32, connected boo
 
 func (cm *CostMap) compute(file CostFile) error {
 	// First, get a list of all unique locations.
+	length, knownByPair, err := cm.phaseOne(file)
+	if err != nil {
+		return err
+	}
+
+	// Second, populate knownByPair with the explicit values from file.
+	cm.phaseTwo(file, knownByPair)
+
+	// Third, build the connectivity graph.
+	cm.phaseThree(length, knownByPair)
+
+	// Fourth, backfill costByPair with all {n^2 minus diagonal} entries.
+	cm.phaseFour(length, knownByPair)
+
+	return nil
+}
+
+func (cm *CostMap) phaseOne(
+	file CostFile,
+) (
+	length uint,
+	knownByPair map[Location]map[Location]float32,
+	err error,
+) {
 	unique := make(map[Location]struct{}, len(file))
 	for _, row := range file {
-		err := roxyutil.ValidateATCLocation(row.A)
+		err = roxyutil.ValidateATCLocation(row.A)
 		if err != nil {
-			return fmt.Errorf("CostConfig[%q, %q, %f]: %w", row.A, row.B, row.Cost, err)
+			err = fmt.Errorf("CostConfig[%q, %q, %f]: %w", row.A, row.B, row.Cost, err)
+			return
 		}
 
 		err = roxyutil.ValidateATCLocation(row.B)
 		if err != nil {
-			return fmt.Errorf("CostConfig[%q, %q, %f]: %w", row.A, row.B, row.Cost, err)
+			err = fmt.Errorf("CostConfig[%q, %q, %f]: %w", row.A, row.B, row.Cost, err)
+			return
 		}
 
 		if row.Cost < 0 {
-			return fmt.Errorf("CostConfig[%q, %q, %f]: negative cost", row.A, row.B, row.Cost)
+			err = fmt.Errorf("CostConfig[%q, %q, %f]: negative cost", row.A, row.B, row.Cost)
+			return
 		}
 
 		unique[Location(row.A)] = struct{}{}
 		unique[Location(row.B)] = struct{}{}
 	}
 
-	length := uint(len(unique))
+	length = uint(len(unique))
 
 	cm.costByPair = make(map[Location]map[Location]float32, length)
 	cm.graphByLoc = make(map[Location]GraphID, length)
-	knownByPair := make(map[Location]map[Location]float32, length)
+	knownByPair = make(map[Location]map[Location]float32, length)
 	for location := range unique {
 		cm.costByPair[location] = make(map[Location]float32, length)
 		knownByPair[location] = make(map[Location]float32, length)
 	}
+	return
+}
 
-	// Second, populate knownByPair with the explicit values from file.
+func (cm *CostMap) phaseTwo(
+	file CostFile,
+	knownByPair map[Location]map[Location]float32,
+) {
 	for _, row := range file {
 		a := Location(row.A)
 		b := Location(row.B)
@@ -91,8 +123,12 @@ func (cm *CostMap) compute(file CostFile) error {
 		knownByPair[a][b] = row.Cost
 		knownByPair[b][a] = row.Cost
 	}
+}
 
-	// Third, build the connectivity graph.
+func (cm *CostMap) phaseThree(
+	length uint,
+	knownByPair map[Location]map[Location]float32,
+) {
 	var lastGraphID GraphID
 	for origin := range knownByPair {
 		// Already marked as being part of a known graph? Skip.
@@ -125,8 +161,12 @@ func (cm *CostMap) compute(file CostFile) error {
 			}
 		}
 	}
+}
 
-	// Fourth, backfill costByPair with all {n^2 minus diagonal} entries.
+func (cm *CostMap) phaseFour(
+	length uint,
+	knownByPair map[Location]map[Location]float32,
+) {
 	for src, srcMap := range cm.costByPair {
 		for dst, dstMap := range cm.costByPair {
 			// Same location? Zero cost. Skip.
@@ -224,6 +264,4 @@ func (cm *CostMap) compute(file CostFile) error {
 			dstMap[src] = best
 		}
 	}
-
-	return nil
 }
