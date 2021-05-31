@@ -28,7 +28,8 @@ func (s healthServer) Check(
 	if !found {
 		return nil, status.Errorf(codes.NotFound, "unknown subsystem %q", req.Service)
 	}
-	return makeResponse(isHealthy), nil
+	resp := makeResponse(isHealthy, true)
+	return resp, nil
 }
 
 func (s healthServer) Watch(
@@ -40,24 +41,24 @@ func (s healthServer) Watch(
 		Str("rpcMethod", "Watch").
 		Msg("RPC")
 
+	ch := make(chan *grpc_health_v1.HealthCheckResponse, 1)
+
 	_, found := s.m.GetHealth(req.Service)
 	if !found {
-		return status.Errorf(codes.NotFound, "unknown subsystem %q", req.Service)
+		ch <- makeResponse(false, false)
 	}
-
-	ch := make(chan bool, 1)
 
 	id := s.m.WatchHealth(func(subsystemName string, isHealthy bool, isStopped bool) {
 		if subsystemName == req.Service {
-			ch <- isHealthy
+			ch <- makeResponse(isHealthy, true)
 			if isStopped {
 				close(ch)
 			}
 		}
 	})
 
-	for isHealthy := range ch {
-		if err := ws.Send(makeResponse(isHealthy)); err != nil {
+	for resp := range ch {
+		if err := ws.Send(resp); err != nil {
 			s.m.CancelWatchHealth(id)
 			close(ch)
 			return err
@@ -67,10 +68,18 @@ func (s healthServer) Watch(
 	return nil
 }
 
-func makeResponse(isHealthy bool) *grpc_health_v1.HealthCheckResponse {
-	status := grpc_health_v1.HealthCheckResponse_NOT_SERVING
-	if isHealthy {
-		status = grpc_health_v1.HealthCheckResponse_SERVING
-	}
+func makeResponse(isHealthy bool, doesExist bool) *grpc_health_v1.HealthCheckResponse {
+	status := makeStatus(isHealthy, doesExist)
 	return &grpc_health_v1.HealthCheckResponse{Status: status}
+}
+
+func makeStatus(isHealthy bool, doesExist bool) grpc_health_v1.HealthCheckResponse_ServingStatus {
+	switch {
+	case doesExist && isHealthy:
+		return grpc_health_v1.HealthCheckResponse_SERVING
+	case doesExist:
+		return grpc_health_v1.HealthCheckResponse_NOT_SERVING
+	default:
+		return grpc_health_v1.HealthCheckResponse_SERVICE_UNKNOWN
+	}
 }
