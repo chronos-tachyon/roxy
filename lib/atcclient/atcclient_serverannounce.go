@@ -40,15 +40,15 @@ func (c *ATCClient) ServerAnnounce(
 	}
 
 	if err := roxyutil.ValidateATCServiceName(first.ServiceName); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	if err := roxyutil.ValidateATCUnique(first.Unique); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	if err := roxyutil.ValidateATCLocation(first.Location); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	key := Key{first.ServiceName, first.ShardId, first.HasShardId}
