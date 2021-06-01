@@ -1,3 +1,10 @@
+v0.5.1
+  * Significant changes to get ATC ClientAssign closer to working
+  * Major API changes to roxyresolver's ParseFooTarget and MakeFooResolverFunc
+  * Implement "roxyctl healthwatch" and "atcctl healthwatch"
+  * Various internal refactors and logging improvements
+  * Lint, GoDoc, and test coverage improvements
+
 v0.5.0
   * Implement first draft of ATC ServerAnnounce
   * Implement first draft of ATC traffic migration
