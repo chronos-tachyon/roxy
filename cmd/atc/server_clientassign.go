@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -16,10 +15,24 @@ func (s *ATCServer) ClientAssign(
 		return status.Error(codes.PermissionDenied, "method ClientAssign not permitted over Admin interface")
 	}
 
+	ctx, logger := s.rpcBegin(cas.Context(), "ClientAssign")
+
+	logger.Trace().
+		Str("func", "ClientAssign.Recv").
+		Msg("Call")
+
 	req, err := cas.Recv()
 	if err != nil {
+		logger.Error().
+			Str("func", "ClientAssign.Recv").
+			Err(err).
+			Msg("Error")
 		return err
 	}
+
+	logger.Trace().
+		Interface("req", req).
+		Msg("Request")
 
 	first := req.First
 	if first == nil {
@@ -44,24 +57,20 @@ func (s *ATCServer) ClientAssign(
 		}
 	}()
 
-	_, svc, err := impl.ServiceMap.CheckInput(first.ServiceName, first.ShardId, first.HasShardId, false)
-	if err != nil {
-		return err
-	}
+	key, svc, err := impl.ServiceMap.CheckInput(first.ServiceName, first.ShardId, first.HasShardId, false)
 
-	err = checkAuthInfo(cas.Context(), svc.AllowedClientNames)
-	if err != nil {
-		return err
-	}
-
-	log.Logger.Debug().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "ClientAssign").
-		Str("rpcInterface", "primary").
-		Str("serviceName", first.ServiceName).
-		Uint32("shardID", first.ShardId).
-		Bool("hasShardID", first.HasShardId).
+	logger.Debug().
+		Stringer("key", key).
 		Msg("RPC")
+
+	if err != nil {
+		return err
+	}
+
+	err = checkAuthInfo(ctx, svc.AllowedClientNames)
+	if err != nil {
+		return err
+	}
 
 	return status.Errorf(codes.Unimplemented, "method ClientAssign not implemented")
 }

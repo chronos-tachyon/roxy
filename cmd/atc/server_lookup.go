@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
@@ -15,19 +13,18 @@ func (s *ATCServer) Lookup(
 	*roxy_v0.LookupResponse,
 	error,
 ) {
-	log.Logger.Debug().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "Lookup").
-		Str("rpcInterface", rpcInterfaceName(s.admin)).
-		Str("serviceName", req.ServiceName).
-		Uint32("shardID", req.ShardId).
-		Bool("hasShardID", req.HasShardId).
-		Msg("RPC")
+	ctx, logger := s.rpcBegin(ctx, "Lookup")
+	_ = ctx
 
 	impl := s.ref.AcquireSharedImpl()
 	defer s.ref.ReleaseSharedImpl()
 
 	key, svc, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, true)
+
+	logger.Debug().
+		Stringer("key", key).
+		Msg("RPC")
+
 	if err != nil {
 		return nil, err
 	}
@@ -71,20 +68,19 @@ func (s *ATCServer) LookupClients(
 	*roxy_v0.LookupClientsResponse,
 	error,
 ) {
-	log.Logger.Debug().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "LookupClients").
-		Str("rpcInterface", rpcInterfaceName(s.admin)).
-		Str("serviceName", req.ServiceName).
-		Uint32("shardID", req.ShardId).
-		Bool("hasShardID", req.HasShardId).
-		Str("unique", req.Unique).
-		Msg("RPC")
+	ctx, logger := s.rpcBegin(ctx, "LookupClients")
+	_ = ctx
 
 	impl := s.ref.AcquireSharedImpl()
 	defer s.ref.ReleaseSharedImpl()
 
 	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, false)
+
+	logger.Debug().
+		Stringer("key", key).
+		Str("uniqueID", req.Unique).
+		Msg("RPC")
+
 	if err != nil {
 		return nil, err
 	}
@@ -119,20 +115,19 @@ func (s *ATCServer) LookupServers(
 	*roxy_v0.LookupServersResponse,
 	error,
 ) {
-	log.Logger.Debug().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "LookupServers").
-		Str("rpcInterface", rpcInterfaceName(s.admin)).
-		Str("serviceName", req.ServiceName).
-		Uint32("shardID", req.ShardId).
-		Bool("hasShardID", req.HasShardId).
-		Str("unique", req.Unique).
-		Msg("RPC")
+	ctx, logger := s.rpcBegin(ctx, "LookupServers")
+	_ = ctx
 
 	impl := s.ref.AcquireSharedImpl()
 	defer s.ref.ReleaseSharedImpl()
 
 	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, false)
+
+	logger.Debug().
+		Stringer("key", key).
+		Str("uniqueID", req.Unique).
+		Msg("RPC")
+
 	if err != nil {
 		return nil, err
 	}

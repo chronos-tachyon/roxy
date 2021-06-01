@@ -5,12 +5,12 @@ import (
 	"errors"
 	"io"
 
-	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
+	"github.com/rs/zerolog"
 )
 
 func (s *ATCServer) ServerAnnounce(
@@ -20,32 +20,24 @@ func (s *ATCServer) ServerAnnounce(
 		return status.Error(codes.PermissionDenied, "method ServerAnnounce not permitted over Admin interface")
 	}
 
-	log.Logger.Trace().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "ServerAnnounce").
-		Str("rpcInterface", "primary").
+	ctx, logger := s.rpcBegin(sas.Context(), "ServerAnnounce")
+
+	logger.Trace().
 		Str("func", "ServerAnnounce.Recv").
 		Msg("Call")
 
 	req, err := sas.Recv()
 	if err != nil {
-		log.Logger.Error().
-			Str("rpcService", "roxy.v0.AirTrafficControl").
-			Str("rpcMethod", "ServerAnnounce").
-			Str("rpcInterface", "primary").
+		logger.Error().
 			Str("func", "ServerAnnounce.Recv").
 			Err(err).
 			Msg("Error")
-
 		return err
 	}
 
-	log.Logger.Trace().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "ServerAnnounce").
-		Str("rpcInterface", "primary").
+	logger.Trace().
 		Interface("req", req).
-		Msg("RPC request")
+		Msg("Request")
 
 	first := req.First
 	if first == nil {
@@ -78,23 +70,19 @@ func (s *ATCServer) ServerAnnounce(
 	}()
 
 	key, svc, err := impl.ServiceMap.CheckInput(first.ServiceName, first.ShardId, first.HasShardId, false)
-	if err != nil {
-		return err
-	}
 
-	err = checkAuthInfo(sas.Context(), svc.AllowedServerNames)
-	if err != nil {
-		return err
-	}
-
-	log.Logger.Debug().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "ServerAnnounce").
-		Str("rpcInterface", "primary").
-		Str("serviceName", first.ServiceName).
-		Uint32("shardID", first.ShardId).
-		Bool("hasShardID", first.HasShardId).
+	logger.Debug().
+		Stringer("key", key).
 		Msg("RPC")
+
+	if err != nil {
+		return err
+	}
+
+	err = checkAuthInfo(ctx, svc.AllowedServerNames)
+	if err != nil {
+		return err
+	}
 
 	shardData := s.ref.GetOrInsertShard(key, svc)
 
@@ -108,91 +96,78 @@ func (s *ATCServer) ServerAnnounce(
 	needImplRelease = false
 	s.ref.ReleaseSharedImpl()
 
-	errCh := make(chan error)
+	active := &activeServerAnnounce{
+		logger:     logger,
+		s:          s,
+		sas:        sas,
+		shardData:  shardData,
+		serverData: serverData,
+		errCh:      make(chan error),
+	}
 
-	go s.serverAnnounceRecvThread(
-		sas,
-		impl,
-		shardData,
-		serverData,
-		req.IsServing,
-		errCh,
-	)
+	go active.recvThread(req.IsServing)
 
 	select {
-	case err := <-errCh:
+	case err := <-active.errCh:
 		return err
 
 	case goAway, ok := <-goAwayCh:
 		if ok {
 			if goAway == nil {
-				log.Logger.Trace().
-					Str("rpcService", "roxy.v0.AirTrafficControl").
-					Str("rpcMethod", "ServerAnnounce").
-					Str("rpcInterface", "primary").
+				logger.Trace().
 					Stringer("statusCode", codes.NotFound).
 					Msg("Return")
 
 				return status.Errorf(codes.NotFound, "Key %v no longer exists", shardData.Key())
 			}
 
-			log.Logger.Trace().
-				Str("rpcService", "roxy.v0.AirTrafficControl").
-				Str("rpcMethod", "ServerAnnounce").
-				Str("rpcInterface", "primary").
+			logger.Trace().
 				Str("func", "ServerAnnounce.Send").
 				Interface("goAway", goAway).
 				Msg("Call")
 
 			err := sas.Send(&roxy_v0.ServerAnnounceResponse{GoAway: goAway})
 			if err != nil {
-				log.Logger.Error().
-					Str("rpcService", "roxy.v0.AirTrafficControl").
-					Str("rpcMethod", "ServerAnnounce").
-					Str("rpcInterface", "primary").
+				logger.Error().
 					Str("func", "ServerAnnounce.Send").
 					Err(err).
 					Msg("Error")
 			}
 			return err
 		}
-		err := <-errCh
+		err := <-active.errCh
 		return err
 	}
 }
 
-func (s *ATCServer) serverAnnounceRecvThread(
-	sas roxy_v0.AirTrafficControl_ServerAnnounceServer,
-	impl *Impl,
-	shardData *ShardData,
-	serverData *ServerData,
-	lastIsServing bool,
-	errCh chan<- error,
-) {
+type activeServerAnnounce struct {
+	logger     zerolog.Logger
+	s          *ATCServer
+	sas        roxy_v0.AirTrafficControl_ServerAnnounceServer
+	shardData  *ShardData
+	serverData *ServerData
+	errCh      chan error
+}
+
+func (active *activeServerAnnounce) recvThread(lastIsServing bool) {
 	var err error
 	var sendErr bool
 Loop:
 	for {
-		log.Logger.Trace().
-			Str("rpcService", "roxy.v0.AirTrafficControl").
-			Str("rpcMethod", "ServerAnnounce").
-			Str("rpcInterface", "primary").
+		active.logger.Trace().
 			Str("func", "ServerAnnounce.Recv").
 			Msg("Call")
 
 		var req *roxy_v0.ServerAnnounceRequest
-		req, err = sas.Recv()
+		req, err = active.sas.Recv()
 
 		s, ok := status.FromError(err)
 
 		switch {
 		case err == nil:
-			log.Logger.Trace().
-				Str("rpcService", "roxy.v0.AirTrafficControl").
-				Str("rpcMethod", "ServerAnnounce").
-				Str("rpcInterface", "primary").
+			active.logger.Trace().
 				Interface("req", req).
-				Msg("RPC request")
+				Msg("Request")
 
 		case err == io.EOF:
 			break Loop
@@ -207,36 +182,33 @@ Loop:
 			break Loop
 
 		default:
-			log.Logger.Error().
-				Str("rpcService", "roxy.v0.AirTrafficControl").
-				Str("rpcMethod", "ServerAnnounce").
-				Str("rpcInterface", "primary").
-				Str("call", "ServerAnnounce.Recv").
+			active.logger.Error().
+				Str("func", "ServerAnnounce.Recv").
 				Err(err).
 				Msg("Error")
 			sendErr = true
 			break Loop
 		}
 
-		shardData.Mutex.Lock()
-		serverData.CostHistory.UpdateAbsolute(req.CostCounter)
-		serverData.LockedUpdate(true, req.IsServing)
-		shardData.Mutex.Unlock()
+		active.shardData.Mutex.Lock()
+		active.serverData.CostHistory.UpdateAbsolute(req.CostCounter)
+		active.serverData.LockedUpdate(true, req.IsServing)
+		active.shardData.Mutex.Unlock()
 
 		lastIsServing = req.IsServing
 	}
 
-	shardData.Mutex.Lock()
-	serverData.CostHistory.Update()
-	serverData.LockedUpdate(false, lastIsServing)
-	shardData.Mutex.Unlock()
+	active.shardData.Mutex.Lock()
+	active.serverData.CostHistory.Update()
+	active.serverData.LockedUpdate(false, lastIsServing)
+	active.shardData.Mutex.Unlock()
 
 	if sendErr {
 		select {
-		case errCh <- err:
+		case active.errCh <- err:
 		default:
 		}
 	}
 
-	close(errCh)
+	close(active.errCh)
 }

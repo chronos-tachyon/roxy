@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -22,6 +21,8 @@ func (s *ATCServer) Transfer(
 		return nil, status.Error(codes.PermissionDenied, "method Transfer not permitted over Admin interface")
 	}
 
+	ctx, logger := s.rpcBegin(ctx, "Transfer")
+
 	s.ref.mu.Lock()
 	next := s.ref.next[req.ConfigId]
 	s.ref.mu.Unlock()
@@ -31,6 +32,12 @@ func (s *ATCServer) Transfer(
 	}
 
 	key, svc, err := next.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, false)
+
+	logger.Debug().
+		Uint64("configID", req.ConfigId).
+		Stringer("key", key).
+		Msg("RPC")
+
 	if err != nil {
 		return nil, err
 	}
@@ -39,15 +46,6 @@ func (s *ATCServer) Transfer(
 	if err != nil {
 		return nil, err
 	}
-
-	log.Logger.Debug().
-		Str("rpcService", "roxy.v0.AirTrafficControl").
-		Str("rpcMethod", "Transfer").
-		Str("rpcInterface", "primary").
-		Str("serviceName", req.ServiceName).
-		Uint32("shardID", req.ShardId).
-		Bool("hasShardID", req.HasShardId).
-		Msg("RPC")
 
 	shardData := s.ref.GetOrInsertShard(key, svc)
 
