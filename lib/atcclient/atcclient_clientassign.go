@@ -37,6 +37,19 @@ func (c *ATCClient) ClientAssign(
 	if !first.HasShardId && first.ShardId != 0 {
 		first.ShardId = 0
 	}
+
+	if err := roxyutil.ValidateATCServiceName(first.ServiceName); err != nil {
+		return nil, nil, nil, err
+	}
+
+	if err := roxyutil.ValidateATCUnique(first.Unique); err != nil {
+		return nil, nil, nil, err
+	}
+
+	if err := roxyutil.ValidateATCLocation(first.Location); err != nil {
+		return nil, nil, nil, err
+	}
+
 	key := Key{first.ServiceName, first.ShardId, first.HasShardId}
 
 	c.wg.Add(1)
