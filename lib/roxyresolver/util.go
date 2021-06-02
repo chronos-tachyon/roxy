@@ -34,7 +34,7 @@ func makeStaticRecordsForIP(host string, port string, serverName string) []Resol
 	}
 	records := make([]Resolved, 1)
 	records[0] = Resolved{
-		Unique:     tcpAddr.String(),
+		UniqueID:   tcpAddr.String(),
 		ServerName: serverName,
 		Addr:       tcpAddr,
 		Address:    grpcAddr,

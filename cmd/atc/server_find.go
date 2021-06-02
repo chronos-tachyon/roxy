@@ -22,7 +22,7 @@ func (s *ATCServer) Find(
 	impl := s.ref.AcquireSharedImpl()
 	defer s.ref.ReleaseSharedImpl()
 
-	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, false)
+	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardNumber, req.HasShardNumber, false)
 
 	logger.Debug().
 		Stringer("key", key).

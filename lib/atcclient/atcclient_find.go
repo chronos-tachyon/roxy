@@ -14,7 +14,7 @@ import (
 )
 
 // Find queries any ATC tower for information about which ATC tower is
-// responsible for the given (ServiceName, ShardID) tuple.  If useCache is
+// responsible for the given (ServiceName, ShardNumber) tuple.  If useCache is
 // false, then the local cache will not be consulted.
 func (c *ATCClient) Find(
 	ctx context.Context,
@@ -82,9 +82,9 @@ func (c *ATCClient) Find(
 	// }}}
 
 	req := &roxy_v0.FindRequest{
-		ServiceName: key.ServiceName,
-		ShardId:     key.ShardID,
-		HasShardId:  key.HasShardID,
+		ServiceName:    key.ServiceName,
+		ShardNumber:    key.ShardNumber,
+		HasShardNumber: key.HasShardNumber,
 	}
 
 	log.Logger.Trace().

@@ -19,7 +19,7 @@ func (s *ATCServer) Lookup(
 	impl := s.ref.AcquireSharedImpl()
 	defer s.ref.ReleaseSharedImpl()
 
-	key, svc, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, true)
+	key, svc, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardNumber, req.HasShardNumber, true)
 
 	logger.Debug().
 		Stringer("key", key).
@@ -40,10 +40,10 @@ func (s *ATCServer) Lookup(
 		AvgDemandedCostPerQuery:           svc.AvgDemandedCPQ,
 	}
 
-	if svc.IsSharded && !req.HasShardId {
-		shardLimit := ShardID(svc.NumShards)
+	if svc.IsSharded && !req.HasShardNumber {
+		shardLimit := ShardNumber(svc.NumShards)
 		s.ref.mu.Lock()
-		for id := ShardID(0); id < shardLimit; id++ {
+		for id := ShardNumber(0); id < shardLimit; id++ {
 			key2 := Key{key.ServiceName, id, true}
 			shardData := s.ref.shardsByKey[key2]
 			if shardData != nil {
@@ -74,11 +74,11 @@ func (s *ATCServer) LookupClients(
 	impl := s.ref.AcquireSharedImpl()
 	defer s.ref.ReleaseSharedImpl()
 
-	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, false)
+	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardNumber, req.HasShardNumber, false)
 
 	logger.Debug().
 		Stringer("key", key).
-		Str("uniqueID", req.Unique).
+		Str("uniqueID", req.UniqueId).
 		Msg("RPC")
 
 	if err != nil {
@@ -90,14 +90,14 @@ func (s *ATCServer) LookupClients(
 	shardData := s.ref.Shard(key)
 	if shardData != nil {
 		shardData.Mutex.Lock()
-		if req.Unique == "" {
-			resp.Clients = make([]*roxy_v0.ClientData, 0, len(shardData.ClientsByUnique))
-			for _, clientData := range shardData.ClientsByUnique {
+		if req.UniqueId == "" {
+			resp.Clients = make([]*roxy_v0.ClientData, 0, len(shardData.Clients))
+			for _, clientData := range shardData.Clients {
 				resp.Clients = append(resp.Clients, clientData.LockedToProto())
 			}
 		} else {
 			resp.Clients = make([]*roxy_v0.ClientData, 0, 1)
-			clientData := shardData.ClientsByUnique[req.Unique]
+			clientData := shardData.Clients[req.UniqueId]
 			if clientData != nil {
 				resp.Clients = append(resp.Clients, clientData.LockedToProto())
 			}
@@ -121,11 +121,11 @@ func (s *ATCServer) LookupServers(
 	impl := s.ref.AcquireSharedImpl()
 	defer s.ref.ReleaseSharedImpl()
 
-	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, false)
+	key, _, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardNumber, req.HasShardNumber, false)
 
 	logger.Debug().
 		Stringer("key", key).
-		Str("uniqueID", req.Unique).
+		Str("uniqueID", req.UniqueId).
 		Msg("RPC")
 
 	if err != nil {
@@ -137,14 +137,14 @@ func (s *ATCServer) LookupServers(
 	shardData := s.ref.Shard(key)
 	if shardData != nil {
 		shardData.Mutex.Lock()
-		if req.Unique == "" {
-			resp.Servers = make([]*roxy_v0.ServerData, 0, len(shardData.ServersByUnique))
-			for _, serverData := range shardData.ServersByUnique {
+		if req.UniqueId == "" {
+			resp.Servers = make([]*roxy_v0.ServerData, 0, len(shardData.Servers))
+			for _, serverData := range shardData.Servers {
 				resp.Servers = append(resp.Servers, serverData.LockedToProto())
 			}
 		} else {
 			resp.Servers = make([]*roxy_v0.ServerData, 0, 1)
-			serverData := shardData.ServersByUnique[req.Unique]
+			serverData := shardData.Servers[req.UniqueId]
 			if serverData != nil {
 				resp.Servers = append(resp.Servers, serverData.LockedToProto())
 			}

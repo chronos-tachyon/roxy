@@ -2,6 +2,7 @@ package mainutil
 
 import (
 	"context"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
@@ -42,6 +43,10 @@ func (s healthServer) Watch(
 		Msg("RPC")
 
 	ch := make(chan *grpc_health_v1.HealthCheckResponse, 1)
+	var closeOnce sync.Once
+	closeCh := func() {
+		close(ch)
+	}
 
 	_, found := s.m.GetHealth(req.Service)
 	if !found {
@@ -52,15 +57,21 @@ func (s healthServer) Watch(
 		if subsystemName == req.Service {
 			ch <- makeResponse(isHealthy, true)
 			if isStopped {
-				close(ch)
+				closeOnce.Do(closeCh)
 			}
 		}
 	})
 
+	go func() {
+		<-s.m.Done()
+		s.m.CancelWatchHealth(id)
+		closeOnce.Do(closeCh)
+	}()
+
 	for resp := range ch {
 		if err := ws.Send(resp); err != nil {
 			s.m.CancelWatchHealth(id)
-			close(ch)
+			closeOnce.Do(closeCh)
 			return err
 		}
 	}

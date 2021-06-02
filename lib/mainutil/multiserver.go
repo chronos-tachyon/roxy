@@ -66,13 +66,15 @@ type MultiServer struct {
 	exitList        []ExitFunc
 
 	mu            sync.Mutex
-	shutdownCh    chan struct{}
 	healthMap     map[string]bool
 	watchMap      map[HealthWatchID]HealthWatchFunc
 	lastWatchID   HealthWatchID
 	isStopped     bool
 	alreadyTermed bool
-	alreadyClosed bool
+
+	doneMakeOnce  sync.Once
+	doneCloseOnce sync.Once
+	doneCh        chan struct{}
 }
 
 // HealthServer returns an implementation of grpc_health_v1.HealthServer that
@@ -231,7 +233,7 @@ func (m *MultiServer) AddHTTPServer(name string, server *http.Server, listen net
 	}
 	m.OnRun(func(ctx context.Context) {
 		err := server.Serve(listen)
-		m.closeShutdownCh()
+		m.closeDoneCh()
 		if isRealShutdownError(err) {
 			log.Logger.Error().
 				Str("subsystem", name).
@@ -274,7 +276,7 @@ func (m *MultiServer) AddGRPCServer(name string, server *grpc.Server, listen net
 	}
 	m.OnRun(func(ctx context.Context) {
 		err := server.Serve(listen)
-		m.closeShutdownCh()
+		m.closeDoneCh()
 		if isRealShutdownError(err) {
 			log.Logger.Error().
 				Str("subsystem", name).
@@ -334,9 +336,8 @@ func (m *MultiServer) AddAnnouncer(ann *announcer.Announcer, r *membership.Roxy)
 func (m *MultiServer) Run(ctx context.Context) error {
 	roxyutil.AssertNotNil(&ctx)
 
-	m.shutdownCh = make(chan struct{})
+	m.makeDoneCh()
 	m.alreadyTermed = false
-	m.alreadyClosed = false
 
 	var errs multierror.Error
 	for _, fn := range m.preRunList {
@@ -345,9 +346,8 @@ func (m *MultiServer) Run(ctx context.Context) error {
 		}
 	}
 	if errs.Errors != nil {
-		close(m.shutdownCh)
+		m.closeDoneCh()
 		m.alreadyTermed = true
-		m.alreadyClosed = true
 		return misc.ErrorOrNil(errs)
 	}
 
@@ -365,7 +365,7 @@ func (m *MultiServer) Run(ctx context.Context) error {
 		case <-doneCh:
 			return
 
-		case <-m.shutdownCh:
+		case <-m.doneCh:
 			// pass
 		}
 
@@ -464,6 +464,8 @@ func (m *MultiServer) Reload(ctx context.Context) error {
 func (m *MultiServer) Shutdown(ctx context.Context, graceful bool) error {
 	roxyutil.AssertNotNil(&ctx)
 
+	m.closeDoneCh()
+
 	m.mu.Lock()
 	alreadyTermed := m.alreadyTermed
 	m.alreadyTermed = true
@@ -530,13 +532,23 @@ func (m *MultiServer) Shutdown(ctx context.Context, graceful bool) error {
 	return misc.ErrorOrNil(errs)
 }
 
-func (m *MultiServer) closeShutdownCh() {
-	m.mu.Lock()
-	if !m.alreadyClosed {
-		m.alreadyClosed = true
-		close(m.shutdownCh)
-	}
-	m.mu.Unlock()
+// Done returns a channel that will close as soon as the shutdown process is
+// triggered.
+func (m *MultiServer) Done() <-chan struct{} {
+	m.makeDoneCh()
+	return m.doneCh
+}
+
+func (m *MultiServer) makeDoneCh() {
+	m.doneMakeOnce.Do(func() {
+		m.doneCh = make(chan struct{})
+	})
+}
+
+func (m *MultiServer) closeDoneCh() {
+	m.doneCloseOnce.Do(func() {
+		close(m.doneCh)
+	})
 }
 
 func isRealShutdownError(err error) bool {

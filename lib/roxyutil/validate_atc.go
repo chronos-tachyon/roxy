@@ -39,18 +39,18 @@ func ValidateATCLocation(str string) error {
 	return nil
 }
 
-// ValidateATCUnique validates that the given string is a valid Unique ID for
+// ValidateATCUniqueID validates that the given string is a valid UniqueID for
 // the Air Traffic Control service.
-func ValidateATCUnique(str string) error {
+func ValidateATCUniqueID(str string) error {
 	if str == "" {
-		return ATCUniqueError{
-			Unique: str,
-			Err:    ErrExpectNonEmpty,
+		return ATCUniqueIDError{
+			UniqueID: str,
+			Err:      ErrExpectNonEmpty,
 		}
 	}
 	if !reATCUnique.MatchString(str) {
-		return ATCUniqueError{
-			Unique: str,
+		return ATCUniqueIDError{
+			UniqueID: str,
 			Err: RegexpMatchError{
 				Input:   str,
 				Pattern: reATCUnique,

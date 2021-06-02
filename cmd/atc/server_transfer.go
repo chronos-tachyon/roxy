@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -24,14 +25,14 @@ func (s *ATCServer) Transfer(
 	ctx, logger := s.rpcBegin(ctx, "Transfer")
 
 	s.ref.mu.Lock()
-	next := s.ref.next[req.ConfigId]
+	impl := s.ref.next[req.ConfigId]
 	s.ref.mu.Unlock()
 
-	if next == nil {
+	if impl == nil {
 		return nil, status.Errorf(codes.NotFound, "config_id %d is not loaded", req.ConfigId)
 	}
 
-	key, svc, err := next.ServiceMap.CheckInput(req.ServiceName, req.ShardId, req.HasShardId, false)
+	key, svc, err := impl.ServiceMap.CheckInput(req.ServiceName, req.ShardNumber, req.HasShardNumber, false)
 
 	logger.Debug().
 		Uint64("configID", req.ConfigId).
@@ -47,7 +48,7 @@ func (s *ATCServer) Transfer(
 		return nil, err
 	}
 
-	shardData := s.ref.GetOrInsertShard(key, svc)
+	shardData := s.ref.GetOrInsertShard(key, svc, impl.CostMap)
 
 	shardData.Mutex.Lock()
 	defer shardData.Mutex.Unlock()
@@ -67,7 +68,12 @@ func (s *ATCServer) Transfer(
 	}
 
 	for _, server := range req.Servers {
-		serverData := shardData.LockedGetOrInsertServer(server)
+		tcpAddr := &net.TCPAddr{
+			IP:   net.IP(server.Ip),
+			Port: int(server.Port),
+			Zone: server.Zone,
+		}
+		serverData := shardData.LockedGetOrInsertServer(server, tcpAddr)
 		if serverData.IsServing {
 			shardData.MeasuredSupplyCPS -= serverData.MeasuredCPS
 		}

@@ -82,7 +82,7 @@ func (sm *ServiceMap) Range() Range {
 
 	lastName := sm.list[length-1]
 	lastData := sm.byName[lastName]
-	lastLimit := ShardID(lastData.EffectiveNumShards())
+	lastLimit := ShardNumber(lastData.EffectiveNumShards())
 	hi := Key{lastName, lastLimit - 1, lastData.IsSharded}.Next()
 
 	return Range{Lo: lo, Hi: hi}
@@ -106,16 +106,16 @@ func (sm *ServiceMap) EnumerateRange(r Range, fn EnumerateFunc) {
 		svc := sm.byName[serviceName]
 
 		key := Key{serviceName, 0, svc.IsSharded}
-		if found && index == firstIndex && key.HasShardID && r.Lo.HasShardID {
-			key.ShardID = r.Lo.ShardID
+		if found && index == firstIndex && key.HasShardNumber && r.Lo.HasShardNumber {
+			key.ShardNumber = r.Lo.ShardNumber
 		}
 
 		if !key.Less(r.Hi) {
 			break
 		}
 
-		if key.HasShardID {
-			shardLimit := ShardID(svc.NumShards)
+		if key.HasShardNumber {
+			shardLimit := ShardNumber(svc.NumShards)
 			limit := Key{serviceName, shardLimit, true}
 			if !limit.Less(r.Hi) {
 				limit = r.Hi
@@ -123,7 +123,7 @@ func (sm *ServiceMap) EnumerateRange(r Range, fn EnumerateFunc) {
 
 			for key.Less(limit) {
 				fn(key, svc)
-				key.ShardID++
+				key.ShardNumber++
 			}
 		} else {
 			fn(key, svc)
@@ -152,8 +152,8 @@ func (sm *ServiceMap) ExpectedStatsByRange(r Range) Stats {
 		svc := sm.byName[serviceName]
 
 		key := Key{serviceName, 0, svc.IsSharded}
-		if found && index == firstIndex && key.HasShardID && r.Lo.HasShardID {
-			key.ShardID = r.Lo.ShardID
+		if found && index == firstIndex && key.HasShardNumber && r.Lo.HasShardNumber {
+			key.ShardNumber = r.Lo.ShardNumber
 		}
 
 		if !key.Less(r.Hi) {
@@ -162,14 +162,15 @@ func (sm *ServiceMap) ExpectedStatsByRange(r Range) Stats {
 
 		var actualNumShards uint = 1
 		if svc.IsSharded {
-			shardLimit := ShardID(svc.NumShards)
+			shardLimit := ShardNumber(svc.NumShards)
 			limit := Key{serviceName, shardLimit, true}
 			if !limit.Less(r.Hi) {
 				limit = r.Hi
 			}
 
-			if key.ShardID <= limit.ShardID {
-				actualNumShards = uint(limit.ShardID - key.ShardID)
+			actualNumShards = 0
+			if key.ShardNumber <= limit.ShardNumber {
+				actualNumShards = uint(limit.ShardNumber - key.ShardNumber)
 			}
 		}
 
@@ -178,13 +179,13 @@ func (sm *ServiceMap) ExpectedStatsByRange(r Range) Stats {
 	return sum
 }
 
-func (sm *ServiceMap) CheckInput(reqServiceName string, reqShardID uint32, reqHasShardID bool, allowWildcard bool) (Key, *ServiceData, error) {
+func (sm *ServiceMap) CheckInput(reqServiceName string, reqShardNumber uint32, reqHasShardNumber bool, allowWildcard bool) (Key, *ServiceData, error) {
 	serviceName := ServiceName(reqServiceName)
-	shardID := ShardID(0)
-	if reqHasShardID {
-		shardID = ShardID(reqShardID)
+	shardNumber := ShardNumber(0)
+	if reqHasShardNumber {
+		shardNumber = ShardNumber(reqShardNumber)
 	}
-	key := Key{serviceName, shardID, reqHasShardID}
+	key := Key{serviceName, shardNumber, reqHasShardNumber}
 
 	svc := sm.Get(serviceName)
 	if svc == nil {
@@ -192,14 +193,14 @@ func (sm *ServiceMap) CheckInput(reqServiceName string, reqShardID uint32, reqHa
 	}
 
 	shardLimit := svc.EffectiveNumShards()
-	if !svc.IsSharded && reqHasShardID {
+	if !svc.IsSharded && reqHasShardNumber {
 		return key, svc, status.Error(codes.InvalidArgument, "service is not sharded, but a shard_id was provided")
 	}
-	if svc.IsSharded && !reqHasShardID && !allowWildcard {
+	if svc.IsSharded && !reqHasShardNumber && !allowWildcard {
 		return key, svc, status.Error(codes.InvalidArgument, "service is sharded, but no shard_id was provided")
 	}
-	if svc.IsSharded && reqHasShardID && reqShardID >= shardLimit {
-		return key, svc, status.Errorf(codes.NotFound, "shard_id %d was not found (range 0..%d)", reqShardID, shardLimit-1)
+	if svc.IsSharded && reqHasShardNumber && reqShardNumber >= shardLimit {
+		return key, svc, status.Errorf(codes.NotFound, "shard_id %d was not found (range 0..%d)", reqShardNumber, shardLimit-1)
 	}
 
 	return key, svc, nil

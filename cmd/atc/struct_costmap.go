@@ -75,7 +75,7 @@ func (cm *CostMap) phaseOne(
 	knownByPair map[Location]map[Location]float32,
 	err error,
 ) {
-	unique := make(map[Location]struct{}, len(file))
+	uniqueSet := make(map[Location]struct{}, len(file))
 	for _, row := range file {
 		err = roxyutil.ValidateATCLocation(row.A)
 		if err != nil {
@@ -94,16 +94,16 @@ func (cm *CostMap) phaseOne(
 			return
 		}
 
-		unique[Location(row.A)] = struct{}{}
-		unique[Location(row.B)] = struct{}{}
+		uniqueSet[Location(row.A)] = struct{}{}
+		uniqueSet[Location(row.B)] = struct{}{}
 	}
 
-	length = uint(len(unique))
+	length = uint(len(uniqueSet))
 
 	cm.costByPair = make(map[Location]map[Location]float32, length)
 	cm.graphByLoc = make(map[Location]GraphID, length)
 	knownByPair = make(map[Location]map[Location]float32, length)
-	for location := range unique {
+	for location := range uniqueSet {
 		cm.costByPair[location] = make(map[Location]float32, length)
 		knownByPair[location] = make(map[Location]float32, length)
 	}

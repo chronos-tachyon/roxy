@@ -24,10 +24,10 @@ var gBackoff expbackoff.ExpBackoff = expbackoff.BuildDefault()
 // ATCClient is a client for communicating with the Roxy Air Traffic Controller
 // service.
 //
-// Each ATC tower is responsible for a set of (ServiceName, ShardID) tuples,
-// which are exclusive to that tower.  The client automatically determines
-// which tower it needs to speak with, by asking any tower within the service
-// to provide instructions.
+// Each ATC tower is responsible for a set of (ServiceName, ShardNumber)
+// tuples, which are exclusive to that tower.  The client automatically
+// determines which tower it needs to speak with, by asking any tower within
+// the service to provide instructions.
 type ATCClient struct {
 	tc      *tls.Config
 	cc      *grpc.ClientConn

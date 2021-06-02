@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
@@ -98,6 +99,10 @@ func (factory InterceptorFactory) UnaryClientInterceptor() grpc.UnaryClientInter
 		invoker grpc.UnaryInvoker,
 		opts ...grpc.CallOption,
 	) error {
+		if isFreeMethod(method) {
+			return invoker(ctx, method, req, resp, cc, opts...)
+		}
+
 		costPerQuery, _, _, adjustFn := factory.Cost(method)
 		if adjustFn != nil {
 			costPerQuery = adjustFn(costPerQuery, req)
@@ -121,6 +126,10 @@ func (factory InterceptorFactory) StreamClientInterceptor() grpc.StreamClientInt
 		streamer grpc.Streamer,
 		opts ...grpc.CallOption,
 	) (grpc.ClientStream, error) {
+		if isFreeMethod(method) {
+			return streamer(ctx, desc, cc, method, opts...)
+		}
+
 		costPerQuery, costPerReq, costPerResp, adjustFn := factory.Cost(method)
 		Spend(uint(costPerQuery))
 		log.Logger.Trace().
@@ -145,6 +154,10 @@ func (factory InterceptorFactory) UnaryServerInterceptor() grpc.UnaryServerInter
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (resp interface{}, err error) {
+		if isFreeMethod(info.FullMethod) {
+			return handler(ctx, req)
+		}
+
 		costPerQuery, _, _, adjustFn := factory.Cost(info.FullMethod)
 		if adjustFn != nil {
 			costPerQuery = adjustFn(costPerQuery, req)
@@ -166,6 +179,10 @@ func (factory InterceptorFactory) StreamServerInterceptor() grpc.StreamServerInt
 		info *grpc.StreamServerInfo,
 		handler grpc.StreamHandler,
 	) error {
+		if isFreeMethod(info.FullMethod) {
+			return handler(srv, ss)
+		}
+
 		costPerQuery, costPerReq, costPerResp, adjustFn := factory.Cost(info.FullMethod)
 		Spend(uint(costPerQuery))
 		log.Logger.Trace().
@@ -339,3 +356,7 @@ func (h interceptorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 var _ http.Handler = interceptorHandler{}
 
 // }}}
+
+func isFreeMethod(method string) bool {
+	return strings.HasPrefix(method, "/roxy.v0.AirTrafficControl/") || strings.HasPrefix(method, "/grpc.health.v1.Health/")
+}

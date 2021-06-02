@@ -10,26 +10,26 @@ func parseMembershipData(namedPort string, serverName string, pathKey string, by
 	r := new(membership.Roxy)
 
 	if err := r.UnmarshalJSON(bytes); err != nil {
-		err = ResolveError{Unique: pathKey, Err: err}
+		err = ResolveError{UniqueID: pathKey, Err: err}
 		return Event{
 			Type: BadDataEvent,
 			Key:  pathKey,
 			Data: Resolved{
-				Unique: pathKey,
-				Err:    err,
+				UniqueID: pathKey,
+				Err:      err,
 			},
 		}
 	}
 
 	if !r.Ready {
 		var err error = StatusError{membership.StatusDead}
-		err = ResolveError{Unique: pathKey, Err: err}
+		err = ResolveError{UniqueID: pathKey, Err: err}
 		return Event{
 			Type: BadDataEvent,
 			Key:  pathKey,
 			Data: Resolved{
-				Unique: pathKey,
-				Err:    err,
+				UniqueID: pathKey,
+				Err:      err,
 			},
 		}
 	}
@@ -54,12 +54,12 @@ func parseMembershipData(namedPort string, serverName string, pathKey string, by
 		Type: UpdateEvent,
 		Key:  pathKey,
 		Data: Resolved{
-			Unique:     pathKey,
-			ServerName: myServerName,
-			ShardID:    r.ShardID,
-			HasShardID: r.HasShardID,
-			Addr:       tcpAddr,
-			Address:    grpcAddr,
+			UniqueID:       pathKey,
+			ServerName:     myServerName,
+			ShardNumber:    r.ShardNumber,
+			HasShardNumber: r.HasShardNumber,
+			Addr:           tcpAddr,
+			Address:        grpcAddr,
 		},
 	}
 }

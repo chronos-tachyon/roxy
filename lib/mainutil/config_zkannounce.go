@@ -19,7 +19,7 @@ import (
 type ZKAnnounceConfig struct {
 	ZKConfig
 	Path      string
-	Unique    string
+	HostID    string
 	NamedPort string
 	Format    announcer.Format
 }
@@ -28,7 +28,7 @@ type ZKAnnounceConfig struct {
 type ZKAnnounceConfigJSON struct {
 	ZKConfigJSON
 	Path      string           `json:"path"`
-	Unique    string           `json:"unique"`
+	HostID    string           `json:"hostID"`
 	NamedPort string           `json:"namedPort"`
 	Format    announcer.Format `json:"format"`
 }
@@ -41,9 +41,9 @@ func (cfg ZKAnnounceConfig) AppendTo(out *strings.Builder) {
 	cfg.ZKConfig.AppendTo(out)
 	out.WriteString(";path=")
 	out.WriteString(cfg.Path)
-	if cfg.Unique != "" {
-		out.WriteString(";unique=")
-		out.WriteString(cfg.Unique)
+	if cfg.HostID != "" {
+		out.WriteString(";hostID=")
+		out.WriteString(cfg.HostID)
 	}
 	if cfg.NamedPort != "" {
 		out.WriteString(";port=")
@@ -135,8 +135,8 @@ func (cfg *ZKAnnounceConfig) Parse(str string) error {
 				return optErr
 			}
 
-		case optionUnique:
-			cfg.Unique, err = roxyutil.ExpandString(optValue)
+		case optionHostID:
+			cfg.HostID, err = roxyutil.ExpandString(optValue)
 			if err != nil {
 				optErr.Err = err
 				return optErr
@@ -278,7 +278,7 @@ func (cfg *ZKAnnounceConfig) PostProcess() error {
 
 // AddTo adds this configuration to the provided Announcer.
 func (cfg ZKAnnounceConfig) AddTo(zkconn *zk.Conn, a *announcer.Announcer) error {
-	impl, err := announcer.NewZK(zkconn, cfg.Path, cfg.Unique, cfg.NamedPort, cfg.Format)
+	impl, err := announcer.NewZK(zkconn, cfg.Path, cfg.HostID, cfg.NamedPort, cfg.Format)
 	if err == nil {
 		a.Add(impl)
 	}

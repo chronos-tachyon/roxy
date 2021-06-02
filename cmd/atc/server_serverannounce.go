@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -44,21 +45,24 @@ func (s *ATCServer) ServerAnnounce(
 		return status.Error(codes.InvalidArgument, "first is absent")
 	}
 
+	err = roxyutil.ValidateATCServiceName(first.ServiceName)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	err = roxyutil.ValidateATCUniqueID(first.UniqueId)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+
 	err = roxyutil.ValidateATCLocation(first.Location)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	err = roxyutil.ValidateATCUnique(first.Unique)
+	tcpAddr, err := makeTCPAddr(first.Ip, first.Port, first.Zone)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	if len(first.Ip) != 4 && len(first.Ip) != 16 {
-		return status.Error(codes.InvalidArgument, "invalid IP address")
-	}
-	if first.Port >= 65536 {
-		return status.Error(codes.InvalidArgument, "invalid TCP port")
 	}
 
 	impl := s.ref.AcquireSharedImpl()
@@ -69,7 +73,7 @@ func (s *ATCServer) ServerAnnounce(
 		}
 	}()
 
-	key, svc, err := impl.ServiceMap.CheckInput(first.ServiceName, first.ShardId, first.HasShardId, false)
+	key, svc, err := impl.ServiceMap.CheckInput(first.ServiceName, first.ShardNumber, first.HasShardNumber, false)
 
 	logger.Debug().
 		Stringer("key", key).
@@ -84,10 +88,10 @@ func (s *ATCServer) ServerAnnounce(
 		return err
 	}
 
-	shardData := s.ref.GetOrInsertShard(key, svc)
+	shardData := s.ref.GetOrInsertShard(key, svc, impl.CostMap)
 
 	shardData.Mutex.Lock()
-	serverData := shardData.LockedGetOrInsertServer(first)
+	serverData := shardData.LockedGetOrInsertServer(first, tcpAddr)
 	serverData.CostHistory.UpdateAbsolute(req.CostCounter)
 	serverData.LockedUpdate(true, req.IsServing)
 	goAwayCh := (<-chan *roxy_v0.GoAway)(serverData.GoAwayCh)
@@ -107,36 +111,45 @@ func (s *ATCServer) ServerAnnounce(
 
 	go active.recvThread(req.IsServing)
 
-	select {
-	case err := <-active.errCh:
+	// Send an empty response as an acknowledgement that the first request
+	// has been received and accepted.  This has the benefit of resetting
+	// the retry counter in lib/atcclient.
+	err = active.doSend(&roxy_v0.ServerAnnounceResponse{})
+	if err != nil {
 		return err
+	}
 
-	case goAway, ok := <-goAwayCh:
-		if ok {
-			if goAway == nil {
-				logger.Trace().
-					Stringer("statusCode", codes.NotFound).
-					Msg("Return")
+	for {
+		select {
+		case <-gMultiServer.Done():
+			err := status.Error(codes.Unavailable, "ATC server is shutting down")
+			logger.Trace().
+				Err(err).
+				Msg("Return")
+			return err
 
-				return status.Errorf(codes.NotFound, "Key %v no longer exists", shardData.Key())
+		case err := <-active.errCh:
+			return err
+
+		case goAway, ok := <-goAwayCh:
+			if !ok {
+				return <-active.errCh
 			}
 
-			logger.Trace().
-				Str("func", "ServerAnnounce.Send").
-				Interface("goAway", goAway).
-				Msg("Call")
-
-			err := sas.Send(&roxy_v0.ServerAnnounceResponse{GoAway: goAway})
-			if err != nil {
-				logger.Error().
-					Str("func", "ServerAnnounce.Send").
+			if goAway == nil {
+				err := status.Errorf(codes.NotFound, "Key %v no longer exists", shardData.Key)
+				logger.Trace().
 					Err(err).
-					Msg("Error")
+					Msg("Return")
+				return err
+			}
+
+			err := active.doSend(&roxy_v0.ServerAnnounceResponse{GoAway: goAway})
+			if err == nil {
+				err = <-active.errCh
 			}
 			return err
 		}
-		err := <-active.errCh
-		return err
 	}
 }
 
@@ -149,10 +162,42 @@ type activeServerAnnounce struct {
 	errCh      chan error
 }
 
+func (active *activeServerAnnounce) doSend(resp *roxy_v0.ServerAnnounceResponse) error {
+	active.logger.Trace().
+		Str("func", "ServerAnnounce.Send").
+		Interface("resp", resp).
+		Msg("Call")
+
+	err := active.sas.Send(resp)
+	if err != nil {
+		active.logger.Error().
+			Str("func", "ServerAnnounce.Send").
+			Err(err).
+			Msg("Error")
+	}
+	return err
+}
+
 func (active *activeServerAnnounce) recvThread(lastIsServing bool) {
 	var err error
 	var sendErr bool
-Loop:
+
+	defer func() {
+		active.shardData.Mutex.Lock()
+		active.serverData.CostHistory.Update()
+		active.serverData.LockedUpdate(false, lastIsServing)
+		active.shardData.Mutex.Unlock()
+
+		if sendErr {
+			select {
+			case active.errCh <- err:
+			default:
+			}
+		}
+
+		close(active.errCh)
+	}()
+
 	for {
 		active.logger.Trace().
 			Str("func", "ServerAnnounce.Recv").
@@ -160,26 +205,27 @@ Loop:
 
 		var req *roxy_v0.ServerAnnounceRequest
 		req, err = active.sas.Recv()
-
 		s, ok := status.FromError(err)
 
 		switch {
 		case err == nil:
 			active.logger.Trace().
+				Str("func", "ServerAnnounce.Recv").
 				Interface("req", req).
 				Msg("Request")
 
 		case err == io.EOF:
-			break Loop
-
+			fallthrough
 		case errors.Is(err, context.Canceled):
-			break Loop
-
+			fallthrough
 		case errors.Is(err, context.DeadlineExceeded):
-			break Loop
-
+			fallthrough
 		case ok && s.Code() == codes.Canceled:
-			break Loop
+			active.logger.Trace().
+				Str("func", "ServerAnnounce.Recv").
+				Err(err).
+				Msg("Hangup")
+			return
 
 		default:
 			active.logger.Error().
@@ -187,7 +233,7 @@ Loop:
 				Err(err).
 				Msg("Error")
 			sendErr = true
-			break Loop
+			return
 		}
 
 		active.shardData.Mutex.Lock()
@@ -197,18 +243,37 @@ Loop:
 
 		lastIsServing = req.IsServing
 	}
+}
 
-	active.shardData.Mutex.Lock()
-	active.serverData.CostHistory.Update()
-	active.serverData.LockedUpdate(false, lastIsServing)
-	active.shardData.Mutex.Unlock()
-
-	if sendErr {
-		select {
-		case active.errCh <- err:
-		default:
-		}
+func makeTCPAddr(ip []byte, port uint32, zone string) (*net.TCPAddr, error) {
+	if port >= 65536 {
+		return nil, errors.New("invalid TCP port")
 	}
 
-	close(active.errCh)
+	portNum := int(port)
+
+	if len(ip) != net.IPv4len && len(ip) != net.IPv6len {
+		return nil, errors.New("invalid IP address")
+	}
+
+	ipAddr := net.IP(ip)
+	if ipv4 := ipAddr.To4(); ipv4 != nil {
+		ipAddr = ipv4
+	}
+
+	isIPv6 := (len(ip) == net.IPv6len)
+	isLocal := ipAddr.IsLinkLocalUnicast() || ipAddr.IsLinkLocalMulticast() || ipAddr.IsInterfaceLocalMulticast()
+	if isIPv6 && isLocal && zone == "" {
+		return nil, errors.New("link-local IPv6 address requires zone")
+	}
+	if zone != "" && !isLocal && !isIPv6 {
+		return nil, errors.New("zone requires link-local IPv6 address")
+	}
+
+	tcpAddr := &net.TCPAddr{
+		IP:   ipAddr,
+		Port: portNum,
+		Zone: zone,
+	}
+	return tcpAddr, nil
 }

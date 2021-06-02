@@ -459,31 +459,31 @@ func doLookup(ctx context.Context, c clients, event *zerolog.Event, args []strin
 	serviceName := args[0]
 	shardStr := args[1]
 
-	var shardID uint32
-	var hasShardID bool
+	var shardNum uint32
+	var hasShardNum bool
 	if shardStr != "" {
 		u64, err := strconv.ParseUint(shardStr, 10, 32)
 		if err != nil {
 			log.Logger.Fatal().
 				Str("input", shardStr).
 				Err(err).
-				Msg("invalid ShardId")
+				Msg("invalid ShardNumber")
 		}
-		shardID, hasShardID = uint32(u64), true
+		shardNum, hasShardNum = uint32(u64), true
 	}
 
 	resp, err := c.atc.Lookup(ctx, &roxy_v0.LookupRequest{
-		ServiceName: serviceName,
-		ShardId:     shardID,
-		HasShardId:  hasShardID,
+		ServiceName:    serviceName,
+		ShardNumber:    shardNum,
+		HasShardNumber: hasShardNum,
 	})
 	if err != nil {
 		log.Logger.Fatal().
 			Str("rpcService", "roxy.v0.AirTrafficControl").
 			Str("rpcMethod", "Lookup").
 			Str("serviceName", serviceName).
-			Uint32("shardID", shardID).
-			Bool("hasShardID", hasShardID).
+			Uint32("shardNum", shardNum).
+			Bool("hasShardNum", hasShardNum).
 			Err(err).
 			Msg("RPC failed")
 	}
@@ -495,35 +495,35 @@ func doLookup(ctx context.Context, c clients, event *zerolog.Event, args []strin
 func doLookupClients(ctx context.Context, c clients, event *zerolog.Event, args []string) *zerolog.Event {
 	serviceName := args[0]
 	shardStr := args[1]
-	unique := args[2]
+	uniqueID := args[2]
 
-	var shardID uint32
-	var hasShardID bool
+	var shardNum uint32
+	var hasShardNum bool
 	if shardStr != "" {
 		u64, err := strconv.ParseUint(shardStr, 10, 32)
 		if err != nil {
 			log.Logger.Fatal().
 				Str("input", shardStr).
 				Err(err).
-				Msg("invalid ShardId")
+				Msg("invalid ShardNumber")
 		}
-		shardID, hasShardID = uint32(u64), true
+		shardNum, hasShardNum = uint32(u64), true
 	}
 
 	resp, err := c.atc.LookupClients(ctx, &roxy_v0.LookupClientsRequest{
-		ServiceName: serviceName,
-		ShardId:     shardID,
-		HasShardId:  hasShardID,
-		Unique:      unique,
+		ServiceName:    serviceName,
+		ShardNumber:    shardNum,
+		HasShardNumber: hasShardNum,
+		UniqueId:       uniqueID,
 	})
 	if err != nil {
 		log.Logger.Fatal().
 			Str("rpcService", "roxy.v0.AirTrafficControl").
 			Str("rpcMethod", "Lookup").
 			Str("serviceName", serviceName).
-			Uint32("shardID", shardID).
-			Bool("hasShardID", hasShardID).
-			Str("unique", unique).
+			Uint32("shardNum", shardNum).
+			Bool("hasShardNum", hasShardNum).
+			Str("uniqueID", uniqueID).
 			Err(err).
 			Msg("RPC failed")
 	}
@@ -535,35 +535,35 @@ func doLookupClients(ctx context.Context, c clients, event *zerolog.Event, args 
 func doLookupServers(ctx context.Context, c clients, event *zerolog.Event, args []string) *zerolog.Event {
 	serviceName := args[0]
 	shardStr := args[1]
-	unique := args[2]
+	uniqueID := args[2]
 
-	var shardID uint32
-	var hasShardID bool
+	var shardNum uint32
+	var hasShardNum bool
 	if shardStr != "" {
 		u64, err := strconv.ParseUint(shardStr, 10, 32)
 		if err != nil {
 			log.Logger.Fatal().
 				Str("input", shardStr).
 				Err(err).
-				Msg("invalid ShardId")
+				Msg("invalid ShardNumber")
 		}
-		shardID, hasShardID = uint32(u64), true
+		shardNum, hasShardNum = uint32(u64), true
 	}
 
 	resp, err := c.atc.LookupServers(ctx, &roxy_v0.LookupServersRequest{
-		ServiceName: serviceName,
-		ShardId:     shardID,
-		HasShardId:  hasShardID,
-		Unique:      unique,
+		ServiceName:    serviceName,
+		ShardNumber:    shardNum,
+		HasShardNumber: hasShardNum,
+		UniqueId:       uniqueID,
 	})
 	if err != nil {
 		log.Logger.Fatal().
 			Str("rpcService", "roxy.v0.AirTrafficControl").
 			Str("rpcMethod", "Lookup").
 			Str("serviceName", serviceName).
-			Uint32("shardID", shardID).
-			Bool("hasShardID", hasShardID).
-			Str("unique", unique).
+			Uint32("shardNum", shardNum).
+			Bool("hasShardNum", hasShardNum).
+			Str("uniqueID", uniqueID).
 			Err(err).
 			Msg("RPC failed")
 	}
@@ -576,30 +576,30 @@ func doFind(ctx context.Context, c clients, event *zerolog.Event, args []string)
 	serviceName := args[0]
 	shardStr := args[1]
 
-	var shardID uint32
-	var hasShardID bool
+	var shardNum uint32
+	var hasShardNum bool
 	if shardStr != "" {
 		u64, err := strconv.ParseUint(shardStr, 10, 32)
 		if err != nil {
 			log.Logger.Fatal().
 				Str("input", shardStr).
 				Err(err).
-				Msg("invalid ShardId")
+				Msg("invalid ShardNumber")
 		}
-		shardID, hasShardID = uint32(u64), true
+		shardNum, hasShardNum = uint32(u64), true
 	}
 
 	resp, err := c.atc.Find(ctx, &roxy_v0.FindRequest{
 		ServiceName: serviceName,
-		ShardId:     shardID,
+		ShardNumber: shardNum,
 	})
 	if err != nil {
 		log.Logger.Fatal().
 			Str("rpcService", "roxy.v0.AirTrafficControl").
 			Str("rpcMethod", "Find").
 			Str("serviceName", serviceName).
-			Uint32("shardID", shardID).
-			Bool("hasShardID", hasShardID).
+			Uint32("shardNum", shardNum).
+			Bool("hasShardNum", hasShardNum).
 			Err(err).
 			Msg("RPC failed")
 	}

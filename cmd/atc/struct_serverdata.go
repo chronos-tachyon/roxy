@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"net"
 	"time"
 
@@ -10,17 +11,29 @@ import (
 
 type ServerData struct {
 	ShardData   *ShardData
-	Unique      string
+	UniqueID    string
 	Location    Location
 	ServerName  string
 	Addr        *net.TCPAddr
 	DeclaredCPS float64
 	MeasuredCPS float64
+	AssignedCPS float64
 	IsAlive     bool
 	IsServing   bool
 	GoAwayCh    chan *roxy_v0.GoAway
 	ExpireTime  time.Time
 	CostHistory costhistory.CostHistory
+	Assignments map[string]float64
+}
+
+func (serverData *ServerData) LockedAvailableCPS() float64 {
+	return serverData.DeclaredCPS - serverData.AssignedCPS
+}
+
+func (serverData *ServerData) LockedUtilizationRatio() float64 {
+	assignedCPS := serverData.AssignedCPS
+	declaredCPS := math.Max(1.0, serverData.DeclaredCPS)
+	return assignedCPS / declaredCPS
 }
 
 func (serverData *ServerData) LockedSendGoAway(goAway *roxy_v0.GoAway) {
@@ -33,34 +46,49 @@ func (serverData *ServerData) LockedSendGoAway(goAway *roxy_v0.GoAway) {
 }
 
 func (serverData *ServerData) LockedUpdate(isAlive bool, isServing bool) {
+	shardData := serverData.ShardData
 	histData := serverData.CostHistory.Data()
 	now := histData.Now
-	measuredCPS := histData.PerSecond
 
-	oldIsAlive := serverData.IsAlive
-	oldIsServing := serverData.IsServing
-	oldMeasuredCPS := serverData.MeasuredCPS
-
-	if oldIsAlive && !isAlive {
+	isAliveChanged := (serverData.IsAlive != isAlive)
+	serverData.IsAlive = isAlive
+	if isAliveChanged && !isAlive {
 		close(serverData.GoAwayCh)
 		serverData.ExpireTime = now.Add(ExpireInterval)
 	}
-
-	if oldIsServing {
-		serverData.ShardData.DeclaredSupplyCPS -= serverData.DeclaredCPS
-		serverData.ShardData.MeasuredSupplyCPS -= oldMeasuredCPS
-	}
-	serverData.IsAlive = isAlive
-	serverData.IsServing = isServing
-	serverData.MeasuredCPS = measuredCPS
-	if isServing {
-		serverData.ShardData.DeclaredSupplyCPS += serverData.DeclaredCPS
-		serverData.ShardData.MeasuredSupplyCPS += measuredCPS
-	}
-
-	if isAlive && !oldIsAlive {
+	if isAliveChanged && isAlive {
 		serverData.ExpireTime = time.Time{}
 		serverData.GoAwayCh = make(chan *roxy_v0.GoAway, 1)
+	}
+
+	isServingChanged := (serverData.IsServing != isServing)
+	if serverData.IsServing {
+		shardData.DeclaredSupplyCPS -= serverData.DeclaredCPS
+		shardData.MeasuredSupplyCPS -= serverData.MeasuredCPS
+	}
+	serverData.MeasuredCPS = histData.PerSecond
+	serverData.IsServing = isServing
+	if serverData.IsServing {
+		shardData.DeclaredSupplyCPS += serverData.DeclaredCPS
+		shardData.MeasuredSupplyCPS += serverData.MeasuredCPS
+	}
+	if isServingChanged && !isServing {
+		serverData.LockedDelete()
+	}
+}
+
+func (serverData *ServerData) LockedDelete() {
+	shardData := serverData.ShardData
+
+	if serverData.IsServing {
+		shardData.DeclaredSupplyCPS -= serverData.DeclaredCPS
+		shardData.MeasuredSupplyCPS -= serverData.MeasuredCPS
+		serverData.IsServing = false
+	}
+
+	for clientID := range serverData.Assignments {
+		clientData := shardData.Clients[clientID]
+		clientData.LockedDeleteServer(serverData, true)
 	}
 }
 
@@ -74,29 +102,26 @@ func (serverData *ServerData) LockedIsExpired() bool {
 }
 
 func (serverData *ServerData) LockedPeriodic() {
+	shardData := serverData.ShardData
+
 	serverData.CostHistory.Update()
 	histData := serverData.CostHistory.Data()
+
 	oldCPS := serverData.MeasuredCPS
 	newCPS := histData.PerSecond
 	serverData.MeasuredCPS = newCPS
 	if serverData.IsServing {
-		serverData.ShardData.MeasuredSupplyCPS += (newCPS - oldCPS)
-		t := serverData.ExpireTime
-		now := histData.Now
-		if !t.IsZero() && now.Sub(t) >= 0 {
-			serverData.IsServing = false
-			serverData.ShardData.DeclaredDemandCPS -= serverData.DeclaredCPS
-			serverData.ShardData.MeasuredDemandCPS -= serverData.MeasuredCPS
-		}
+		shardData.MeasuredSupplyCPS += (newCPS - oldCPS)
 	}
 }
 
 func (serverData *ServerData) LockedToProto() *roxy_v0.ServerData {
+	key := serverData.ShardData.Key
 	return &roxy_v0.ServerData{
-		ServiceName:           string(serverData.ShardData.ServiceName),
-		ShardId:               uint32(serverData.ShardData.ShardID),
-		HasShardId:            serverData.ShardData.HasShardID,
-		Unique:                serverData.Unique,
+		ServiceName:           string(key.ServiceName),
+		ShardNumber:           uint32(key.ShardNumber),
+		HasShardNumber:        key.HasShardNumber,
+		UniqueId:              serverData.UniqueID,
 		Location:              string(serverData.Location),
 		ServerName:            serverData.ServerName,
 		Ip:                    []byte(serverData.Addr.IP),

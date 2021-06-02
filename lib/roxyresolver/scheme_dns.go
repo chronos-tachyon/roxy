@@ -197,7 +197,7 @@ func MakeDNSResolveFunc(ctx context.Context, t DNSTarget) PollingResolveFunc {
 				ServerName: t.ServerName,
 			}
 			out[index] = Resolved{
-				Unique:     tcpAddr.String(),
+				UniqueID:   tcpAddr.String(),
 				ServerName: t.ServerName,
 				Addr:       tcpAddr,
 				Address:    grpcAddr,

@@ -5,26 +5,26 @@ import (
 	"strings"
 )
 
-// Key represents a (ServiceName, ShardID) tuple, where the ShardID is
-// optional.  If HasShardID is false, then ShardID should be zero.
+// Key represents a (ServiceName, ShardNumber) tuple, where the ShardNumber is
+// optional.  If HasShardNumber is false, then ShardNumber should be zero.
 type Key struct {
-	ServiceName ServiceName
-	ShardID     ShardID
-	HasShardID  bool
+	ServiceName    ServiceName
+	ShardNumber    ShardNumber
+	HasShardNumber bool
 }
 
 // ForceCanonical ensures that this Key is in the canonical format, i.e. that
-// SharID is zero if HasShardID is false.
+// SharID is zero if HasShardNumber is false.
 func (key *Key) ForceCanonical() {
-	if !key.HasShardID {
-		key.ShardID = 0
+	if !key.HasShardNumber {
+		key.ShardNumber = 0
 	}
 }
 
 // String returns a human-readable string representation of this Key.
 func (key Key) String() string {
-	if key.HasShardID {
-		return string(key.ServiceName) + "/" + strconv.FormatUint(uint64(key.ShardID), 10)
+	if key.HasShardNumber {
+		return string(key.ServiceName) + "/" + strconv.FormatUint(uint64(key.ShardNumber), 10)
 	}
 	return string(key.ServiceName)
 }
@@ -34,10 +34,10 @@ func (key Key) String() string {
 func (key Key) Compare(other Key) int {
 	cmp := strings.Compare(string(key.ServiceName), string(other.ServiceName))
 	if cmp == 0 {
-		cmp = cmpBool(key.HasShardID, other.HasShardID)
+		cmp = cmpBool(key.HasShardNumber, other.HasShardNumber)
 	}
 	if cmp == 0 {
-		cmp = cmpShardID(key.ShardID, other.ShardID)
+		cmp = cmpShardNumber(key.ShardNumber, other.ShardNumber)
 	}
 	return cmp
 }
@@ -54,12 +54,12 @@ func (key Key) Less(other Key) bool {
 
 // Next returns the smallest key which is greater than the given key.
 func (key Key) Next() Key {
-	if key.HasShardID && key.ShardID != ^ShardID(0) {
-		key.ShardID++
+	if key.HasShardNumber && key.ShardNumber != ^ShardNumber(0) {
+		key.ShardNumber++
 	} else {
 		key.ServiceName = key.ServiceName + "\x00"
-		key.ShardID = 0
-		key.HasShardID = false
+		key.ShardNumber = 0
+		key.HasShardNumber = false
 	}
 	return key
 }
@@ -75,7 +75,7 @@ func cmpBool(a, b bool) int {
 	}
 }
 
-func cmpShardID(a, b ShardID) int {
+func cmpShardNumber(a, b ShardNumber) int {
 	switch {
 	case a == b:
 		return 0

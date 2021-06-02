@@ -78,7 +78,7 @@ func main() {
 
 	ctx = announcer.WithDeclaredCPS(ctx, 64.0)
 
-	mainutil.SetUniqueFile(flagUniqueFile)
+	atcclient.SetUniqueFile(flagUniqueFile)
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
@@ -526,7 +526,7 @@ func (s *webServerServer) Serve(ws roxy_v0.Web_ServeServer) (err error) {
 		return
 	}
 
-	if methodIn != http.MethodGet && methodIn != http.MethodPost {
+	if methodIn != http.MethodGet && methodIn != http.MethodHead {
 		hOut[0].Value = "405"
 		hOut = append(hOut, &roxy_v0.KeyValue{
 			Key:   constants.HeaderAllow,

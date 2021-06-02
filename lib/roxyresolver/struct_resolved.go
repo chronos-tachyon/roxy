@@ -12,8 +12,8 @@ import (
 
 // Resolved represents a resolved address.
 type Resolved struct {
-	// Unique is a stable unique identifier for this server.
-	Unique string
+	// UniqueID is a stable unique identifier for this server.
+	UniqueID string
 
 	// Location is a string denoting the geographic location of this server.
 	//
@@ -34,10 +34,10 @@ type Resolved struct {
 	// This field is only set by the SRV resolver.
 	SRVWeight uint16
 
-	// ShardID is the shard ID number.
+	// ShardNumber is the shard ID number.
 	//
 	// This field is only set by some resolvers.
-	ShardID uint32
+	ShardNumber uint32
 
 	// Weight is the proportional weight for this server.
 	//
@@ -47,8 +47,8 @@ type Resolved struct {
 	// HasSRV is true if both SRVPriority and SRVWeight are set.
 	HasSRV bool
 
-	// HasShardID is true if ShardID is set.
-	HasShardID bool
+	// HasShardNumber is true if ShardNumber is set.
+	HasShardNumber bool
 
 	// HasWeight is true if Weight is set.
 	HasWeight bool
@@ -73,9 +73,9 @@ func (data Resolved) Check() {
 	if checkDisabled {
 		return
 	}
-	if data.Unique == "" {
+	if data.UniqueID == "" {
 		panic(roxyutil.CheckError{
-			Message: "Resolved.Unique is empty",
+			Message: "Resolved.UniqueID is empty",
 		})
 	}
 	if data.Err == nil && data.Addr == nil {
@@ -103,18 +103,18 @@ func (data Resolved) Check() {
 // Equal returns true iff the two Resolved addresses are identical.
 func (data Resolved) Equal(other Resolved) bool {
 	equal := true
-	equal = equal && (data.Unique == other.Unique)
+	equal = equal && (data.UniqueID == other.UniqueID)
 	equal = equal && (data.Location == other.Location)
 	equal = equal && (data.ServerName == other.ServerName)
 	equal = equal && (data.HasSRV == other.HasSRV)
-	equal = equal && (data.HasShardID == other.HasShardID)
+	equal = equal && (data.HasShardNumber == other.HasShardNumber)
 	equal = equal && (data.HasWeight == other.HasWeight)
 	if equal && data.HasSRV {
 		equal = equal && (data.SRVPriority == other.SRVPriority)
 		equal = equal && (data.SRVWeight == other.SRVWeight)
 	}
-	if equal && data.HasShardID {
-		equal = equal && (data.ShardID == other.ShardID)
+	if equal && data.HasShardNumber {
+		equal = equal && (data.ShardNumber == other.ShardNumber)
 	}
 	if equal && data.HasWeight {
 		equal = equal && (data.Weight == other.Weight)

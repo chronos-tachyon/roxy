@@ -145,16 +145,16 @@ type PollingResolver struct {
 	sc           *serviceconfig.ParseResult
 	nextRR       uint32
 
-	mu       sync.Mutex
-	cv       *sync.Cond
-	watches  map[WatchID]WatchFunc
-	byAddr   map[string]*Dynamic
-	byUnique map[string]int
-	resolved []Resolved
-	perm     []int
-	err      multierror.Error
-	ready    bool
-	closed   bool
+	mu         sync.Mutex
+	cv         *sync.Cond
+	watches    map[WatchID]WatchFunc
+	byAddr     map[string]*Dynamic
+	byUniqueID map[string]int
+	resolved   []Resolved
+	perm       []int
+	err        multierror.Error
+	ready      bool
+	closed     bool
 }
 
 // Err returns any errors encountered since the last call to Err or ResolveAll.
@@ -233,7 +233,7 @@ func (res *PollingResolver) Watch(fn WatchFunc) WatchID {
 		for _, data := range res.resolved {
 			ev := Event{
 				Type: UpdateEvent,
-				Key:  data.Unique,
+				Key:  data.UniqueID,
 				Data: data,
 			}
 			ev.Check()
@@ -297,7 +297,7 @@ func (res *PollingResolver) resolverThread() {
 		res.mu.Lock()
 		res.watches = nil
 		res.byAddr = nil
-		res.byUnique = nil
+		res.byUniqueID = nil
 		res.resolved = nil
 		res.perm = nil
 		res.ready = true
@@ -391,7 +391,7 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 		ResolvedList(newList).Sort()
 
 		newByAddr := make(map[string]*Dynamic, len(newList))
-		newByUnique := make(map[string]int, len(newList))
+		newByUniqueID := make(map[string]int, len(newList))
 		for index, newData := range newList {
 			if newData.Addr != nil {
 				addr := newData.Addr.String()
@@ -406,15 +406,15 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 				newData.Dynamic = dynamic
 				newList[index] = newData
 			}
-			newByUnique[newData.Unique] = index
+			newByUniqueID[newData.UniqueID] = index
 		}
 
 		for _, oldData := range oldList {
-			index, found := newByUnique[oldData.Unique]
+			index, found := newByUniqueID[oldData.UniqueID]
 			if !found {
 				ev := Event{
 					Type: DeleteEvent,
-					Key:  oldData.Unique,
+					Key:  oldData.UniqueID,
 				}
 				ev.Check()
 				events = append(events, ev)
@@ -423,7 +423,7 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 				if !oldData.Equal(newData) {
 					ev := Event{
 						Type: StatusChangeEvent,
-						Key:  newData.Unique,
+						Key:  newData.UniqueID,
 						Data: newData,
 					}
 					ev.Check()
@@ -433,11 +433,11 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 		}
 
 		for _, newData := range newList {
-			_, found := res.byUnique[newData.Unique]
+			_, found := res.byUniqueID[newData.UniqueID]
 			if !found {
 				ev := Event{
 					Type: UpdateEvent,
-					Key:  newData.Unique,
+					Key:  newData.UniqueID,
 					Data: newData,
 				}
 				ev.Check()
@@ -446,7 +446,7 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 		}
 
 		res.byAddr = newByAddr
-		res.byUnique = newByUnique
+		res.byUniqueID = newByUniqueID
 		res.resolved = newList
 		res.perm = computePermImpl(res.balancer, res.resolved, res.rng)
 

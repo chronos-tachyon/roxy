@@ -18,11 +18,12 @@ import (
 )
 
 // ServerAnnounce starts announcing that a new server is available for the
-// given (ServiceName, ShardID) tuple.  If the method returns with no error,
-// then the caller must call the returned CancelFunc when the announcement
-// should be withdrawn, and the caller must also ensure that the returned error
-// channel is drained in a timely manner.  The error channel will be closed
-// once all goroutines and other internal resources have been released.
+// given (ServiceName, ShardNumber) tuple.  If the method returns with no
+// error, then the caller must call the returned CancelFunc when the
+// announcement should be withdrawn, and the caller must also ensure that the
+// returned error channel is drained in a timely manner.  The error channel
+// will be closed once all goroutines and other internal resources have been
+// released.
 func (c *ATCClient) ServerAnnounce(
 	ctx context.Context,
 	first *roxy_v0.ServerData,
@@ -35,15 +36,15 @@ func (c *ATCClient) ServerAnnounce(
 	roxyutil.AssertNotNil(&first)
 
 	first = proto.Clone(first).(*roxy_v0.ServerData)
-	if !first.HasShardId && first.ShardId != 0 {
-		first.ShardId = 0
+	if !first.HasShardNumber && first.ShardNumber != 0 {
+		first.ShardNumber = 0
 	}
 
 	if err := roxyutil.ValidateATCServiceName(first.ServiceName); err != nil {
 		return nil, nil, err
 	}
 
-	if err := roxyutil.ValidateATCUnique(first.Unique); err != nil {
+	if err := roxyutil.ValidateATCUniqueID(first.UniqueId); err != nil {
 		return nil, nil, err
 	}
 
@@ -51,7 +52,7 @@ func (c *ATCClient) ServerAnnounce(
 		return nil, nil, err
 	}
 
-	key := Key{first.ServiceName, first.ShardId, first.HasShardId}
+	key := Key{first.ServiceName, first.ShardNumber, first.HasShardNumber}
 
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -70,7 +71,7 @@ func (c *ATCClient) ServerAnnounce(
 		Str("type", "ATCClient").
 		Str("method", "ServerAnnounce").
 		Stringer("key", key).
-		Str("uniqueId", first.Unique).
+		Str("uniqueId", first.UniqueId).
 		Logger()
 
 	logger.Trace().
@@ -167,21 +168,23 @@ func (active *activeServerAnnounce) doSend(isFinal bool) {
 	isServing := false
 	if !isFinal {
 		isServing = IsServing()
+		if active.sentFirst && isServing == active.lastServing && costCounter == active.lastCounter {
+			return
+		}
 	}
 
-	if active.sentFirst && isServing == active.lastServing && costCounter == active.lastCounter {
-		return
+	req := &roxy_v0.ServerAnnounceRequest{
+		First:       first,
+		CostCounter: costCounter,
+		IsServing:   isServing,
 	}
 
 	active.logger.Trace().
 		Str("func", "ServerAnnounce.Send").
+		Interface("req", req).
 		Msg("Call")
 
-	err := active.sac.Send(&roxy_v0.ServerAnnounceRequest{
-		First:       first,
-		CostCounter: costCounter,
-		IsServing:   isServing,
-	})
+	err := active.sac.Send(req)
 	if err != nil {
 		active.logger.Trace().
 			Str("func", "ServerAnnounce.Send").
@@ -211,10 +214,16 @@ func (active *activeServerAnnounce) doSend(isFinal bool) {
 }
 
 func (active *activeServerAnnounce) sendThread() {
-	defer active.c.wg.Done()
+	defer func() {
+		active.doSend(true)
+		active.c.wg.Done()
+	}()
 
-	looping := true
-	for looping {
+	if active.isStopped() {
+		return
+	}
+
+	for {
 		active.doSend(false)
 
 		t := time.NewTimer(ReportInterval)
@@ -225,11 +234,11 @@ func (active *activeServerAnnounce) sendThread() {
 
 		case <-active.c.closeCh:
 			t.Stop()
-			looping = false
+			return
 
 		case <-active.stopCh:
 			t.Stop()
-			looping = false
+			return
 
 		case <-active.syncCh:
 			t.Stop()
@@ -237,10 +246,9 @@ func (active *activeServerAnnounce) sendThread() {
 		case <-t.C:
 			// pass
 		}
+
 		drainSyncChannel(active.syncCh)
 	}
-
-	active.doSend(true)
 }
 
 func (active *activeServerAnnounce) recvThread() {
@@ -282,19 +290,33 @@ func (active *activeServerAnnounce) recvThread() {
 		switch {
 		case err == nil:
 			retries = 0
+			active.logger.Trace().
+				Str("func", "ServerAnnounce.Recv").
+				Int("counter", counter).
+				Int("retries", retries).
+				Interface("resp", resp).
+				Msg("Result")
+
+			if resp.GoAway == nil {
+				continue
+			}
+
 			addr = goAwayToTCPAddr(resp.GoAway)
 			active.c.updateServiceData(active.key, addr)
 			active.c.wg.Add(1)
 			go saRecvUntilEOF(&active.c.wg, active.sac)
 
 		case err == io.EOF:
-			// pass
-
+			fallthrough
 		case errors.Is(err, context.Canceled):
-			// pass
-
+			fallthrough
 		case errors.Is(err, context.DeadlineExceeded):
-			// pass
+			active.logger.Trace().
+				Str("func", "ServerAnnounce.Recv").
+				Int("counter", counter).
+				Int("retries", retries).
+				Err(err).
+				Msg("Hangup")
 
 		default:
 			active.logger.Trace().

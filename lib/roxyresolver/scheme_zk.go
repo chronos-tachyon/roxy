@@ -388,8 +388,8 @@ func zkChildThread(
 				Type: BadDataEvent,
 				Key:  myPath,
 				Data: Resolved{
-					Unique: myPath,
-					Err:    err,
+					UniqueID: myPath,
+					Err:      err,
 				},
 			}
 			if !childSleep() {
@@ -429,8 +429,8 @@ func zkChildThread(
 						Type: BadDataEvent,
 						Key:  myPath,
 						Data: Resolved{
-							Unique: myPath,
-							Err:    err,
+							UniqueID: myPath,
+							Err:      err,
 						},
 					}
 					if !childSleep() {

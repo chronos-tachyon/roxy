@@ -19,7 +19,7 @@ type ATCAnnounceConfig struct {
 	ATCClientConfig
 	ServiceName string
 	Location    string
-	Unique      string
+	UniqueID    string
 	NamedPort   string
 }
 
@@ -28,7 +28,7 @@ type ATCAnnounceConfigJSON struct {
 	ATCClientConfigJSON
 	ServiceName string `json:"serviceName"`
 	Location    string `json:"location"`
-	Unique      string `json:"unique"`
+	UniqueID    string `json:"uniqueID"`
 	NamedPort   string `json:"namedPort"`
 }
 
@@ -42,8 +42,8 @@ func (cfg ATCAnnounceConfig) AppendTo(out *strings.Builder) {
 	out.WriteString(cfg.ServiceName)
 	out.WriteString(";location=")
 	out.WriteString(cfg.Location)
-	out.WriteString(";unique=")
-	out.WriteString(cfg.Unique)
+	out.WriteString(";uniqueID=")
+	out.WriteString(cfg.UniqueID)
 	if cfg.NamedPort != "" {
 		out.WriteString(";port=")
 		out.WriteString(cfg.NamedPort)
@@ -79,7 +79,7 @@ func (cfg ATCAnnounceConfig) ToJSON() *ATCAnnounceConfigJSON {
 		ATCClientConfigJSON: *cfg.ATCClientConfig.ToJSON(),
 		ServiceName:         cfg.ServiceName,
 		Location:            cfg.Location,
-		Unique:              cfg.Unique,
+		UniqueID:            cfg.UniqueID,
 		NamedPort:           cfg.NamedPort,
 	}
 }
@@ -142,8 +142,8 @@ func (cfg *ATCAnnounceConfig) Parse(str string) error {
 				return optErr
 			}
 
-		case optionUnique:
-			cfg.Unique, err = roxyutil.ExpandString(optValue)
+		case optionUniqueID:
+			cfg.UniqueID, err = roxyutil.ExpandString(optValue)
 			if err != nil {
 				optErr.Err = err
 				return optErr
@@ -227,7 +227,7 @@ func (cfg *ATCAnnounceConfig) FromJSON(alt *ATCAnnounceConfigJSON) error {
 	*cfg = ATCAnnounceConfig{
 		ServiceName: alt.ServiceName,
 		Location:    alt.Location,
-		Unique:      alt.Unique,
+		UniqueID:    alt.UniqueID,
 		NamedPort:   alt.NamedPort,
 	}
 
@@ -265,13 +265,13 @@ func (cfg *ATCAnnounceConfig) PostProcess() error {
 		return err
 	}
 
-	if cfg.Unique == "" {
-		cfg.Unique, err = UniqueID()
+	if cfg.UniqueID == "" {
+		cfg.UniqueID, err = atcclient.UniqueID()
 		if err != nil {
 			return err
 		}
 	}
-	err = roxyutil.ValidateATCUnique(cfg.Unique)
+	err = roxyutil.ValidateATCUniqueID(cfg.UniqueID)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func (cfg *ATCAnnounceConfig) PostProcess() error {
 
 // AddTo adds this configuration to the provided Announcer.
 func (cfg ATCAnnounceConfig) AddTo(client *atcclient.ATCClient, a *announcer.Announcer) error {
-	impl, err := announcer.NewATC(client, cfg.ServiceName, cfg.Location, cfg.Unique, cfg.NamedPort)
+	impl, err := announcer.NewATC(client, cfg.ServiceName, cfg.Location, cfg.UniqueID, cfg.NamedPort)
 	if err == nil {
 		a.Add(impl)
 	}

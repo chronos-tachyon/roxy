@@ -11,13 +11,13 @@ import (
 
 // ResolveError indicates a problem with a specific address.
 type ResolveError struct {
-	Unique string
-	Err    error
+	UniqueID string
+	Err      error
 }
 
 // Error fulfills the error interface.
 func (err ResolveError) Error() string {
-	return fmt.Sprintf("%q: %v", err.Unique, err.Err)
+	return fmt.Sprintf("%q: %v", err.UniqueID, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.

@@ -21,14 +21,14 @@ import (
 
 // ATCTarget represents a parsed target spec for the "atc" scheme.
 type ATCTarget struct {
-	ServiceName string
-	ShardID     uint32
-	HasShardID  bool
-	Unique      string
-	Location    string
-	ServerName  string
-	Balancer    BalancerType
-	CPS         float64
+	ServiceName    string
+	ShardNumber    uint32
+	HasShardNumber bool
+	UniqueID       string
+	Location       string
+	ServerName     string
+	Balancer       BalancerType
+	CPS            float64
 }
 
 // FromTarget breaks apart a Target into component data.
@@ -69,19 +69,27 @@ func (t *ATCTarget) FromTarget(rt Target) error {
 	if hasShardStr {
 		u64, err := strconv.ParseUint(shardStr, 10, 32)
 		if err != nil {
-			err = roxyutil.ATCShardIDError{ShardID: shardStr, Err: err}
+			err = roxyutil.ATCShardNumberError{ShardNumber: shardStr, Err: err}
 			err = roxyutil.EndpointError{Endpoint: rt.Endpoint, Err: err}
 			return err
 		}
-		t.ShardID = uint32(u64)
-		t.HasShardID = true
+		t.ShardNumber = uint32(u64)
+		t.HasShardNumber = true
 	}
 
-	t.Unique = rt.Query.Get("unique")
-	err = roxyutil.ValidateATCUnique(t.Unique)
-	if err != nil {
-		err = roxyutil.QueryParamError{Name: "unique", Value: t.Unique, Err: err}
-		return err
+	t.UniqueID = rt.Query.Get("unique")
+	if t.UniqueID == "" {
+		t.UniqueID, err = atcclient.UniqueID()
+		if err != nil {
+			err = roxyutil.ATCLoadUniqueError{Err: err}
+			return err
+		}
+	} else {
+		err = roxyutil.ValidateATCUniqueID(t.UniqueID)
+		if err != nil {
+			err = roxyutil.QueryParamError{Name: "unique", Value: t.UniqueID, Err: err}
+			return err
+		}
 	}
 
 	t.Location = rt.Query.Get("location")
@@ -119,6 +127,8 @@ func (t *ATCTarget) FromTarget(rt Target) error {
 
 // AsTarget recombines the component data into a Target.
 func (t ATCTarget) AsTarget() Target {
+	uniqueID, uniqueErr := atcclient.UniqueID()
+
 	query := make(url.Values, 5)
 	if t.Balancer != WeightedRoundRobinBalancer {
 		query.Set("balancer", t.Balancer.String())
@@ -126,8 +136,8 @@ func (t ATCTarget) AsTarget() Target {
 	if t.ServerName != "" {
 		query.Set("serverName", t.ServerName)
 	}
-	if t.Unique != "" {
-		query.Set("unique", t.Unique)
+	if uniqueErr != nil || t.UniqueID != uniqueID {
+		query.Set("unique", t.UniqueID)
 	}
 	if t.Location != "" {
 		query.Set("location", t.Location)
@@ -138,8 +148,8 @@ func (t ATCTarget) AsTarget() Target {
 
 	var endpoint string
 	endpoint = t.ServiceName
-	if t.HasShardID {
-		endpoint = t.ServiceName + "/" + strconv.FormatUint(uint64(t.ShardID), 10)
+	if t.HasShardNumber {
+		endpoint = t.ServiceName + "/" + strconv.FormatUint(uint64(t.ShardNumber), 10)
 	}
 
 	return Target{
@@ -190,12 +200,12 @@ func NewATCResolver(opts Options) (Resolver, error) {
 // MakeATCResolveFunc constructs a WatchingResolveFunc for building your own
 // custom WatchingResolver with the "atc" scheme.
 func MakeATCResolveFunc(client *atcclient.ATCClient, t ATCTarget) WatchingResolveFunc {
-	return func(ctx context.Context, wg *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
+	return func(ctx context.Context, wg1 *sync.WaitGroup, _ expbackoff.ExpBackoff) (<-chan []Event, error) {
 		cancelFn, eventCh, errCh, err := client.ClientAssign(ctx, &roxy_v0.ClientData{
 			ServiceName:           t.ServiceName,
-			ShardId:               t.ShardID,
-			HasShardId:            t.HasShardID,
-			Unique:                t.Unique,
+			ShardNumber:           t.ShardNumber,
+			HasShardNumber:        t.HasShardNumber,
+			UniqueId:              t.UniqueID,
 			Location:              t.Location,
 			DeclaredCostPerSecond: t.CPS,
 		})
@@ -203,33 +213,45 @@ func MakeATCResolveFunc(client *atcclient.ATCClient, t ATCTarget) WatchingResolv
 			return nil, err
 		}
 
+		wg2 := new(sync.WaitGroup)
 		ch := make(chan []Event)
 
-		wg.Add(1)
-		go func() {
-			defer func() {
-				cancelFn()
-				wg.Done()
-			}()
-			for err := range errCh {
-				ch <- []Event{{Type: ErrorEvent, Err: err}}
-			}
-		}()
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			byUnique := make(map[string]Resolved, 16)
-			for inList := range eventCh {
-				outList := mapATCEventsToEvents(t.ServerName, byUnique, inList)
-				if len(outList) != 0 {
-					ch <- outList
-				}
-			}
-		}()
+		wg1.Add(3)
+		wg2.Add(2)
+		go atcResolveThread1(wg1, wg2, errCh, ch)
+		go atcResolveThread2(wg1, wg2, t.ServerName, eventCh, ch)
+		go atcResolveThread3(wg1, wg2, cancelFn, ctx.Done(), ch)
 
 		return ch, nil
 	}
+}
+
+func atcResolveThread1(wg1, wg2 *sync.WaitGroup, errCh <-chan error, ch chan<- []Event) {
+	for err := range errCh {
+		ch <- []Event{{Type: ErrorEvent, Err: err}}
+	}
+	wg2.Done()
+	wg1.Done()
+}
+
+func atcResolveThread2(wg1, wg2 *sync.WaitGroup, serverName string, eventCh <-chan []*roxy_v0.Event, ch chan<- []Event) {
+	byUniqueID := make(map[string]Resolved, 16)
+	for inList := range eventCh {
+		outList := mapATCEventsToEvents(serverName, byUniqueID, inList)
+		if len(outList) != 0 {
+			ch <- outList
+		}
+	}
+	wg2.Done()
+	wg1.Done()
+}
+
+func atcResolveThread3(wg1, wg2 *sync.WaitGroup, cancelFn context.CancelFunc, doneCh <-chan struct{}, ch chan<- []Event) {
+	<-doneCh
+	cancelFn()
+	wg2.Wait()
+	close(ch)
+	wg1.Done()
 }
 
 // type atcBuilder {{{
@@ -268,15 +290,15 @@ var _ resolver.Builder = atcBuilder{}
 
 // }}}
 
-func mapATCEventsToEvents(serverName string, byUnique map[string]Resolved, in []*roxy_v0.Event) []Event {
+func mapATCEventsToEvents(serverName string, byUniqueID map[string]Resolved, in []*roxy_v0.Event) []Event {
 	out := make([]Event, 0, len(in))
 	for _, event := range in {
-		out = mapATCEventToEvents(out, serverName, byUnique, event)
+		out = mapATCEventToEvents(out, serverName, byUniqueID, event)
 	}
 	return out
 }
 
-func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Resolved, event *roxy_v0.Event) []Event {
+func mapATCEventToEvents(out []Event, serverName string, byUniqueID map[string]Resolved, event *roxy_v0.Event) []Event {
 	switch event.EventType {
 	case roxy_v0.Event_INSERT_IP:
 		tcpAddr := &net.TCPAddr{
@@ -299,52 +321,52 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 		}
 
 		data := Resolved{
-			Unique:     event.Unique,
+			UniqueID:   event.UniqueId,
 			Location:   event.Location,
 			ServerName: myServerName,
-			Weight:     event.Weight,
+			Weight:     float32(event.AssignedCostPerSecond),
 			HasWeight:  true,
 			Addr:       tcpAddr,
 			Address:    grpcAddr,
 		}
 
-		byUnique[data.Unique] = data
+		byUniqueID[data.UniqueID] = data
 
 		out = append(out, Event{
 			Type: UpdateEvent,
-			Key:  data.Unique,
+			Key:  data.UniqueID,
 			Data: data,
 		})
 
 	case roxy_v0.Event_DELETE_IP:
-		delete(byUnique, event.Unique)
+		delete(byUniqueID, event.UniqueId)
 
 		out = append(out, Event{
 			Type: DeleteEvent,
-			Key:  event.Unique,
+			Key:  event.UniqueId,
 		})
 
 	case roxy_v0.Event_UPDATE_WEIGHT:
-		old := byUnique[event.Unique]
+		old := byUniqueID[event.UniqueId]
 
 		data := Resolved{
-			Unique:     old.Unique,
-			Location:   old.Location,
-			ServerName: old.ServerName,
-			ShardID:    old.ShardID,
-			Weight:     event.Weight,
-			HasShardID: old.HasShardID,
-			HasWeight:  true,
-			Addr:       old.Addr,
-			Address:    old.Address,
-			Dynamic:    old.Dynamic,
+			UniqueID:       old.UniqueID,
+			Location:       old.Location,
+			ServerName:     old.ServerName,
+			ShardNumber:    old.ShardNumber,
+			Weight:         float32(event.AssignedCostPerSecond),
+			HasShardNumber: old.HasShardNumber,
+			HasWeight:      true,
+			Addr:           old.Addr,
+			Address:        old.Address,
+			Dynamic:        old.Dynamic,
 		}
 
-		byUnique[data.Unique] = data
+		byUniqueID[data.UniqueID] = data
 
 		out = append(out, Event{
 			Type: StatusChangeEvent,
-			Key:  data.Unique,
+			Key:  data.UniqueID,
 			Data: data,
 		})
 
@@ -355,11 +377,11 @@ func mapATCEventToEvents(out []Event, serverName string, byUnique map[string]Res
 		})
 
 	case roxy_v0.Event_DELETE_ALL_IPS:
-		for unique := range byUnique {
-			delete(byUnique, unique)
+		for uniqueID := range byUniqueID {
+			delete(byUniqueID, uniqueID)
 			out = append(out, Event{
 				Type: DeleteEvent,
-				Key:  unique,
+				Key:  uniqueID,
 			})
 		}
 	}

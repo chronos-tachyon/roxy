@@ -54,5 +54,5 @@ func resolvedCompare(a Resolved, b Resolved) int {
 	if cmp := misc.CompareTCPAddr(a.Addr.(*net.TCPAddr), b.Addr.(*net.TCPAddr)); cmp != 0 {
 		return cmp
 	}
-	return strings.Compare(a.Unique, b.Unique)
+	return strings.Compare(a.UniqueID, b.UniqueID)
 }

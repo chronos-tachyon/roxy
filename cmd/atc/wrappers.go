@@ -6,7 +6,7 @@ import (
 
 type ServiceName string
 
-type ShardID uint32
+type ShardNumber uint32
 
 type Location string
 

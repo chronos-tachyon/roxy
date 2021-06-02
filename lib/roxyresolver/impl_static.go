@@ -140,7 +140,7 @@ func (res *StaticResolver) Watch(fn WatchFunc) WatchID {
 	for _, data := range res.resolved {
 		ev := Event{
 			Type: UpdateEvent,
-			Key:  data.Unique,
+			Key:  data.UniqueID,
 			Data: data,
 		}
 		ev.Check()

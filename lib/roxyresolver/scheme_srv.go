@@ -220,7 +220,7 @@ func MakeSRVResolveFunc(ctx context.Context, t SRVTarget) PollingResolveFunc {
 					ServerName: srvServerName,
 				}
 				out = append(out, Resolved{
-					Unique:      fmt.Sprintf("%03d/%03d/%s", srvPriority, srvWeight, tcpAddr.String()),
+					UniqueID:    fmt.Sprintf("%03d/%03d/%s", srvPriority, srvWeight, tcpAddr.String()),
 					ServerName:  srvServerName,
 					SRVPriority: srvPriority,
 					SRVWeight:   srvWeight,

@@ -12,9 +12,6 @@ import (
 type contextKey string
 
 const (
-	// ShardIDContextKey is the context.Context key for attaching a shard ID.
-	ShardIDContextKey = contextKey("roxy.ShardID")
-
 	// ZKConnContextKey is the context.Context key for attaching a *zk.Conn.
 	ZKConnContextKey = contextKey("roxy.zk.Conn")
 
@@ -24,11 +21,6 @@ const (
 	// ATCClientContextKey is the context.Context key for attaching an *atcclient.ATCClient.
 	ATCClientContextKey = contextKey("roxy.atc.Client")
 )
-
-// WithShardID attaches a shard ID to the given context.
-func WithShardID(ctx context.Context, shardID int32) context.Context {
-	return context.WithValue(ctx, ShardIDContextKey, shardID)
-}
 
 // WithZKConn attaches a ZooKeeper client connection to the given context.
 func WithZKConn(ctx context.Context, zkconn *zk.Conn) context.Context {
@@ -43,12 +35,6 @@ func WithEtcdV3Client(ctx context.Context, etcd *v3.Client) context.Context {
 // WithATCClient attaches an ATC client to the given context.
 func WithATCClient(ctx context.Context, client *atcclient.ATCClient) context.Context {
 	return context.WithValue(ctx, ATCClientContextKey, client)
-}
-
-// GetShardID retrieves the attached shard ID.
-func GetShardID(ctx context.Context) (shardID int32, ok bool) {
-	shardID, ok = ctx.Value(ShardIDContextKey).(int32)
-	return
 }
 
 // GetZKConn retrieves the attached ZooKeeper client connection.

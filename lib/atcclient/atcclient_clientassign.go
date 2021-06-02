@@ -34,15 +34,15 @@ func (c *ATCClient) ClientAssign(
 	roxyutil.AssertNotNil(&first)
 
 	first = proto.Clone(first).(*roxy_v0.ClientData)
-	if !first.HasShardId && first.ShardId != 0 {
-		first.ShardId = 0
+	if !first.HasShardNumber && first.ShardNumber != 0 {
+		first.ShardNumber = 0
 	}
 
 	if err := roxyutil.ValidateATCServiceName(first.ServiceName); err != nil {
 		return nil, nil, nil, err
 	}
 
-	if err := roxyutil.ValidateATCUnique(first.Unique); err != nil {
+	if err := roxyutil.ValidateATCUniqueID(first.UniqueId); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -50,7 +50,7 @@ func (c *ATCClient) ClientAssign(
 		return nil, nil, nil, err
 	}
 
-	key := Key{first.ServiceName, first.ShardId, first.HasShardId}
+	key := Key{first.ServiceName, first.ShardNumber, first.HasShardNumber}
 
 	c.wg.Add(1)
 	defer c.wg.Done()
@@ -69,7 +69,7 @@ func (c *ATCClient) ClientAssign(
 		Str("type", "ATCClient").
 		Str("method", "ClientAssign").
 		Stringer("key", key).
-		Str("uniqueId", first.Unique).
+		Str("uniqueId", first.UniqueId).
 		Logger()
 
 	logger.Trace().
@@ -168,21 +168,23 @@ func (active *activeClientAssign) doSend(isFinal bool) {
 	isServing := false
 	if !isFinal {
 		isServing = IsServing()
+		if active.sentFirst && isServing == active.lastServing && costCounter == active.lastCounter {
+			return
+		}
 	}
 
-	if active.sentFirst && isServing == active.lastServing && costCounter == active.lastCounter {
-		return
+	req := &roxy_v0.ClientAssignRequest{
+		First:       first,
+		CostCounter: costCounter,
+		IsServing:   isServing,
 	}
 
 	active.logger.Trace().
 		Str("func", "ClientAssign.Send").
+		Interface("req", req).
 		Msg("Call")
 
-	err := active.cac.Send(&roxy_v0.ClientAssignRequest{
-		First:       first,
-		CostCounter: costCounter,
-		IsServing:   isServing,
-	})
+	err := active.cac.Send(req)
 	if err != nil {
 		active.logger.Trace().
 			Str("func", "ClientAssign.Send").
@@ -212,10 +214,12 @@ func (active *activeClientAssign) doSend(isFinal bool) {
 }
 
 func (active *activeClientAssign) sendThread() {
-	defer active.c.wg.Done()
+	defer func() {
+		active.doSend(true)
+		active.c.wg.Done()
+	}()
 
-	looping := true
-	for looping {
+	for {
 		active.doSend(false)
 
 		t := time.NewTimer(ReportInterval)
@@ -226,11 +230,11 @@ func (active *activeClientAssign) sendThread() {
 
 		case <-active.c.closeCh:
 			t.Stop()
-			looping = false
+			return
 
 		case <-active.stopCh:
 			t.Stop()
-			looping = false
+			return
 
 		case <-active.syncCh:
 			t.Stop()
@@ -238,10 +242,9 @@ func (active *activeClientAssign) sendThread() {
 		case <-t.C:
 			// pass
 		}
+
 		drainSyncChannel(active.syncCh)
 	}
-
-	active.doSend(true)
 }
 
 func (active *activeClientAssign) recvThread() {
@@ -284,25 +287,37 @@ func (active *activeClientAssign) recvThread() {
 		switch {
 		case err == nil:
 			retries = 0
+			active.logger.Trace().
+				Str("func", "ClientAssign.Recv").
+				Int("counter", counter).
+				Int("retries", retries).
+				Interface("resp", resp).
+				Msg("Result")
+
 			if len(resp.Events) != 0 {
 				active.eventCh <- resp.Events
 			}
+
 			if resp.GoAway == nil {
 				continue
 			}
+
 			addr = goAwayToTCPAddr(resp.GoAway)
 			active.c.updateServiceData(active.key, addr)
 			active.c.wg.Add(1)
 			go caRecvUntilEOF(&active.c.wg, active.cac)
 
 		case err == io.EOF:
-			// pass
-
+			fallthrough
 		case errors.Is(err, context.Canceled):
-			// pass
-
+			fallthrough
 		case errors.Is(err, context.DeadlineExceeded):
-			// pass
+			active.logger.Trace().
+				Str("func", "ClientAssign.Recv").
+				Int("counter", counter).
+				Int("retries", retries).
+				Err(err).
+				Msg("Hangup")
 
 		default:
 			active.logger.Trace().

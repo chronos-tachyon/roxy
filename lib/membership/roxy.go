@@ -34,8 +34,8 @@ type Roxy struct {
 	ServerName      string
 	PrimaryPort     uint16
 	AdditionalPorts map[string]uint16
-	ShardID         uint32
-	HasShardID      bool
+	ShardNumber     uint32
+	HasShardNumber  bool
 	Metadata        map[string]string
 }
 
@@ -151,10 +151,10 @@ func (r *Roxy) AsRoxyJSON() *RoxyJSON {
 
 	ip := r.IP.String()
 
-	var shardID *uint32
-	if r.HasShardID {
-		shardID = new(uint32)
-		*shardID = r.ShardID
+	var shardNumber *uint32
+	if r.HasShardNumber {
+		shardNumber = new(uint32)
+		*shardNumber = r.ShardNumber
 	}
 
 	out := &RoxyJSON{
@@ -164,7 +164,7 @@ func (r *Roxy) AsRoxyJSON() *RoxyJSON {
 		PrimaryPort:     r.PrimaryPort,
 		AdditionalPorts: r.AdditionalPorts,
 		ServerName:      r.ServerName,
-		ShardID:         shardID,
+		ShardNumber:     shardNumber,
 		Metadata:        r.Metadata,
 	}
 	return out
@@ -188,10 +188,10 @@ func (r *Roxy) AsServerSet() *ServerSet {
 		additional[name] = ServerSetEndpointFromTCPAddr(r.NamedAddr(name))
 	}
 
-	var shardID *int32
-	if r.HasShardID {
-		shardID = new(int32)
-		*shardID = int32(r.ShardID)
+	var shardNumber *int32
+	if r.HasShardNumber {
+		shardNumber = new(int32)
+		*shardNumber = int32(r.ShardNumber)
 	}
 
 	metadata := make(map[string]string, 1)
@@ -203,7 +203,7 @@ func (r *Roxy) AsServerSet() *ServerSet {
 		ServiceEndpoint:     primary,
 		AdditionalEndpoints: additional,
 		Status:              status,
-		ShardID:             shardID,
+		ShardNumber:         shardNumber,
 		Metadata:            metadata,
 	}
 	return out
@@ -226,8 +226,8 @@ func (r *Roxy) AsGRPC(namedPort string) *GRPC {
 	if r.ServerName != "" {
 		metadata["ServerName"] = r.ServerName
 	}
-	if r.HasShardID {
-		metadata["ShardID"] = r.ShardID
+	if r.HasShardNumber {
+		metadata["Shard"] = r.ShardNumber
 	}
 
 	out := &GRPC{
@@ -271,9 +271,9 @@ func (r *Roxy) FromRoxyJSON(x *RoxyJSON) error {
 		return err
 	}
 
-	if x.ShardID != nil {
-		r.ShardID = *x.ShardID
-		r.HasShardID = true
+	if x.ShardNumber != nil {
+		r.ShardNumber = *x.ShardNumber
+		r.HasShardNumber = true
 	}
 
 	wantZero = false
@@ -326,9 +326,9 @@ func (r *Roxy) FromServerSet(ss *ServerSet) error {
 		r.AdditionalPorts[namedPort] = uint16(tcpAddr2.Port)
 	}
 
-	if ss.ShardID != nil {
-		r.ShardID = uint32(*ss.ShardID)
-		r.HasShardID = true
+	if ss.ShardNumber != nil {
+		r.ShardNumber = uint32(*ss.ShardNumber)
+		r.HasShardNumber = true
 	}
 
 	r.Metadata = make(map[string]string, len(ss.Metadata))
@@ -395,11 +395,11 @@ func (r *Roxy) FromGRPC(grpc *GRPC) error {
 		r.ServerName = str
 	}
 
-	if str, found := r.Metadata["ShardID"]; found {
+	if str, found := r.Metadata["Shard"]; found {
 		if u64, err := strconv.ParseUint(str, 10, 32); err == nil {
-			delete(r.Metadata, "ShardID")
-			r.ShardID = uint32(u64)
-			r.HasShardID = true
+			delete(r.Metadata, "Shard")
+			r.ShardNumber = uint32(u64)
+			r.HasShardNumber = true
 		}
 	}
 
@@ -424,7 +424,7 @@ type RoxyJSON struct {
 	ServerName      string            `json:"serverName,omitempty"`
 	PrimaryPort     uint16            `json:"primaryPort,omitempty"`
 	AdditionalPorts map[string]uint16 `json:"additionalPorts,omitempty"`
-	ShardID         *uint32           `json:"shardID,omitempty"`
+	ShardNumber     *uint32           `json:"shard,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 

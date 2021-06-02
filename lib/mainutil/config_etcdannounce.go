@@ -19,7 +19,7 @@ import (
 type EtcdAnnounceConfig struct {
 	EtcdConfig
 	Path      string
-	Unique    string
+	Hostname  string
 	NamedPort string
 	Format    announcer.Format
 }
@@ -28,7 +28,7 @@ type EtcdAnnounceConfig struct {
 type EtcdAnnounceConfigJSON struct {
 	EtcdConfigJSON
 	Path      string           `json:"path"`
-	Unique    string           `json:"unique"`
+	Hostname  string           `json:"hostname"`
 	NamedPort string           `json:"namedPort"`
 	Format    announcer.Format `json:"format"`
 }
@@ -41,9 +41,9 @@ func (cfg EtcdAnnounceConfig) AppendTo(out *strings.Builder) {
 	cfg.EtcdConfig.AppendTo(out)
 	out.WriteString(";path=")
 	out.WriteString(cfg.Path)
-	if cfg.Unique != "" {
-		out.WriteString(";unique=")
-		out.WriteString(cfg.Unique)
+	if cfg.Hostname != "" {
+		out.WriteString(";hostname=")
+		out.WriteString(cfg.Hostname)
 	}
 	if cfg.NamedPort != "" {
 		out.WriteString(";port=")
@@ -135,8 +135,8 @@ func (cfg *EtcdAnnounceConfig) Parse(str string) error {
 				return optErr
 			}
 
-		case optionUnique:
-			cfg.Unique, err = roxyutil.ExpandString(optValue)
+		case optionHostID:
+			cfg.Hostname, err = roxyutil.ExpandString(optValue)
 			if err != nil {
 				optErr.Err = err
 				return optErr
@@ -278,7 +278,7 @@ func (cfg *EtcdAnnounceConfig) PostProcess() error {
 
 // AddTo adds this configuration to the provided Announcer.
 func (cfg EtcdAnnounceConfig) AddTo(etcd *v3.Client, a *announcer.Announcer) error {
-	impl, err := announcer.NewEtcd(etcd, cfg.Path, cfg.Unique, cfg.NamedPort, cfg.Format)
+	impl, err := announcer.NewEtcd(etcd, cfg.Path, cfg.Hostname, cfg.NamedPort, cfg.Format)
 	if err == nil {
 		a.Add(impl)
 	}

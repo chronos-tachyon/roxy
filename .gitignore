@@ -4,6 +4,7 @@
 /atcctl
 /colorize-logs
 /demo-backend
+/demo-client
 /zkcp
 /*.deb
 /release-notes.txt

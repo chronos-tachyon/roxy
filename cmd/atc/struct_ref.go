@@ -159,18 +159,18 @@ func (ref *Ref) Flip(ctx context.Context, configID uint64) error {
 	migrationDataByAddr := make(map[*net.TCPAddr]*migrationData, len(next.PeerList))
 	for key, shardData := range ref.shardsByKey {
 		svc := next.ServiceMap.Get(key.ServiceName)
-		shardLimit := ShardID(svc.EffectiveNumShards())
+		shardLimit := ShardNumber(svc.EffectiveNumShards())
 
 		shardData.Mutex.Lock()
 
 		shardData.ServiceData = svc
 
 		switch {
-		case key.ShardID >= shardLimit:
-			for _, clientData := range shardData.ClientsByUnique {
+		case key.ShardNumber >= shardLimit:
+			for _, clientData := range shardData.Clients {
 				clientData.LockedSendGoAway(nil) // force immediate codes.NotFound
 			}
-			for _, serverData := range shardData.ServersByUnique {
+			for _, serverData := range shardData.Servers {
 				serverData.LockedSendGoAway(nil) // force immediate codes.NotFound
 			}
 
@@ -236,33 +236,37 @@ func (ref *Ref) Shard(key Key) *ShardData {
 	return shardData
 }
 
-func (ref *Ref) GetOrInsertShard(key Key, svc *ServiceData) *ShardData {
+func (ref *Ref) GetOrInsertShard(key Key, svc *ServiceData, cm *CostMap) *ShardData {
 	roxyutil.AssertNotNil(&svc)
+	roxyutil.AssertNotNil(&cm)
+	roxyutil.Assert(key.HasShardNumber == svc.IsSharded, "Key.HasShardNumber != ServiceData.IsSharded")
 
 	ref.mu.Lock()
-	shardData := ref.lockedGetOrInsertShard(key, svc)
+	shardData := ref.lockedGetOrInsertShard(key, svc, cm)
 	ref.mu.Unlock()
 	return shardData
 }
 
-func (ref *Ref) lockedGetOrInsertShard(key Key, svc *ServiceData) *ShardData {
+func (ref *Ref) lockedGetOrInsertShard(key Key, svc *ServiceData, cm *CostMap) *ShardData {
 	roxyutil.AssertNotNil(&svc)
+	roxyutil.AssertNotNil(&cm)
+	roxyutil.Assert(key.HasShardNumber == svc.IsSharded, "Key.HasShardNumber != ServiceData.IsSharded")
 
 	shardData := ref.shardsByKey[key]
 	if shardData == nil {
 		shardData = &ShardData{
-			ServiceName:     key.ServiceName,
-			ShardID:         key.ShardID,
-			HasShardID:      svc.IsSharded,
-			ServiceData:     svc,
-			ClientsByUnique: make(map[string]*ClientData, svc.ExpectedNumClientsPerShard),
-			ServersByUnique: make(map[string]*ServerData, svc.ExpectedNumServersPerShard),
+			Key:         key,
+			ServiceData: svc,
+			CostMap:     cm,
+			Clients:     make(map[string]*ClientData, svc.ExpectedNumClientsPerShard),
+			Servers:     make(map[string]*ServerData, svc.ExpectedNumServersPerShard),
 		}
 		shardData.Cond = sync.NewCond(&shardData.Mutex)
 		ref.shardsByKey[key] = shardData
 	} else {
 		shardData.Mutex.Lock()
 		shardData.ServiceData = svc
+		shardData.CostMap = cm
 		shardData.Mutex.Unlock()
 	}
 	return shardData
@@ -363,19 +367,19 @@ func (ref *Ref) migrationThread(
 			shardData.Mutex.Lock()
 
 			req := &roxy_v0.TransferRequest{
-				ConfigId:    configID,
-				ServiceName: string(shardData.ServiceName),
-				ShardId:     uint32(shardData.ShardID),
-				HasShardId:  shardData.HasShardID,
-				Clients:     make([]*roxy_v0.ClientData, 0, len(shardData.ClientsByUnique)),
-				Servers:     make([]*roxy_v0.ServerData, 0, len(shardData.ServersByUnique)),
+				ConfigId:       configID,
+				ServiceName:    string(shardData.Key.ServiceName),
+				ShardNumber:    uint32(shardData.Key.ShardNumber),
+				HasShardNumber: shardData.Key.HasShardNumber,
+				Clients:        make([]*roxy_v0.ClientData, 0, len(shardData.Clients)),
+				Servers:        make([]*roxy_v0.ServerData, 0, len(shardData.Servers)),
 			}
 
-			for _, clientData := range shardData.ClientsByUnique {
+			for _, clientData := range shardData.Clients {
 				samples := clientData.CostHistory.Snapshot()
 
 				client := &roxy_v0.ClientData{
-					Unique:                clientData.Unique,
+					UniqueId:              clientData.UniqueID,
 					Location:              string(clientData.Location),
 					DeclaredCostPerSecond: clientData.DeclaredCPS,
 					History:               make([]*roxy_v0.Sample, len(samples)),
@@ -388,11 +392,11 @@ func (ref *Ref) migrationThread(
 				req.Clients = append(req.Clients, client)
 			}
 
-			for _, serverData := range shardData.ServersByUnique {
+			for _, serverData := range shardData.Servers {
 				samples := serverData.CostHistory.Snapshot()
 
 				server := &roxy_v0.ServerData{
-					Unique:                serverData.Unique,
+					UniqueId:              serverData.UniqueID,
 					Location:              string(serverData.Location),
 					ServerName:            serverData.ServerName,
 					Ip:                    []byte(serverData.Addr.IP),
@@ -415,17 +419,17 @@ func (ref *Ref) migrationThread(
 			if err != nil {
 				log.Logger.Error().
 					Stringer("addr", peerData.Addr).
-					Stringer("key", shardData.Key()).
+					Stringer("key", shardData.Key).
 					Err(err).
 					Msg("AirTrafficControl.Transfer RPC failed")
 			}
 		}
 
 		shardData.Mutex.Lock()
-		for _, clientData := range shardData.ClientsByUnique {
+		for _, clientData := range shardData.Clients {
 			clientData.LockedSendGoAway(goAway)
 		}
-		for _, serverData := range shardData.ServersByUnique {
+		for _, serverData := range shardData.Servers {
 			serverData.LockedSendGoAway(goAway)
 		}
 		shardData.Mutex.Unlock()
@@ -457,7 +461,7 @@ func (ref *Ref) lockedPeriodic() {
 	for key, shardData := range ref.shardsByKey {
 		shardData.Mutex.Lock()
 		shardData.LockedPeriodic()
-		if len(shardData.ClientsByUnique) == 0 && len(shardData.ServersByUnique) == 0 {
+		if len(shardData.Clients) == 0 && len(shardData.Servers) == 0 {
 			delete(ref.shardsByKey, key)
 		}
 		shardData.Mutex.Unlock()

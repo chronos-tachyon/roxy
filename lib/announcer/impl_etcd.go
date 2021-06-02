@@ -17,15 +17,15 @@ import (
 )
 
 // NewEtcd creates a new etcd.io announcer.
-func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (Interface, error) {
+func NewEtcd(etcd *v3.Client, path, hostID, namedPort string, format Format) (Interface, error) {
 	if etcd == nil {
 		panic(errors.New("*v3.Client is nil"))
 	}
 	if err := roxyutil.ValidateEtcdPath(path); err != nil {
 		return nil, err
 	}
-	if unique == "" {
-		unique = os.Getenv("HOSTNAME")
+	if hostID == "" {
+		hostID = os.Getenv("HOSTNAME")
 	}
 	if namedPort != "" {
 		if err := roxyutil.ValidateNamedPort(namedPort); err != nil {
@@ -35,7 +35,7 @@ func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (In
 	impl := &etcdImpl{
 		etcd:      etcd,
 		path:      path,
-		unique:    unique,
+		hostID:    hostID,
 		namedPort: namedPort,
 		format:    format,
 		state:     StateReady,
@@ -47,7 +47,7 @@ func NewEtcd(etcd *v3.Client, path, unique, namedPort string, format Format) (In
 type etcdImpl struct {
 	etcd      *v3.Client
 	path      string
-	unique    string
+	hostID    string
 	namedPort string
 	format    Format
 
@@ -76,7 +76,7 @@ func (impl *etcdImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		return err
 	}
 
-	key := impl.path + impl.unique
+	key := impl.path + impl.hostID
 
 	_, err = impl.etcd.KV.Put(ctx, key, string(payload), v3.WithLease(lease.ID))
 	err = roxyresolver.MapEtcdError(err)

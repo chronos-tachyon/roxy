@@ -15,15 +15,15 @@ import (
 )
 
 // NewZK creates a new ZooKeeper announcer.
-func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Interface, error) {
+func NewZK(zkconn *zk.Conn, path, hostID, namedPort string, format Format) (Interface, error) {
 	if zkconn == nil {
 		panic(errors.New("*zk.Conn is nil"))
 	}
 	if err := roxyutil.ValidateZKPath(path); err != nil {
 		return nil, err
 	}
-	if unique == "" {
-		unique = os.Getenv("HOSTNAME")
+	if hostID == "" {
+		hostID = os.Getenv("HOSTNAME")
 	}
 	if namedPort != "" {
 		if err := roxyutil.ValidateNamedPort(namedPort); err != nil {
@@ -33,7 +33,7 @@ func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Inte
 	return &zkImpl{
 		zkconn:    zkconn,
 		path:      path,
-		unique:    unique,
+		hostID:    hostID,
 		namedPort: namedPort,
 		format:    format,
 		state:     StateReady,
@@ -43,7 +43,7 @@ func NewZK(zkconn *zk.Conn, path, unique, namedPort string, format Format) (Inte
 type zkImpl struct {
 	zkconn    *zk.Conn
 	path      string
-	unique    string
+	hostID    string
 	namedPort string
 	format    Format
 
@@ -63,7 +63,7 @@ func (impl *zkImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 
 	checkAnnounce(impl.state)
 
-	file := path.Join(impl.path, impl.unique)
+	file := path.Join(impl.path, impl.hostID)
 
 	actual, err := impl.zkconn.CreateProtectedEphemeralSequential(file, payload, zk.WorldACL(zk.PermAll))
 	err = roxyresolver.MapZKError(err)

@@ -79,17 +79,17 @@ func NewWatchingResolver(opts WatchingResolverOptions) (*WatchingResolver, error
 
 	ctx, cancelFn := context.WithCancel(opts.Context)
 	res := &WatchingResolver{
-		ctx:      ctx,
-		cancelFn: cancelFn,
-		rng:      rng,
-		balancer: opts.Balancer,
-		backoff:  expbackoff.BuildDefault(),
-		watchFn:  opts.ResolveFunc,
-		cc:       opts.ClientConn,
-		sc:       parsedServiceConfig,
-		watches:  make(map[WatchID]WatchFunc, 1),
-		byAddr:   make(map[string]*Dynamic, 16),
-		byUnique: make(map[string]int, 16),
+		ctx:        ctx,
+		cancelFn:   cancelFn,
+		rng:        rng,
+		balancer:   opts.Balancer,
+		backoff:    expbackoff.BuildDefault(),
+		watchFn:    opts.ResolveFunc,
+		cc:         opts.ClientConn,
+		sc:         parsedServiceConfig,
+		watches:    make(map[WatchID]WatchFunc, 1),
+		byAddr:     make(map[string]*Dynamic, 16),
+		byUniqueID: make(map[string]int, 16),
 	}
 	res.cv = sync.NewCond(&res.mu)
 	go res.resolverThread()
@@ -109,16 +109,16 @@ type WatchingResolver struct {
 	sc       *serviceconfig.ParseResult
 	nextRR   uint32
 
-	mu       sync.Mutex
-	cv       *sync.Cond
-	watches  map[WatchID]WatchFunc
-	byAddr   map[string]*Dynamic
-	byUnique map[string]int
-	resolved []Resolved
-	perm     []int
-	err      multierror.Error
-	ready    bool
-	closed   bool
+	mu         sync.Mutex
+	cv         *sync.Cond
+	watches    map[WatchID]WatchFunc
+	byAddr     map[string]*Dynamic
+	byUniqueID map[string]int
+	resolved   []Resolved
+	perm       []int
+	err        multierror.Error
+	ready      bool
+	closed     bool
 }
 
 // Err returns any errors encountered since the last call to Err or ResolveAll.
@@ -197,7 +197,7 @@ func (res *WatchingResolver) Watch(fn WatchFunc) WatchID {
 		for _, data := range res.resolved {
 			ev := Event{
 				Type: UpdateEvent,
-				Key:  data.Unique,
+				Key:  data.UniqueID,
 				Data: data,
 			}
 			ev.Check()
@@ -241,16 +241,21 @@ func (res *WatchingResolver) Close() {
 
 func (res *WatchingResolver) resolverThread() {
 	var wg sync.WaitGroup
+	var ch <-chan []Event
 
 	defer func() {
 		res.cancelFn()
+
+		for range ch {
+			// pass
+		}
 
 		wg.Wait()
 
 		res.mu.Lock()
 		res.watches = nil
 		res.byAddr = nil
-		res.byUnique = nil
+		res.byUniqueID = nil
 		res.resolved = nil
 		res.perm = nil
 		res.ready = true
@@ -261,7 +266,6 @@ func (res *WatchingResolver) resolverThread() {
 
 	retries := 0
 
-	var ch <-chan []Event
 	var err error
 	for {
 		for {
@@ -326,11 +330,11 @@ func (res *WatchingResolver) sendEvents(events []Event) {
 		res.mu.Unlock()
 	}()
 
-	gotDelete := func(unique string) (oldData Resolved, ok bool) {
-		if index, found := res.byUnique[unique]; found {
+	gotDelete := func(uniqueID string) (oldData Resolved, ok bool) {
+		if index, found := res.byUniqueID[uniqueID]; found {
 			oldData = res.resolved[index]
 			ok = true
-			delete(res.byUnique, unique)
+			delete(res.byUniqueID, uniqueID)
 			indicesToDelete[index] = struct{}{}
 			rebuildByAddr = true
 			didChange = true
@@ -348,7 +352,7 @@ func (res *WatchingResolver) sendEvents(events []Event) {
 			}
 			newData.Dynamic = dynamic
 		}
-		res.byUnique[newData.Unique] = len(res.resolved)
+		res.byUniqueID[newData.UniqueID] = len(res.resolved)
 		res.resolved = append(res.resolved, newData)
 		didChange = true
 	}
@@ -374,15 +378,15 @@ func (res *WatchingResolver) sendEvents(events []Event) {
 	if len(indicesToDelete) != 0 {
 		n := len(res.resolved) - len(indicesToDelete)
 		newList := make([]Resolved, 0, n)
-		newByUnique := make(map[string]int, n)
+		newByUniqueID := make(map[string]int, n)
 		for index, data := range res.resolved {
 			if _, found := indicesToDelete[index]; !found {
-				newByUnique[data.Unique] = len(newList)
+				newByUniqueID[data.UniqueID] = len(newList)
 				newList = append(newList, data)
 			}
 		}
 		res.resolved = newList
-		res.byUnique = newByUnique
+		res.byUniqueID = newByUniqueID
 	}
 
 	if rebuildByAddr {

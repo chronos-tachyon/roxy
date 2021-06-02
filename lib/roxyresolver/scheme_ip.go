@@ -170,7 +170,7 @@ func makeIPRecords(tcpAddrs []*net.TCPAddr, serverName string) []Resolved {
 			ServerName: myServerName,
 		}
 		records[index] = Resolved{
-			Unique:     fmt.Sprintf("%d/%s", index, tcpAddr.String()),
+			UniqueID:   fmt.Sprintf("%d/%s", index, tcpAddr.String()),
 			ServerName: myServerName,
 			Addr:       tcpAddr,
 			Address:    grpcAddr,

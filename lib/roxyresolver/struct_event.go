@@ -111,9 +111,9 @@ func (event Event) checkData(expectData, expectDataErr bool) {
 	}
 	if expectData {
 		event.Data.Check()
-		if event.Key != event.Data.Unique {
+		if event.Key != event.Data.UniqueID {
 			panic(roxyutil.CheckError{
-				Message: fmt.Sprintf("Event.Key is %q but Event.Data.Unique is %q", event.Key, event.Data.Unique),
+				Message: fmt.Sprintf("Event.Key is %q but Event.Data.UniqueID is %q", event.Key, event.Data.UniqueID),
 			})
 		}
 		if expectDataErr && event.Data.Err == nil {

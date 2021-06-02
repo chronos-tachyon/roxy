@@ -537,25 +537,25 @@ var _ error = ATCServiceNameError{}
 
 // }}}
 
-// type ATCShardIDError {{{
+// type ATCShardNumberError {{{
 
-// ATCShardIDError represents failure to parse an ATC shard ID.
-type ATCShardIDError struct {
-	ShardID string
-	Err     error
+// ATCShardNumberError represents failure to parse an ATC shard number.
+type ATCShardNumberError struct {
+	ShardNumber string
+	Err         error
 }
 
 // Error fulfills the error interface.
-func (err ATCShardIDError) Error() string {
-	return fmt.Sprintf("invalid ATC shard ID %q: %v", err.ShardID, err.Err)
+func (err ATCShardNumberError) Error() string {
+	return fmt.Sprintf("invalid ATC shard ID %q: %v", err.ShardNumber, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err ATCShardIDError) Unwrap() error {
+func (err ATCShardNumberError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = ATCShardIDError{}
+var _ error = ATCShardNumberError{}
 
 // }}}
 
@@ -581,26 +581,46 @@ var _ error = ATCLocationError{}
 
 // }}}
 
-// type ATCUniqueError {{{
+// type ATCUniqueIDError {{{
 
-// ATCUniqueError represents failure to parse an ATC unique client ID or
-// unique server ID.
-type ATCUniqueError struct {
-	Unique string
-	Err    error
+// ATCUniqueIDError represents failure to parse an ATC unique ID.
+type ATCUniqueIDError struct {
+	UniqueID string
+	Err      error
 }
 
 // Error fulfills the error interface.
-func (err ATCUniqueError) Error() string {
-	return fmt.Sprintf("invalid ATC unique identifier %q: %v", err.Unique, err.Err)
+func (err ATCUniqueIDError) Error() string {
+	return fmt.Sprintf("invalid ATC unique ID %q: %v", err.UniqueID, err.Err)
 }
 
 // Unwrap returns the underlying cause of this error.
-func (err ATCUniqueError) Unwrap() error {
+func (err ATCUniqueIDError) Unwrap() error {
 	return err.Err
 }
 
-var _ error = ATCUniqueError{}
+var _ error = ATCUniqueIDError{}
+
+// }}}
+
+// type ATCLoadUniqueError {{{
+
+// ATCLoadUniqueError represents failure to load or persist a stable unique ID.
+type ATCLoadUniqueError struct {
+	Err error
+}
+
+// Error fulfills the error interface.
+func (err ATCLoadUniqueError) Error() string {
+	return fmt.Sprintf("failed to load or persist ATC unique ID: %v", err.Err)
+}
+
+// Unwrap returns the underlying cause of this error.
+func (err ATCLoadUniqueError) Unwrap() error {
+	return err.Err
+}
+
+var _ error = ATCLoadUniqueError{}
 
 // }}}
 

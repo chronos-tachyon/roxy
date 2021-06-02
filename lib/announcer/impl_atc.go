@@ -15,17 +15,17 @@ import (
 )
 
 // NewATC creates a new Roxy Air Traffic Control announcer.
-func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPort string) (Interface, error) {
+func NewATC(client *atcclient.ATCClient, serviceName, location, uniqueID, namedPort string) (Interface, error) {
 	if client == nil {
 		panic(errors.New("*atcclient.ATCClient is nil"))
 	}
 	if err := roxyutil.ValidateATCServiceName(serviceName); err != nil {
 		return nil, err
 	}
-	if err := roxyutil.ValidateATCLocation(location); err != nil {
+	if err := roxyutil.ValidateATCUniqueID(uniqueID); err != nil {
 		return nil, err
 	}
-	if err := roxyutil.ValidateATCUnique(unique); err != nil {
+	if err := roxyutil.ValidateATCLocation(location); err != nil {
 		return nil, err
 	}
 	if namedPort != "" {
@@ -37,7 +37,7 @@ func NewATC(client *atcclient.ATCClient, serviceName, location, unique, namedPor
 		client:      client,
 		serviceName: serviceName,
 		location:    location,
-		unique:      unique,
+		uniqueID:    uniqueID,
 		namedPort:   namedPort,
 		state:       StateReady,
 	}
@@ -49,7 +49,7 @@ type atcImpl struct {
 	client      *atcclient.ATCClient
 	serviceName string
 	location    string
-	unique      string
+	uniqueID    string
 	namedPort   string
 
 	mu       sync.Mutex
@@ -71,9 +71,9 @@ func (impl *atcImpl) Announce(ctx context.Context, r *membership.Roxy) error {
 		ctx,
 		&roxy_v0.ServerData{
 			ServiceName:           impl.serviceName,
-			ShardId:               r.ShardID,
-			HasShardId:            r.HasShardID,
-			Unique:                impl.unique,
+			ShardNumber:           r.ShardNumber,
+			HasShardNumber:        r.HasShardNumber,
+			UniqueId:              impl.uniqueID,
 			Location:              impl.location,
 			ServerName:            r.ServerName,
 			Ip:                    []byte(tcpAddr.IP),

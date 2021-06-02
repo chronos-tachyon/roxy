@@ -154,7 +154,7 @@ func NewUnixResolver(opts Options) (Resolver, error) {
 	// we rely on the standard gRPC resolver for those schemes.
 
 	data := Resolved{
-		Unique:     constants.NetUnix + ":" + t.Addr.String(),
+		UniqueID:   constants.NetUnix + ":" + t.Addr.String(),
 		ServerName: t.ServerName,
 		Addr:       t.Addr,
 		Address:    grpcAddr,

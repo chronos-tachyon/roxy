@@ -11,9 +11,10 @@ import (
 )
 
 // Lookup queries any ATC tower for information about the given service or
-// shard.  Unlike with most other uses of Key, setting HasShardID to false is a
-// wildcard lookup that returns information about all shards (if the service is
-// sharded), rather than an assertion that the service is not sharded.
+// shard.  Unlike with most other uses of Key, setting HasShardNumber to false
+// is a wildcard lookup that returns information about all shards (if the
+// service is sharded), rather than an assertion that the service is not
+// sharded.
 func (c *ATCClient) Lookup(
 	ctx context.Context,
 	key Key,
@@ -35,9 +36,9 @@ func (c *ATCClient) Lookup(
 	}
 
 	req := &roxy_v0.LookupRequest{
-		ServiceName: key.ServiceName,
-		ShardId:     key.ShardID,
-		HasShardId:  key.HasShardID,
+		ServiceName:    key.ServiceName,
+		ShardNumber:    key.ShardNumber,
+		HasShardNumber: key.HasShardNumber,
 	}
 
 	log.Logger.Trace().
@@ -84,10 +85,10 @@ func (c *ATCClient) LookupClients(
 	}
 
 	req := &roxy_v0.LookupClientsRequest{
-		ServiceName: key.ServiceName,
-		ShardId:     key.ShardID,
-		HasShardId:  key.HasShardID,
-		Unique:      uniqueID,
+		ServiceName:    key.ServiceName,
+		ShardNumber:    key.ShardNumber,
+		HasShardNumber: key.HasShardNumber,
+		UniqueId:       uniqueID,
 	}
 
 	log.Logger.Trace().
@@ -136,10 +137,10 @@ func (c *ATCClient) LookupServers(
 	}
 
 	req := &roxy_v0.LookupServersRequest{
-		ServiceName: key.ServiceName,
-		ShardId:     key.ShardID,
-		HasShardId:  key.HasShardID,
-		Unique:      uniqueID,
+		ServiceName:    key.ServiceName,
+		ShardNumber:    key.ShardNumber,
+		HasShardNumber: key.HasShardNumber,
+		UniqueId:       uniqueID,
 	}
 
 	log.Logger.Trace().

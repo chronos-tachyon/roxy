@@ -9,34 +9,30 @@ import (
 )
 
 type ShardData struct {
-	ServiceName       ServiceName
-	ShardID           ShardID
-	HasShardID        bool
+	Key               Key
 	Mutex             sync.Mutex
 	Cond              *sync.Cond
 	ServiceData       *ServiceData
-	ClientsByUnique   map[string]*ClientData
-	ServersByUnique   map[string]*ServerData
+	CostMap           *CostMap
+	Clients           map[string]*ClientData
+	Servers           map[string]*ServerData
 	DeclaredDemandCPS float64
 	MeasuredDemandCPS float64
 	DeclaredSupplyCPS float64
 	MeasuredSupplyCPS float64
+	AssignedCPS       float64
 }
 
-func (shardData *ShardData) Key() Key {
-	return Key{shardData.ServiceName, shardData.ShardID, shardData.HasShardID}
-}
-
-func (shardData *ShardData) Client(unique string) *ClientData {
+func (shardData *ShardData) Client(uniqueID string) *ClientData {
 	shardData.Mutex.Lock()
-	clientData := shardData.ClientsByUnique[unique]
+	clientData := shardData.Clients[uniqueID]
 	shardData.Mutex.Unlock()
 	return clientData
 }
 
-func (shardData *ShardData) Server(unique string) *ServerData {
+func (shardData *ShardData) Server(uniqueID string) *ServerData {
 	shardData.Mutex.Lock()
-	serverData := shardData.ServersByUnique[unique]
+	serverData := shardData.Servers[uniqueID]
 	shardData.Mutex.Unlock()
 	return serverData
 }
@@ -48,22 +44,23 @@ func (shardData *ShardData) GetOrInsertClient(first *roxy_v0.ClientData) *Client
 	return clientData
 }
 
-func (shardData *ShardData) GetOrInsertServer(first *roxy_v0.ServerData) *ServerData {
+func (shardData *ShardData) GetOrInsertServer(first *roxy_v0.ServerData, tcpAddr *net.TCPAddr) *ServerData {
 	shardData.Mutex.Lock()
-	serverData := shardData.LockedGetOrInsertServer(first)
+	serverData := shardData.LockedGetOrInsertServer(first, tcpAddr)
 	shardData.Mutex.Unlock()
 	return serverData
 }
 
 func (shardData *ShardData) LockedGetOrInsertClient(first *roxy_v0.ClientData) *ClientData {
-	clientData := shardData.ClientsByUnique[first.Unique]
+	clientData := shardData.Clients[first.UniqueId]
 	if clientData == nil {
 		clientData = &ClientData{
-			ShardData: shardData,
-			Unique:    first.Unique,
+			ShardData:   shardData,
+			UniqueID:    first.UniqueId,
+			Assignments: make(map[string]float64, shardData.ServiceData.ExpectedNumServersPerShard),
 		}
 		clientData.CostHistory.Init()
-		shardData.ClientsByUnique[first.Unique] = clientData
+		shardData.Clients[first.UniqueId] = clientData
 	}
 	if clientData.IsServing {
 		oldCPS := clientData.DeclaredCPS
@@ -75,22 +72,18 @@ func (shardData *ShardData) LockedGetOrInsertClient(first *roxy_v0.ClientData) *
 	return clientData
 }
 
-func (shardData *ShardData) LockedGetOrInsertServer(first *roxy_v0.ServerData) *ServerData {
-	addr := &net.TCPAddr{
-		IP:   net.IP(first.Ip),
-		Port: int(first.Port),
-		Zone: first.Zone,
-	}
-	addr = misc.CanonicalizeTCPAddr(addr)
+func (shardData *ShardData) LockedGetOrInsertServer(first *roxy_v0.ServerData, tcpAddr *net.TCPAddr) *ServerData {
+	tcpAddr = misc.CanonicalizeTCPAddr(tcpAddr)
 
-	serverData := shardData.ServersByUnique[first.Unique]
+	serverData := shardData.Servers[first.UniqueId]
 	if serverData == nil {
 		serverData = &ServerData{
-			ShardData: shardData,
-			Unique:    first.Unique,
+			ShardData:   shardData,
+			UniqueID:    first.UniqueId,
+			Assignments: make(map[string]float64, shardData.ServiceData.ExpectedNumClientsPerShard),
 		}
 		serverData.CostHistory.Init()
-		shardData.ServersByUnique[first.Unique] = serverData
+		shardData.Servers[first.UniqueId] = serverData
 	}
 	if serverData.IsServing {
 		oldCPS := serverData.DeclaredCPS
@@ -99,24 +92,32 @@ func (shardData *ShardData) LockedGetOrInsertServer(first *roxy_v0.ServerData) *
 	}
 	serverData.Location = Location(first.Location)
 	serverData.ServerName = first.ServerName
-	serverData.Addr = addr
+	serverData.Addr = tcpAddr
 	serverData.DeclaredCPS = first.DeclaredCostPerSecond
 	return serverData
 }
 
 func (shardData *ShardData) LockedPeriodic() {
-	for unique, clientData := range shardData.ClientsByUnique {
+	for clientID, clientData := range shardData.Clients {
 		clientData.LockedPeriodic()
 		if clientData.LockedIsExpired() {
-			delete(shardData.ClientsByUnique, unique)
+			clientData.LockedDelete()
+			delete(shardData.Clients, clientID)
 		}
 	}
-	for unique, serverData := range shardData.ServersByUnique {
+
+	for serverID, serverData := range shardData.Servers {
 		serverData.LockedPeriodic()
 		if serverData.LockedIsExpired() {
-			delete(shardData.ServersByUnique, unique)
+			serverData.LockedDelete()
+			delete(shardData.Servers, serverID)
 		}
 	}
+
+	shardData.LockedRebalance()
+}
+
+func (shardData *ShardData) LockedRebalance() {
 }
 
 func (shardData *ShardData) ToProto() *roxy_v0.ShardData {
@@ -128,20 +129,20 @@ func (shardData *ShardData) ToProto() *roxy_v0.ShardData {
 
 func (shardData *ShardData) LockedToProto() *roxy_v0.ShardData {
 	out := &roxy_v0.ShardData{
-		ServiceName:                 string(shardData.ServiceName),
-		ShardId:                     uint32(shardData.ShardID),
-		HasShardId:                  shardData.HasShardID,
+		ServiceName:                 string(shardData.Key.ServiceName),
+		ShardNumber:                 uint32(shardData.Key.ShardNumber),
+		HasShardNumber:              shardData.Key.HasShardNumber,
 		DeclaredDemandCostPerSecond: shardData.DeclaredDemandCPS,
 		MeasuredDemandCostPerSecond: shardData.MeasuredDemandCPS,
 		DeclaredSupplyCostPerSecond: shardData.DeclaredSupplyCPS,
 		MeasuredSupplyCostPerSecond: shardData.MeasuredSupplyCPS,
 	}
-	for _, clientData := range shardData.ClientsByUnique {
+	for _, clientData := range shardData.Clients {
 		if clientData.IsAlive {
 			out.NumClients++
 		}
 	}
-	for _, serverData := range shardData.ServersByUnique {
+	for _, serverData := range shardData.Servers {
 		if serverData.IsAlive {
 			out.NumServers++
 		}

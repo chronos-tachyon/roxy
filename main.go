@@ -73,7 +73,7 @@ func main() {
 	defer mainutil.CancelRootContext()
 	ctx := mainutil.RootContext()
 
-	mainutil.SetUniqueFile(flagUniqueFile)
+	atcclient.SetUniqueFile(flagUniqueFile)
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 

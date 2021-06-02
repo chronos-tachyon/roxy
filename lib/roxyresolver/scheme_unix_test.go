@@ -327,7 +327,7 @@ func TestNewUnixResolver(t *testing.T) {
 
 			event := Event{
 				Type: UpdateEvent,
-				Key:  data.Unique,
+				Key:  data.UniqueID,
 				Data: data,
 			}
 			if !reflect.DeepEqual(event, events[0]) {

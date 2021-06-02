@@ -19,7 +19,7 @@ type ServerSet struct {
 	ServiceEndpoint     *ServerSetEndpoint            `json:"serviceEndpoint"`
 	AdditionalEndpoints map[string]*ServerSetEndpoint `json:"additionalEndpoints"`
 	Status              ServerSetStatus               `json:"status"`
-	ShardID             *int32                        `json:"shard,omitempty"`
+	ShardNumber         *int32                        `json:"shard,omitempty"`
 	Metadata            map[string]string             `json:"metadata,omitempty"`
 }
 
