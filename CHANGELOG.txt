@@ -1,3 +1,8 @@
+v0.6.0
+  * MAJOR API AND ABI BREAKS
+  * ClientAssign kinda works sometimes, if you don't breathe too hard on it
+  * Fix deadlocks and hangs in ATC server, client, and resolver
+
 v0.5.1
   * Significant changes to get ATC ClientAssign closer to working
   * Major API changes to roxyresolver's ParseFooTarget and MakeFooResolverFunc
