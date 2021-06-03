@@ -1,3 +1,6 @@
+v0.6.1
+  * Fixes for ClientAssign
+
 v0.6.0
   * MAJOR API AND ABI BREAKS
   * ClientAssign kinda works sometimes, if you don't breathe too hard on it

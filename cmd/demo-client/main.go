@@ -18,11 +18,11 @@ import (
 )
 
 var (
-	flagATC        string = ""
-	flagWeb        string = ""
-	flagUniqueFile string = "/var/opt/roxy/lib/state/demo-client.id"
+	flagATC        string        = ""
+	flagWeb        string        = ""
+	flagUniqueFile string        = "/var/opt/roxy/lib/state/demo-client.id"
 	flagDelay      time.Duration = 1 * time.Second
-	flagIterations int = 5
+	flagIterations int           = 5
 )
 
 func init() {
