@@ -409,15 +409,15 @@ func (res *WatchingResolver) sendEvents(events []Event) {
 	}
 
 	if res.cc != nil {
-		if err := misc.ErrorOrNil(newErrors); err != nil {
-			res.cc.ReportError(err)
-		} else if len(res.resolved) == 0 {
-			res.cc.ReportError(roxyutil.ErrNoHealthyBackends)
-		} else {
+		if len(res.resolved) != 0 {
 			var state resolver.State
 			state.Addresses = makeAddressList(res.resolved)
 			state.ServiceConfig = res.sc
 			res.cc.UpdateState(state)
+		} else if err := misc.ErrorOrNil(newErrors); err != nil {
+			res.cc.ReportError(err)
+		} else {
+			res.cc.ReportError(roxyutil.ErrNoHealthyBackends)
 		}
 	}
 

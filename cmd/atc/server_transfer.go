@@ -54,7 +54,7 @@ func (s *ATCServer) Transfer(
 	defer shardData.Mutex.Unlock()
 
 	for _, client := range req.Clients {
-		clientData := shardData.LockedGetOrInsertClient(client)
+		clientData := shardData.GetOrInsertClientLocked(client)
 		if clientData.IsServing {
 			shardData.MeasuredDemandCPS -= clientData.MeasuredCPS
 		}
@@ -73,7 +73,7 @@ func (s *ATCServer) Transfer(
 			Port: int(server.Port),
 			Zone: server.Zone,
 		}
-		serverData := shardData.LockedGetOrInsertServer(server, tcpAddr)
+		serverData := shardData.GetOrInsertServerLocked(server, tcpAddr)
 		if serverData.IsServing {
 			shardData.MeasuredSupplyCPS -= serverData.MeasuredCPS
 		}

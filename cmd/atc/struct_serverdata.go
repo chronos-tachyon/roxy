@@ -26,17 +26,17 @@ type ServerData struct {
 	Assignments map[string]float64
 }
 
-func (serverData *ServerData) LockedAvailableCPS() float64 {
+func (serverData *ServerData) AvailableCPSLocked() float64 {
 	return serverData.DeclaredCPS - serverData.AssignedCPS
 }
 
-func (serverData *ServerData) LockedUtilizationRatio() float64 {
+func (serverData *ServerData) UtilizationRatioLocked() float64 {
 	assignedCPS := serverData.AssignedCPS
 	declaredCPS := math.Max(1.0, serverData.DeclaredCPS)
 	return assignedCPS / declaredCPS
 }
 
-func (serverData *ServerData) LockedSendGoAway(goAway *roxy_v0.GoAway) {
+func (serverData *ServerData) SendGoAwayLocked(goAway *roxy_v0.GoAway) {
 	if serverData.IsAlive {
 		select {
 		case serverData.GoAwayCh <- goAway:
@@ -45,7 +45,7 @@ func (serverData *ServerData) LockedSendGoAway(goAway *roxy_v0.GoAway) {
 	}
 }
 
-func (serverData *ServerData) LockedUpdate(isAlive bool, isServing bool) {
+func (serverData *ServerData) UpdateLocked(isAlive bool, isServing bool) {
 	shardData := serverData.ShardData
 	histData := serverData.CostHistory.Data()
 	now := histData.Now
@@ -73,11 +73,11 @@ func (serverData *ServerData) LockedUpdate(isAlive bool, isServing bool) {
 		shardData.MeasuredSupplyCPS += serverData.MeasuredCPS
 	}
 	if isServingChanged && !isServing {
-		serverData.LockedDelete()
+		serverData.DeleteLocked()
 	}
 }
 
-func (serverData *ServerData) LockedDelete() {
+func (serverData *ServerData) DeleteLocked() {
 	shardData := serverData.ShardData
 
 	if serverData.IsServing {
@@ -88,11 +88,11 @@ func (serverData *ServerData) LockedDelete() {
 
 	for clientID := range serverData.Assignments {
 		clientData := shardData.Clients[clientID]
-		clientData.LockedDeleteServer(serverData, true)
+		clientData.DeleteServerLocked(serverData)
 	}
 }
 
-func (serverData *ServerData) LockedIsExpired() bool {
+func (serverData *ServerData) IsExpiredLocked() bool {
 	t := serverData.ExpireTime
 	if t.IsZero() {
 		return false
@@ -101,7 +101,7 @@ func (serverData *ServerData) LockedIsExpired() bool {
 	return now.Sub(t) >= 0
 }
 
-func (serverData *ServerData) LockedPeriodic() {
+func (serverData *ServerData) PeriodicLocked() {
 	shardData := serverData.ShardData
 
 	serverData.CostHistory.Update()
@@ -115,7 +115,7 @@ func (serverData *ServerData) LockedPeriodic() {
 	}
 }
 
-func (serverData *ServerData) LockedToProto() *roxy_v0.ServerData {
+func (serverData *ServerData) ToProtoLocked() *roxy_v0.ServerData {
 	key := serverData.ShardData.Key
 	return &roxy_v0.ServerData{
 		ServiceName:           string(key.ServiceName),

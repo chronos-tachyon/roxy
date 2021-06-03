@@ -51,11 +51,41 @@ func (p Picker) Get(index uint) interface{} {
 	return p.values[index]
 }
 
-// Disable permanently alters the probability of selecting the index'th value
-// to 0.
+// Disable semi-permanently alters the probability of selecting the index'th
+// value to 0.
 func (p Picker) Disable(index uint) {
 	p.weights[index] = 0.0
 	p.recomputeProbabilities()
+}
+
+// Enable undoes the effect of a previous call to Disable.
+func (p Picker) Enable(index uint) {
+	p.weights[index] = math.Exp2(-p.scores[index])
+	p.recomputeProbabilities()
+}
+
+// Worst deterministically picks the index of the value with the worst score.
+// Disabled values are ignored.
+func (p Picker) Worst() (uint, bool) {
+	var (
+		hasWorst   bool
+		worstIndex uint
+		worstProb  float64
+	)
+	length := p.Len()
+	for index := uint(0); index < length; index++ {
+		prob := p.probs[index]
+		if prob == 0.0 {
+			continue
+		}
+		if hasWorst && prob >= worstProb {
+			continue
+		}
+		hasWorst = true
+		worstIndex = index
+		worstProb = prob
+	}
+	return worstIndex, hasWorst
 }
 
 // Pick randomly selects the index of a value.

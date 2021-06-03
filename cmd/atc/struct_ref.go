@@ -16,6 +16,7 @@ import (
 
 	"github.com/chronos-tachyon/roxy/lib/roxyresolver"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
+	"github.com/chronos-tachyon/roxy/lib/syncrand"
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
@@ -85,7 +86,7 @@ func (ref *Ref) ReleaseSharedImpl() {
 	ref.mu.Unlock()
 }
 
-func (ref *Ref) lockedAcquireExclusiveImpl() {
+func (ref *Ref) acquireExclusiveImplLocked() {
 	ref.waiters++
 	for ref.exclusive || ref.refCount != 0 {
 		ref.cv2.Wait()
@@ -94,7 +95,7 @@ func (ref *Ref) lockedAcquireExclusiveImpl() {
 	ref.exclusive = true
 }
 
-func (ref *Ref) lockedReleaseExclusiveImpl() {
+func (ref *Ref) releaseExclusiveImplLocked() {
 	ref.exclusive = false
 	if ref.waiters == 0 {
 		ref.cv1.Broadcast()
@@ -112,12 +113,12 @@ func (ref *Ref) Load(ctx context.Context, configID uint64, rev int64) error {
 	}
 
 	ref.mu.Lock()
-	ref.lockedAcquireExclusiveImpl()
+	ref.acquireExclusiveImplLocked()
 	if ref.next == nil {
 		ref.next = make(map[uint64]*Impl, 1)
 	}
 	ref.next[configID] = next
-	ref.lockedReleaseExclusiveImpl()
+	ref.releaseExclusiveImplLocked()
 	ref.mu.Unlock()
 
 	return nil
@@ -127,10 +128,10 @@ func (ref *Ref) Flip(ctx context.Context, configID uint64) error {
 	roxyutil.AssertNotNil(&ctx)
 
 	ref.mu.Lock()
-	ref.lockedAcquireExclusiveImpl()
+	ref.acquireExclusiveImplLocked()
 
 	defer func() {
-		ref.lockedReleaseExclusiveImpl()
+		ref.releaseExclusiveImplLocked()
 		ref.mu.Unlock()
 	}()
 
@@ -168,10 +169,10 @@ func (ref *Ref) Flip(ctx context.Context, configID uint64) error {
 		switch {
 		case key.ShardNumber >= shardLimit:
 			for _, clientData := range shardData.Clients {
-				clientData.LockedSendGoAway(nil) // force immediate codes.NotFound
+				clientData.SendGoAwayLocked(nil) // force immediate codes.NotFound
 			}
 			for _, serverData := range shardData.Servers {
-				serverData.LockedSendGoAway(nil) // force immediate codes.NotFound
+				serverData.SendGoAwayLocked(nil) // force immediate codes.NotFound
 			}
 
 		case next.SelfData.Contains(key):
@@ -207,10 +208,10 @@ func (ref *Ref) Commit(ctx context.Context, configID uint64) error {
 	roxyutil.AssertNotNil(&ctx)
 
 	ref.mu.Lock()
-	ref.lockedAcquireExclusiveImpl()
+	ref.acquireExclusiveImplLocked()
 
 	defer func() {
-		ref.lockedReleaseExclusiveImpl()
+		ref.releaseExclusiveImplLocked()
 		ref.mu.Unlock()
 	}()
 
@@ -242,12 +243,12 @@ func (ref *Ref) GetOrInsertShard(key Key, svc *ServiceData, cm *CostMap) *ShardD
 	roxyutil.Assert(key.HasShardNumber == svc.IsSharded, "Key.HasShardNumber != ServiceData.IsSharded")
 
 	ref.mu.Lock()
-	shardData := ref.lockedGetOrInsertShard(key, svc, cm)
+	shardData := ref.getOrInsertShardLocked(key, svc, cm)
 	ref.mu.Unlock()
 	return shardData
 }
 
-func (ref *Ref) lockedGetOrInsertShard(key Key, svc *ServiceData, cm *CostMap) *ShardData {
+func (ref *Ref) getOrInsertShardLocked(key Key, svc *ServiceData, cm *CostMap) *ShardData {
 	roxyutil.AssertNotNil(&svc)
 	roxyutil.AssertNotNil(&cm)
 	roxyutil.Assert(key.HasShardNumber == svc.IsSharded, "Key.HasShardNumber != ServiceData.IsSharded")
@@ -255,11 +256,12 @@ func (ref *Ref) lockedGetOrInsertShard(key Key, svc *ServiceData, cm *CostMap) *
 	shardData := ref.shardsByKey[key]
 	if shardData == nil {
 		shardData = &ShardData{
-			Key:         key,
-			ServiceData: svc,
-			CostMap:     cm,
-			Clients:     make(map[string]*ClientData, svc.ExpectedNumClientsPerShard),
-			Servers:     make(map[string]*ServerData, svc.ExpectedNumServersPerShard),
+			Key:             key,
+			ServiceData:     svc,
+			CostMap:         cm,
+			Clients:         make(map[string]*ClientData, svc.ExpectedNumClientsPerShard),
+			Servers:         make(map[string]*ServerData, svc.ExpectedNumServersPerShard),
+			PeriodicCounter: uint64(syncrand.Global().Intn(0x4000)),
 		}
 		shardData.Cond = sync.NewCond(&shardData.Mutex)
 		ref.shardsByKey[key] = shardData
@@ -306,10 +308,10 @@ func (ref *Ref) PeerConn(
 
 func (ref *Ref) Close() error {
 	ref.mu.Lock()
-	ref.lockedAcquireExclusiveImpl()
+	ref.acquireExclusiveImplLocked()
 
 	defer func() {
-		ref.lockedReleaseExclusiveImpl()
+		ref.releaseExclusiveImplLocked()
 		ref.mu.Unlock()
 	}()
 
@@ -427,10 +429,10 @@ func (ref *Ref) migrationThread(
 
 		shardData.Mutex.Lock()
 		for _, clientData := range shardData.Clients {
-			clientData.LockedSendGoAway(goAway)
+			clientData.SendGoAwayLocked(goAway)
 		}
 		for _, serverData := range shardData.Servers {
-			serverData.LockedSendGoAway(goAway)
+			serverData.SendGoAwayLocked(goAway)
 		}
 		shardData.Mutex.Unlock()
 	}
@@ -453,14 +455,14 @@ func (ref *Ref) periodicThread() {
 
 func (ref *Ref) periodic() {
 	ref.mu.Lock()
-	ref.lockedPeriodic()
+	ref.periodicLocked()
 	ref.mu.Unlock()
 }
 
-func (ref *Ref) lockedPeriodic() {
+func (ref *Ref) periodicLocked() {
 	for key, shardData := range ref.shardsByKey {
 		shardData.Mutex.Lock()
-		shardData.LockedPeriodic()
+		shardData.PeriodicLocked()
 		if len(shardData.Clients) == 0 && len(shardData.Servers) == 0 {
 			delete(ref.shardsByKey, key)
 		}

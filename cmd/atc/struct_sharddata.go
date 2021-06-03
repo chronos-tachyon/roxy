@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
+	"github.com/chronos-tachyon/roxy/lib/syncrand"
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
@@ -21,6 +22,22 @@ type ShardData struct {
 	DeclaredSupplyCPS float64
 	MeasuredSupplyCPS float64
 	AssignedCPS       float64
+	PeriodicCounter   uint64
+}
+
+func (shardData *ShardData) NumServersLocked() (minServers, maxServers uint) {
+	for _, serverData := range shardData.Servers {
+		if serverData.IsServing {
+			maxServers++
+		}
+	}
+
+	minServers = maxServers
+	if minServers > 3 {
+		minServers = 3
+	}
+
+	return
 }
 
 func (shardData *ShardData) Client(uniqueID string) *ClientData {
@@ -39,19 +56,19 @@ func (shardData *ShardData) Server(uniqueID string) *ServerData {
 
 func (shardData *ShardData) GetOrInsertClient(first *roxy_v0.ClientData) *ClientData {
 	shardData.Mutex.Lock()
-	clientData := shardData.LockedGetOrInsertClient(first)
+	clientData := shardData.GetOrInsertClientLocked(first)
 	shardData.Mutex.Unlock()
 	return clientData
 }
 
 func (shardData *ShardData) GetOrInsertServer(first *roxy_v0.ServerData, tcpAddr *net.TCPAddr) *ServerData {
 	shardData.Mutex.Lock()
-	serverData := shardData.LockedGetOrInsertServer(first, tcpAddr)
+	serverData := shardData.GetOrInsertServerLocked(first, tcpAddr)
 	shardData.Mutex.Unlock()
 	return serverData
 }
 
-func (shardData *ShardData) LockedGetOrInsertClient(first *roxy_v0.ClientData) *ClientData {
+func (shardData *ShardData) GetOrInsertClientLocked(first *roxy_v0.ClientData) *ClientData {
 	clientData := shardData.Clients[first.UniqueId]
 	if clientData == nil {
 		clientData = &ClientData{
@@ -72,7 +89,7 @@ func (shardData *ShardData) LockedGetOrInsertClient(first *roxy_v0.ClientData) *
 	return clientData
 }
 
-func (shardData *ShardData) LockedGetOrInsertServer(first *roxy_v0.ServerData, tcpAddr *net.TCPAddr) *ServerData {
+func (shardData *ShardData) GetOrInsertServerLocked(first *roxy_v0.ServerData, tcpAddr *net.TCPAddr) *ServerData {
 	tcpAddr = misc.CanonicalizeTCPAddr(tcpAddr)
 
 	serverData := shardData.Servers[first.UniqueId]
@@ -97,37 +114,58 @@ func (shardData *ShardData) LockedGetOrInsertServer(first *roxy_v0.ServerData, t
 	return serverData
 }
 
-func (shardData *ShardData) LockedPeriodic() {
-	for clientID, clientData := range shardData.Clients {
-		clientData.LockedPeriodic()
-		if clientData.LockedIsExpired() {
-			clientData.LockedDelete()
-			delete(shardData.Clients, clientID)
-		}
-	}
+func (shardData *ShardData) PeriodicLocked() {
+	shardData.PeriodicCounter++
+	counter := shardData.PeriodicCounter
+
+	shouldShedExcessServers := (counter & 0x3f) == 0x00
+	shouldRebalance := (counter & 0x0f) == 0x00
 
 	for serverID, serverData := range shardData.Servers {
-		serverData.LockedPeriodic()
-		if serverData.LockedIsExpired() {
-			serverData.LockedDelete()
+		serverData.PeriodicLocked()
+		if serverData.IsExpiredLocked() {
+			serverData.DeleteLocked()
 			delete(shardData.Servers, serverID)
 		}
 	}
 
-	shardData.LockedRebalance()
-}
+	for clientID, clientData := range shardData.Clients {
+		clientData.PeriodicLocked()
+		if clientData.IsExpiredLocked() {
+			clientData.DeleteLocked()
+			delete(shardData.Clients, clientID)
+		} else if !clientData.IsOKLocked() {
+			clientData.RebalanceLocked(false)
+		} else if shouldShedExcessServers {
+			clientData.ShedExcessServersLocked()
+		}
+	}
 
-func (shardData *ShardData) LockedRebalance() {
+	if shouldRebalance {
+		clientList := make([]*ClientData, 0, len(shardData.Clients))
+		for _, clientData := range shardData.Clients {
+			if clientData.IsServing {
+				clientList = append(clientList, clientData)
+			}
+		}
+
+		if len(clientList) != 0 {
+			rng := syncrand.Global()
+			index := rng.Intn(len(clientList))
+			clientData := clientList[index]
+			clientData.RebalanceLocked(false)
+		}
+	}
 }
 
 func (shardData *ShardData) ToProto() *roxy_v0.ShardData {
 	shardData.Mutex.Lock()
-	out := shardData.LockedToProto()
+	out := shardData.ToProtoLocked()
 	shardData.Mutex.Unlock()
 	return out
 }
 
-func (shardData *ShardData) LockedToProto() *roxy_v0.ShardData {
+func (shardData *ShardData) ToProtoLocked() *roxy_v0.ShardData {
 	out := &roxy_v0.ShardData{
 		ServiceName:                 string(shardData.Key.ServiceName),
 		ShardNumber:                 uint32(shardData.Key.ShardNumber),

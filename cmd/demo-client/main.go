@@ -9,6 +9,7 @@ import (
 
 	getopt "github.com/pborman/getopt/v2"
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
 
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
@@ -20,6 +21,8 @@ var (
 	flagATC        string = ""
 	flagWeb        string = ""
 	flagUniqueFile string = "/var/opt/roxy/lib/state/demo-client.id"
+	flagDelay      time.Duration = 1 * time.Second
+	flagIterations int = 5
 )
 
 func init() {
@@ -32,6 +35,8 @@ func init() {
 	getopt.FlagLong(&flagATC, "atc", 'A', "ATC server configuration")
 	getopt.FlagLong(&flagWeb, "web", 'W', "gRPC roxy.v0.Web server to connect to")
 	getopt.FlagLong(&flagUniqueFile, "unique-file", 'U', "file containing a unique ID for the ATC announcer")
+	getopt.FlagLong(&flagDelay, "delay", 0, "delay between iterations")
+	getopt.FlagLong(&flagIterations, "iterations", 'n', "number of iterations")
 }
 
 func main() {
@@ -47,6 +52,7 @@ func main() {
 	ctx := mainutil.RootContext()
 
 	atcclient.SetUniqueFile(flagUniqueFile)
+	atcclient.SetIsServing(true)
 
 	roxyresolver.SetLogger(log.Logger.With().Str("package", "roxyresolver").Logger())
 
@@ -98,7 +104,8 @@ func main() {
 		DefaultCostPerRequest: 1,
 	}
 
-	dialOpts := interceptor.DialOptions()
+	dialOpts := interceptor.DialOptions(
+		grpc.WithBlock())
 
 	cc, err := web.Dial(ctx, dialOpts...)
 	if err != nil {
@@ -121,9 +128,9 @@ func main() {
 		}()
 
 		webClient := roxy_v0.NewWebClient(cc)
-		for i := 0; i < 5; i++ {
+		for i := 0; i < flagIterations; i++ {
 			if i != 0 {
-				time.Sleep(5 * time.Second)
+				time.Sleep(flagDelay)
 			}
 
 			req := &roxy_v0.WebMessage{}

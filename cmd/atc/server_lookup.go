@@ -93,13 +93,13 @@ func (s *ATCServer) LookupClients(
 		if req.UniqueId == "" {
 			resp.Clients = make([]*roxy_v0.ClientData, 0, len(shardData.Clients))
 			for _, clientData := range shardData.Clients {
-				resp.Clients = append(resp.Clients, clientData.LockedToProto())
+				resp.Clients = append(resp.Clients, clientData.ToProtoLocked())
 			}
 		} else {
 			resp.Clients = make([]*roxy_v0.ClientData, 0, 1)
 			clientData := shardData.Clients[req.UniqueId]
 			if clientData != nil {
-				resp.Clients = append(resp.Clients, clientData.LockedToProto())
+				resp.Clients = append(resp.Clients, clientData.ToProtoLocked())
 			}
 		}
 		shardData.Mutex.Unlock()
@@ -140,13 +140,13 @@ func (s *ATCServer) LookupServers(
 		if req.UniqueId == "" {
 			resp.Servers = make([]*roxy_v0.ServerData, 0, len(shardData.Servers))
 			for _, serverData := range shardData.Servers {
-				resp.Servers = append(resp.Servers, serverData.LockedToProto())
+				resp.Servers = append(resp.Servers, serverData.ToProtoLocked())
 			}
 		} else {
 			resp.Servers = make([]*roxy_v0.ServerData, 0, 1)
 			serverData := shardData.Servers[req.UniqueId]
 			if serverData != nil {
-				resp.Servers = append(resp.Servers, serverData.LockedToProto())
+				resp.Servers = append(resp.Servers, serverData.ToProtoLocked())
 			}
 		}
 		shardData.Mutex.Unlock()

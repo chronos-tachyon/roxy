@@ -27,11 +27,11 @@ type ClientData struct {
 	EventQueue  []*roxy_v0.Event
 }
 
-func (clientData *ClientData) LockedNeededCPS() float64 {
+func (clientData *ClientData) NeededCPSLocked() float64 {
 	return math.Max(1.0, math.Max(clientData.DeclaredCPS, clientData.MeasuredCPS))
 }
 
-func (clientData *ClientData) LockedSendGoAway(goAway *roxy_v0.GoAway) {
+func (clientData *ClientData) SendGoAwayLocked(goAway *roxy_v0.GoAway) {
 	if clientData.IsAlive {
 		select {
 		case clientData.GoAwayCh <- goAway:
@@ -40,7 +40,7 @@ func (clientData *ClientData) LockedSendGoAway(goAway *roxy_v0.GoAway) {
 	}
 }
 
-func (clientData *ClientData) LockedUpdate(isAlive bool, isServing bool) {
+func (clientData *ClientData) UpdateLocked(isAlive bool, isServing bool) {
 	shardData := clientData.ShardData
 	histData := clientData.CostHistory.Data()
 	now := histData.Now
@@ -70,7 +70,7 @@ func (clientData *ClientData) LockedUpdate(isAlive bool, isServing bool) {
 	}
 }
 
-func (clientData *ClientData) LockedDelete() {
+func (clientData *ClientData) DeleteLocked() {
 	shardData := clientData.ShardData
 
 	if clientData.IsServing {
@@ -89,7 +89,7 @@ func (clientData *ClientData) LockedDelete() {
 	}
 }
 
-func (clientData *ClientData) LockedInsertServer(serverData *ServerData, newCPS float64, insertEvent bool) {
+func (clientData *ClientData) InsertServerLocked(serverData *ServerData, newCPS float64) {
 	oldCPS, found := clientData.Assignments[serverData.UniqueID]
 	roxyutil.Assertf(!found, "existing association between client %q and server %q (%f CPS)", clientData.UniqueID, serverData.UniqueID, oldCPS)
 
@@ -100,7 +100,7 @@ func (clientData *ClientData) LockedInsertServer(serverData *ServerData, newCPS 
 	clientData.AssignedCPS += newCPS
 	clientData.Assignments[serverData.UniqueID] = newCPS
 
-	if insertEvent && clientData.IsAlive {
+	if clientData.IsAlive {
 		clientData.EventQueue = append(clientData.EventQueue, &roxy_v0.Event{
 			EventType:             roxy_v0.Event_INSERT_IP,
 			UniqueId:              serverData.UniqueID,
@@ -115,7 +115,7 @@ func (clientData *ClientData) LockedInsertServer(serverData *ServerData, newCPS 
 	}
 }
 
-func (clientData *ClientData) LockedUpdateServer(serverData *ServerData, newCPS float64, insertEvent bool) {
+func (clientData *ClientData) ModifyServerLocked(serverData *ServerData, newCPS float64) {
 	oldCPS, found := clientData.Assignments[serverData.UniqueID]
 	roxyutil.Assertf(found, "no existing association between client %q and server %q", clientData.UniqueID, serverData.UniqueID)
 
@@ -128,7 +128,7 @@ func (clientData *ClientData) LockedUpdateServer(serverData *ServerData, newCPS 
 	clientData.AssignedCPS += deltaCPS
 	clientData.Assignments[serverData.UniqueID] = newCPS
 
-	if insertEvent && clientData.IsAlive {
+	if clientData.IsAlive {
 		clientData.EventQueue = append(clientData.EventQueue, &roxy_v0.Event{
 			EventType:             roxy_v0.Event_UPDATE_WEIGHT,
 			UniqueId:              serverData.UniqueID,
@@ -138,7 +138,7 @@ func (clientData *ClientData) LockedUpdateServer(serverData *ServerData, newCPS 
 	}
 }
 
-func (clientData *ClientData) LockedDeleteServer(serverData *ServerData, insertEvent bool) {
+func (clientData *ClientData) DeleteServerLocked(serverData *ServerData) {
 	oldCPS, found := clientData.Assignments[serverData.UniqueID]
 	roxyutil.Assertf(found, "no existing association between client %q and server %q", clientData.UniqueID, serverData.UniqueID)
 
@@ -149,7 +149,7 @@ func (clientData *ClientData) LockedDeleteServer(serverData *ServerData, insertE
 	clientData.AssignedCPS -= oldCPS
 	delete(clientData.Assignments, serverData.UniqueID)
 
-	if insertEvent && clientData.IsAlive {
+	if clientData.IsAlive {
 		clientData.EventQueue = append(clientData.EventQueue, &roxy_v0.Event{
 			EventType: roxy_v0.Event_DELETE_IP,
 			UniqueId:  serverData.UniqueID,
@@ -158,42 +158,39 @@ func (clientData *ClientData) LockedDeleteServer(serverData *ServerData, insertE
 	}
 }
 
-func (clientData *ClientData) LockedOnConnect() {
-	if clientData.lockedIsOK() {
-		shardData := clientData.ShardData
-		for serverID, assignedCPS := range clientData.Assignments {
-			serverData := shardData.Servers[serverID]
-			clientData.EventQueue = append(clientData.EventQueue, &roxy_v0.Event{
-				EventType:             roxy_v0.Event_INSERT_IP,
-				UniqueId:              serverID,
-				Location:              string(serverData.Location),
-				ServerName:            serverData.ServerName,
-				Ip:                    []byte(serverData.Addr.IP),
-				Zone:                  serverData.Addr.Zone,
-				Port:                  uint32(serverData.Addr.Port),
-				AssignedCostPerSecond: assignedCPS,
-			})
-		}
+func (clientData *ClientData) OnConnectLocked() {
+	if !clientData.IsOKLocked() {
+		clientData.RebalanceLocked(true)
 		return
 	}
-	clientData.LockedAssignServers()
+
+	shardData := clientData.ShardData
+	for serverID, assignedCPS := range clientData.Assignments {
+		serverData := shardData.Servers[serverID]
+		clientData.EventQueue = append(clientData.EventQueue, &roxy_v0.Event{
+			EventType:             roxy_v0.Event_INSERT_IP,
+			UniqueId:              serverID,
+			Location:              string(serverData.Location),
+			ServerName:            serverData.ServerName,
+			Ip:                    []byte(serverData.Addr.IP),
+			Zone:                  serverData.Addr.Zone,
+			Port:                  uint32(serverData.Addr.Port),
+			AssignedCostPerSecond: assignedCPS,
+		})
+	}
 }
 
-func (clientData *ClientData) LockedAssignServers() {
+func (clientData *ClientData) RebalanceLocked(isOnConnect bool) {
 	shardData := clientData.ShardData
-	maxServers := uint(len(shardData.Servers))
-	minServers := maxServers
-	if minServers > 3 {
-		minServers = 3
-	}
+	minServers, maxServers := shardData.NumServersLocked()
 
-	neededCPS := clientData.LockedNeededCPS() - clientData.AssignedCPS
+	neededCPS := clientData.NeededCPSLocked() - clientData.AssignedCPS
 	availableCPS := float64(0.0)
 
-	p1, serverIndexByID1 := clientData.lockedInsertServerPicker()
+	p1, serverIndexByID1 := clientData.makePickerForServerInsertionLocked()
 	for serverID := range clientData.Assignments {
 		serverData := shardData.Servers[serverID]
-		availableCPS += serverData.LockedAvailableCPS()
+		availableCPS += serverData.AvailableCPSLocked()
 		if index, found := serverIndexByID1[serverID]; found {
 			p1.Disable(index)
 		}
@@ -210,11 +207,11 @@ func (clientData *ClientData) LockedAssignServers() {
 		p1.Disable(index)
 
 		serverData := p1.Get(index).(*ServerData)
-		availableCPS += serverData.LockedAvailableCPS()
+		availableCPS += serverData.AvailableCPSLocked()
 		newServers = append(newServers, serverData)
 	}
 
-	p2, _ := clientData.lockedAssignServerPicker(newServers)
+	p2, _ := clientData.makePickerForServerAssignmentLocked(newServers)
 	amounts := p2.Divvy(neededCPS)
 	amountsLen := uint(len(amounts))
 	newAssignments := make(map[string]float64, amountsLen)
@@ -222,39 +219,118 @@ func (clientData *ClientData) LockedAssignServers() {
 		suggestedCPS := amounts[index]
 		serverData := p2.Get(index).(*ServerData)
 		oldCPS := clientData.Assignments[serverData.UniqueID]
-		availableCPS := serverData.LockedAvailableCPS()
+		availableCPS := serverData.AvailableCPSLocked()
 		newCPS := math.Min(availableCPS, oldCPS+suggestedCPS)
 		deltaCPS := (newCPS - oldCPS)
 		newAssignments[serverData.UniqueID] = newCPS
 		neededCPS -= deltaCPS
 	}
 
-	numRemaining := uint(len(amounts))
+	numRemaining := amountsLen
 	for numRemaining != 0 && neededCPS > 0.0 {
 		index := p2.Pick(nil)
 		p2.Disable(index)
-
 		serverData := p2.Get(index).(*ServerData)
 		oldCPS := clientData.Assignments[serverData.UniqueID]
 		newCPS := newAssignments[serverData.UniqueID]
 		deltaCPS := (newCPS - oldCPS)
-		availableCPS := serverData.LockedAvailableCPS() - deltaCPS
+		availableCPS := serverData.AvailableCPSLocked() - deltaCPS
 		additionalCPS := math.Min(neededCPS, availableCPS)
 		newAssignments[serverData.UniqueID] += additionalCPS
 		neededCPS -= additionalCPS
+		numRemaining--
 	}
 
 	for serverID, newCPS := range newAssignments {
+		oldCPS, found := clientData.Assignments[serverID]
 		serverData := shardData.Servers[serverID]
-		if _, found := clientData.Assignments[serverID]; found {
-			clientData.LockedUpdateServer(serverData, newCPS, true)
+		if isOnConnect && found {
+			shardData.AssignedCPS -= oldCPS
+			serverData.AssignedCPS -= oldCPS
+			delete(serverData.Assignments, clientData.UniqueID)
+			clientData.AssignedCPS -= oldCPS
+			delete(clientData.Assignments, serverID)
+			found = false
+		}
+
+		if found {
+			clientData.ModifyServerLocked(serverData, newCPS)
 		} else {
-			clientData.LockedInsertServer(serverData, newCPS, true)
+			clientData.InsertServerLocked(serverData, newCPS)
 		}
 	}
 }
 
-func (clientData *ClientData) LockedIsExpired() bool {
+func (clientData *ClientData) ShedExcessServersLocked() {
+	neededCPS := clientData.NeededCPSLocked()
+	assignedCPS := clientData.AssignedCPS
+	excessCPS := math.Max(0.0, assignedCPS-neededCPS)
+	excessRatio := excessCPS / neededCPS
+	if excessRatio < 0.125 {
+		return
+	}
+
+	numServers := uint(len(clientData.Assignments))
+	shardData := clientData.ShardData
+	minServers, _ := shardData.NumServersLocked()
+	if numServers <= minServers {
+		return
+	}
+
+	p, _ := clientData.makePickerForServerAssignmentLocked(nil)
+	discardList := make([]*ServerData, 0, numServers-minServers)
+	for numServers > minServers {
+		worst, ok := p.Worst()
+		if !ok {
+			break
+		}
+
+		p.Disable(worst)
+		amounts := p.Divvy(neededCPS)
+		amountsLen := uint(len(amounts))
+		ok = true
+		for index := uint(0); index < amountsLen; index++ {
+			serverData := p.Get(index).(*ServerData)
+			suggestedCPS := amounts[index]
+			availableCPS := serverData.AvailableCPSLocked()
+			if suggestedCPS > availableCPS {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			p.Enable(worst)
+			break
+		}
+
+		worstData := p.Get(worst).(*ServerData)
+		discardList = append(discardList, worstData)
+		numServers--
+	}
+
+	if len(discardList) == 0 {
+		return
+	}
+
+	discardSet := make(map[string]struct{}, len(discardList))
+	for _, serverData := range discardList {
+		discardSet[serverData.UniqueID] = struct{}{}
+		clientData.DeleteServerLocked(serverData)
+	}
+
+	amounts := p.Divvy(neededCPS)
+	amountsLen := uint(len(amounts))
+	for index := uint(0); index < amountsLen; index++ {
+		serverData := p.Get(index).(*ServerData)
+		if _, found := discardSet[serverData.UniqueID]; found {
+			continue
+		}
+		newCPS := amounts[index]
+		clientData.ModifyServerLocked(serverData, newCPS)
+	}
+}
+
+func (clientData *ClientData) IsExpiredLocked() bool {
 	t := clientData.ExpireTime
 	if t.IsZero() {
 		return false
@@ -263,7 +339,7 @@ func (clientData *ClientData) LockedIsExpired() bool {
 	return now.Sub(t) >= 0
 }
 
-func (clientData *ClientData) LockedPeriodic() {
+func (clientData *ClientData) PeriodicLocked() {
 	shardData := clientData.ShardData
 
 	clientData.CostHistory.Update()
@@ -277,7 +353,7 @@ func (clientData *ClientData) LockedPeriodic() {
 	}
 }
 
-func (clientData *ClientData) LockedToProto() *roxy_v0.ClientData {
+func (clientData *ClientData) ToProtoLocked() *roxy_v0.ClientData {
 	key := clientData.ShardData.Key
 	return &roxy_v0.ClientData{
 		ServiceName:           string(key.ServiceName),
@@ -293,20 +369,17 @@ func (clientData *ClientData) LockedToProto() *roxy_v0.ClientData {
 	}
 }
 
-func (clientData *ClientData) lockedIsOK() bool {
+func (clientData *ClientData) IsOKLocked() bool {
 	shardData := clientData.ShardData
+	minServers, _ := shardData.NumServersLocked()
 	numServers := uint(len(clientData.Assignments))
-	minServers := uint(len(shardData.Servers))
-	if minServers > 3 {
-		minServers = 3
-	}
 
 	assignedCPS := clientData.AssignedCPS
-	neededCPS := clientData.LockedNeededCPS()
+	neededCPS := clientData.NeededCPSLocked()
 	return (numServers >= minServers && assignedCPS >= neededCPS)
 }
 
-func (clientData *ClientData) lockedInsertServerPicker() (picker.Picker, map[string]uint) {
+func (clientData *ClientData) makePickerForServerInsertionLocked() (picker.Picker, map[string]uint) {
 	shardData := clientData.ShardData
 
 	serverMap := make(map[string]uint, len(shardData.Servers))
@@ -318,11 +391,11 @@ func (clientData *ClientData) lockedInsertServerPicker() (picker.Picker, map[str
 		}
 	}
 
-	p := picker.Make(serverList, clientData.makeServerScoreFunc())
+	p := picker.Make(serverList, clientData.makeServerScoreFuncLocked())
 	return p, serverMap
 }
 
-func (clientData *ClientData) lockedAssignServerPicker(newServers []*ServerData) (picker.Picker, map[string]uint) {
+func (clientData *ClientData) makePickerForServerAssignmentLocked(newServers []*ServerData) (picker.Picker, map[string]uint) {
 	shardData := clientData.ShardData
 
 	serverMap := make(map[string]uint, len(clientData.Assignments))
@@ -337,16 +410,16 @@ func (clientData *ClientData) lockedAssignServerPicker(newServers []*ServerData)
 		serverList = append(serverList, serverData)
 	}
 
-	p := picker.Make(serverList, clientData.makeServerScoreFunc())
+	p := picker.Make(serverList, clientData.makeServerScoreFuncLocked())
 	return p, serverMap
 }
 
-func (clientData *ClientData) makeServerScoreFunc() func(interface{}) float64 {
+func (clientData *ClientData) makeServerScoreFuncLocked() func(interface{}) float64 {
 	costMap := clientData.ShardData.CostMap
 	return func(v interface{}) float64 {
 		serverData := v.(*ServerData)
 
-		utilization := serverData.LockedUtilizationRatio()
+		utilization := serverData.UtilizationRatioLocked()
 		if utilization > 1.0 {
 			utilization = 1.0
 		}

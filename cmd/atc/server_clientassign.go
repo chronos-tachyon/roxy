@@ -85,10 +85,10 @@ func (s *ATCServer) ClientAssign(
 	shardData := s.ref.GetOrInsertShard(key, svc, impl.CostMap)
 
 	shardData.Mutex.Lock()
-	clientData := shardData.LockedGetOrInsertClient(first)
+	clientData := shardData.GetOrInsertClientLocked(first)
 	clientData.CostHistory.UpdateAbsolute(req.CostCounter)
-	clientData.LockedUpdate(true, req.IsServing)
-	clientData.LockedOnConnect()
+	clientData.UpdateLocked(true, req.IsServing)
+	clientData.OnConnectLocked()
 	goAwayCh := (<-chan *roxy_v0.GoAway)(clientData.GoAwayCh)
 	shardData.Mutex.Unlock()
 
@@ -106,11 +106,6 @@ func (s *ATCServer) ClientAssign(
 	}
 
 	go active.recvThread(req.IsServing)
-
-	err = active.doSend(&roxy_v0.ClientAssignResponse{})
-	if err != nil {
-		return err
-	}
 
 	for {
 		select {
@@ -191,7 +186,7 @@ func (active *activeClientAssign) recvThread(lastIsServing bool) {
 	defer func() {
 		active.shardData.Mutex.Lock()
 		active.clientData.CostHistory.Update()
-		active.clientData.LockedUpdate(false, lastIsServing)
+		active.clientData.UpdateLocked(false, lastIsServing)
 		active.shardData.Mutex.Unlock()
 
 		if sendErr {
@@ -243,7 +238,7 @@ func (active *activeClientAssign) recvThread(lastIsServing bool) {
 
 		active.shardData.Mutex.Lock()
 		active.clientData.CostHistory.UpdateAbsolute(req.CostCounter)
-		active.clientData.LockedUpdate(true, req.IsServing)
+		active.clientData.UpdateLocked(true, req.IsServing)
 		active.shardData.Mutex.Unlock()
 
 		lastIsServing = req.IsServing

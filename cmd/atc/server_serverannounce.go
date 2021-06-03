@@ -91,9 +91,9 @@ func (s *ATCServer) ServerAnnounce(
 	shardData := s.ref.GetOrInsertShard(key, svc, impl.CostMap)
 
 	shardData.Mutex.Lock()
-	serverData := shardData.LockedGetOrInsertServer(first, tcpAddr)
+	serverData := shardData.GetOrInsertServerLocked(first, tcpAddr)
 	serverData.CostHistory.UpdateAbsolute(req.CostCounter)
-	serverData.LockedUpdate(true, req.IsServing)
+	serverData.UpdateLocked(true, req.IsServing)
 	goAwayCh := (<-chan *roxy_v0.GoAway)(serverData.GoAwayCh)
 	shardData.Mutex.Unlock()
 
@@ -185,7 +185,7 @@ func (active *activeServerAnnounce) recvThread(lastIsServing bool) {
 	defer func() {
 		active.shardData.Mutex.Lock()
 		active.serverData.CostHistory.Update()
-		active.serverData.LockedUpdate(false, lastIsServing)
+		active.serverData.UpdateLocked(false, lastIsServing)
 		active.shardData.Mutex.Unlock()
 
 		if sendErr {
@@ -238,7 +238,7 @@ func (active *activeServerAnnounce) recvThread(lastIsServing bool) {
 
 		active.shardData.Mutex.Lock()
 		active.serverData.CostHistory.UpdateAbsolute(req.CostCounter)
-		active.serverData.LockedUpdate(true, req.IsServing)
+		active.serverData.UpdateLocked(true, req.IsServing)
 		active.shardData.Mutex.Unlock()
 
 		lastIsServing = req.IsServing
