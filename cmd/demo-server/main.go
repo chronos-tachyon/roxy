@@ -1,4 +1,4 @@
-// Command "demo-backend" is a demonstration of a server which uses the Roxy
+// Command "demo-server" is a demonstration of a server which uses the Roxy
 // libraries "membership", "announce", and "mainutil", and which serves web
 // content via both HTTP(S) and gRPC.
 //
@@ -43,7 +43,7 @@ var (
 	flagAnnounceEtcd    string = ""
 	flagAnnounceATC     string = ""
 	flagShakespeareFile string = "/dev/null"
-	flagUniqueFile      string = "/var/opt/roxy/lib/state/demo-backend.id"
+	flagUniqueFile      string = "/var/opt/roxy/lib/state/demo-server.id"
 )
 
 func init() {

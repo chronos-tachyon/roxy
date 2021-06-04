@@ -3,8 +3,8 @@
 /atc
 /atcctl
 /colorize-logs
-/demo-backend
 /demo-client
+/demo-server
 /zkcp
 /*.deb
 /release-notes.txt
