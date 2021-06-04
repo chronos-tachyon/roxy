@@ -91,6 +91,10 @@
     "contentType": "audio/x-scpls"
   },
   {
+    "suffixes": [".xspf"],
+    "contentType": "application/xspf+xml"
+  },
+  {
     "suffixes": [".mid", ".midi"],
     "contentType": "audio/midi"
   },
