@@ -4,6 +4,8 @@
 /atcctl
 /colorize-logs
 /demo-client
+/demo-client-grpc-ws
+/demo-client-http-ws
 /demo-server
 /zkcp
 /*.deb

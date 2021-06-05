@@ -2,12 +2,14 @@ syntax = "proto3";
 
 option go_package = "github.com/chronos-tachyon/roxy/proto/roxy_v0";
 
+import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
 package roxy.v0;
 
 service Web {
   rpc Serve (stream WebMessage) returns (stream WebMessage);
+  rpc Socket (stream WebSocketFrame) returns (stream WebSocketFrame);
 }
 
 message WebMessage {
@@ -19,6 +21,32 @@ message WebMessage {
 message KeyValue {
   string key = 1;
   string value = 2;
+}
+
+message WebSocketFrame {
+  enum Type {
+    UNKNOWN = 0;
+    DATA_TEXT = 1;
+    DATA_BINARY = 2;
+    reserved 3 to 7;
+    CTRL_CLOSE = 8;
+    CTRL_PING = 9;
+    CTRL_PONG = 10;
+    reserved 11 to 15;
+  }
+  Type frame_type = 1;
+  bytes payload = 2;
+  repeated WebSocketExtension websocket_extensions = 3;
+}
+
+message WebSocketExtension {
+  string extension_type = 1;
+  google.protobuf.Any extension_data = 2;
+}
+
+message WebSocketCloseError {
+  uint32 code = 1;
+  string text = 2;
 }
 
 service AirTrafficControl {

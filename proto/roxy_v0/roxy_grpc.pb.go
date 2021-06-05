@@ -19,6 +19,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type WebClient interface {
 	Serve(ctx context.Context, opts ...grpc.CallOption) (Web_ServeClient, error)
+	Socket(ctx context.Context, opts ...grpc.CallOption) (Web_SocketClient, error)
 }
 
 type webClient struct {
@@ -60,11 +61,43 @@ func (x *webServeClient) Recv() (*WebMessage, error) {
 	return m, nil
 }
 
+func (c *webClient) Socket(ctx context.Context, opts ...grpc.CallOption) (Web_SocketClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Web_ServiceDesc.Streams[1], "/roxy.v0.Web/Socket", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &webSocketClient{stream}
+	return x, nil
+}
+
+type Web_SocketClient interface {
+	Send(*WebSocketFrame) error
+	Recv() (*WebSocketFrame, error)
+	grpc.ClientStream
+}
+
+type webSocketClient struct {
+	grpc.ClientStream
+}
+
+func (x *webSocketClient) Send(m *WebSocketFrame) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *webSocketClient) Recv() (*WebSocketFrame, error) {
+	m := new(WebSocketFrame)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // WebServer is the server API for Web service.
 // All implementations must embed UnimplementedWebServer
 // for forward compatibility
 type WebServer interface {
 	Serve(Web_ServeServer) error
+	Socket(Web_SocketServer) error
 	mustEmbedUnimplementedWebServer()
 }
 
@@ -74,6 +107,9 @@ type UnimplementedWebServer struct {
 
 func (UnimplementedWebServer) Serve(Web_ServeServer) error {
 	return status.Errorf(codes.Unimplemented, "method Serve not implemented")
+}
+func (UnimplementedWebServer) Socket(Web_SocketServer) error {
+	return status.Errorf(codes.Unimplemented, "method Socket not implemented")
 }
 func (UnimplementedWebServer) mustEmbedUnimplementedWebServer() {}
 
@@ -114,6 +150,32 @@ func (x *webServeServer) Recv() (*WebMessage, error) {
 	return m, nil
 }
 
+func _Web_Socket_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(WebServer).Socket(&webSocketServer{stream})
+}
+
+type Web_SocketServer interface {
+	Send(*WebSocketFrame) error
+	Recv() (*WebSocketFrame, error)
+	grpc.ServerStream
+}
+
+type webSocketServer struct {
+	grpc.ServerStream
+}
+
+func (x *webSocketServer) Send(m *WebSocketFrame) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *webSocketServer) Recv() (*WebSocketFrame, error) {
+	m := new(WebSocketFrame)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // Web_ServiceDesc is the grpc.ServiceDesc for Web service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -125,6 +187,12 @@ var Web_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Serve",
 			Handler:       _Web_Serve_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Socket",
+			Handler:       _Web_Socket_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

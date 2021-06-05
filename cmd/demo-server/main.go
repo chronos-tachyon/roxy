@@ -7,6 +7,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -18,13 +21,16 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/gorilla/websocket"
 	getopt "github.com/pborman/getopt/v2"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
+	"github.com/chronos-tachyon/roxy/internal/wsutil"
 	"github.com/chronos-tachyon/roxy/lib/announcer"
 	"github.com/chronos-tachyon/roxy/lib/atcclient"
 	"github.com/chronos-tachyon/roxy/lib/mainutil"
@@ -34,7 +40,17 @@ import (
 	"github.com/chronos-tachyon/roxy/proto/roxy_v0"
 )
 
-const maxBodyChunk = 1 << 20 // 1 MiB
+const (
+	maxBodyChunk = 1 << 20 // 1 MiB
+	writeTimeout = 30 * time.Second
+	readTimeout  = 60 * time.Second
+	readLimit    = 1 << 20 // 1 MiB
+)
+
+var wsUpgrader = websocket.Upgrader{
+	HandshakeTimeout: 10 * time.Second,
+	CheckOrigin:      func(r *http.Request) bool { return true },
+}
 
 var (
 	flagListenHTTP      string = "127.0.0.1:8000"
@@ -75,7 +91,7 @@ func main() {
 	mainutil.InitContext()
 	defer mainutil.CancelRootContext()
 	ctx := mainutil.RootContext()
-
+	ctx = log.Logger.WithContext(ctx)
 	ctx = announcer.WithDeclaredCPS(ctx, 64.0)
 
 	atcclient.SetUniqueFile(flagUniqueFile)
@@ -194,11 +210,11 @@ func main() {
 		DefaultCostPerRequest: 1,
 	}
 
-	var httpHandler http.Handler
-	httpHandler = demoHandler{corpus: corpus}
-	httpHandler = interceptor.Handler(httpHandler)
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/", interceptor.Handler(demoHandler{corpus: corpus}))
+	httpMux.Handle("/ws", webSocketHandler{})
 	httpServer := &http.Server{
-		Handler: httpHandler,
+		Handler: httpMux,
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
@@ -362,6 +378,8 @@ func processFlags(
 		Msg("ready")
 }
 
+// type demoHandler {{{
+
 type demoHandler struct {
 	corpus []byte
 }
@@ -373,7 +391,22 @@ func (h demoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Str("httpPath", r.URL.Path).
 		Msg("HTTP")
 
-	atcclient.Spend(1)
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	if r.Method == http.MethodOptions {
+		w.Header().Set(constants.HeaderAllow, constants.AllowGET)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set(constants.HeaderAllow, constants.AllowGET)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
 	headerNames := make([]string, 0, len(r.Header))
 	for key := range r.Header {
@@ -400,10 +433,68 @@ func (h demoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hdrs.Set(constants.HeaderContentType, constants.ContentTypeTextPlain)
 	hdrs.Set(constants.HeaderContentLen, strconv.Itoa(len(h.corpus)))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(h.corpus)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(h.corpus)
+	}
 }
 
 var _ http.Handler = demoHandler{}
+
+// }}}
+
+// type webSocketHandler {{{
+
+type webSocketHandler struct{}
+
+func (h webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Logger.Debug().
+		Str("httpHost", r.Host).
+		Str("httpMethod", r.Method).
+		Str("httpPath", r.URL.Path).
+		Msg("HTTP")
+
+	if r.URL.Path != "/ws" {
+		http.NotFound(w, r)
+		return
+	}
+
+	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Logger.Error().
+			Err(err).
+			Msg("WebSocket upgrade failed")
+		return
+	}
+
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			log.Logger.Error().
+				Err(err).
+				Msg("WebSocket Conn.Close failed")
+		}
+	}()
+
+	wss := wsutil.MakeAdaptor(
+		conn,
+		wsutil.WithWriteTimeout(writeTimeout),
+		wsutil.WithReadTimeout(readTimeout),
+		wsutil.WithReadLimit(readLimit),
+	)
+	looper := newLooper(r.Context(), wss)
+	err = looper.Wait()
+	if err != nil {
+		log.Logger.Error().
+			Err(err).
+			Msg("WebSocket I/O error")
+	}
+}
+
+var _ http.Handler = webSocketHandler{}
+
+// }}}
+
+// type webServerServer {{{
 
 type webServerServer struct {
 	roxy_v0.UnimplementedWebServer
@@ -543,6 +634,52 @@ func (s *webServerServer) Serve(ws roxy_v0.Web_ServeServer) (err error) {
 	return
 }
 
+func (s *webServerServer) Socket(wss roxy_v0.Web_SocketServer) error {
+	log.Logger.Debug().
+		Str("rpcService", "roxy.v0.Web").
+		Str("rpcMethod", "Socket").
+		Str("rpcInterface", "primary").
+		Msg("RPC")
+
+	ctx := log.Logger.WithContext(wss.Context())
+	looper := newLooper(ctx, wss)
+	err := looper.Wait()
+	return wsutil.ConvertErrorToStatusError(err)
+}
+
+// }}}
+
+func newLooper(ctx context.Context, wss wsutil.WebSocketConn) *wsutil.Looper {
+	return wsutil.NewLooper(
+		ctx,
+		wss,
+		wsutil.OnText(func(ctx context.Context, looper *wsutil.Looper, text string) {
+			var x struct {
+				A float64 `json:"a"`
+				B float64 `json:"b"`
+			}
+
+			d := json.NewDecoder(strings.NewReader(text))
+			d.DisallowUnknownFields()
+			err := d.Decode(&x)
+			if err != nil {
+				looper.SendClose(websocket.ClosePolicyViolation, "invalid JSON")
+			}
+
+			c := x.A + x.B
+			str := strconv.FormatFloat(c, 'f', -1, 64)
+			looper.SendTextMessage(str)
+		}),
+		wsutil.OnBinary(func(ctx context.Context, looper *wsutil.Looper, data []byte) {
+			sum := sha256.Sum256(data)
+			str := hex.EncodeToString(sum[:])
+			looper.SendTextMessage(str)
+		}),
+	)
+}
+
+// type kvList {{{
+
 type kvList []*roxy_v0.KeyValue
 
 var specialHeaders = map[string]int{
@@ -573,3 +710,7 @@ func (list kvList) Less(i, j int) bool {
 func (list kvList) Sort() {
 	sort.Stable(list)
 }
+
+var _ sort.Interface = kvList(nil)
+
+// }}}
