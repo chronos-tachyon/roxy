@@ -224,6 +224,7 @@ func (looper *Looper) Wait() error {
 // It's safe to call this from any thread.
 //
 func (looper *Looper) SendTextMessage(text string) {
+	roxyutil.Assert(utf8.ValidString(text), "text is not valid UTF-8")
 	looper.logger.Trace().
 		Stringer("payload", textPayloadStringer(text)).
 		Int("len", len(text)).
@@ -256,6 +257,7 @@ func (looper *Looper) SendBinaryMessage(data []byte) {
 // It's safe to call this from any thread.
 //
 func (looper *Looper) SendClose(code uint16, text string) {
+	roxyutil.Assert(utf8.ValidString(text), "text is not valid UTF-8")
 	err := CloseError{Code: code, Text: text}
 	data := err.AsBytes()
 	looper.logger.Trace().
@@ -277,6 +279,7 @@ func (looper *Looper) SendClose(code uint16, text string) {
 // You normally don't need to call this yourself.
 //
 func (looper *Looper) SendPing(text string) {
+	roxyutil.Assert(utf8.ValidString(text), "text is not valid UTF-8")
 	looper.logger.Trace().
 		Stringer("payload", textPayloadStringer(text)).
 		Int("len", len(text)).
@@ -295,6 +298,7 @@ func (looper *Looper) SendPing(text string) {
 // You normally don't need to call this yourself.
 //
 func (looper *Looper) SendPong(text string) {
+	roxyutil.Assert(utf8.ValidString(text), "text is not valid UTF-8")
 	looper.logger.Trace().
 		Stringer("payload", textPayloadStringer(text)).
 		Int("len", len(text)).
@@ -385,6 +389,12 @@ func (looper *Looper) recvThread() {
 				Stringer("payload", textPayloadStringer(text)).
 				Int("len", len(text)).
 				Msg("Recv DATA_TEXT")
+
+			if !utf8.ValidString(text) {
+				looper.SendClose(websocket.CloseInvalidFramePayloadData, "text is not valid UTF-8")
+				continue
+			}
+
 			if looper.onText != nil {
 				looper.onText(looper.ctx, looper, text)
 			}
@@ -407,6 +417,12 @@ func (looper *Looper) recvThread() {
 				Int("len", len(data)).
 				Err(err).
 				Msg("Recv CTRL_CLOSE")
+
+			if !utf8.ValidString(err.Text) {
+				looper.SendClose(websocket.CloseInvalidFramePayloadData, "text is not valid UTF-8")
+				continue
+			}
+
 			looper.SendClose(err.Code, err.Text)
 			if looper.onClose != nil {
 				looper.onClose(looper.ctx, looper, err)
@@ -418,6 +434,12 @@ func (looper *Looper) recvThread() {
 				Stringer("payload", textPayloadStringer(text)).
 				Int("len", len(text)).
 				Msg("Recv CTRL_PING")
+
+			if !utf8.ValidString(text) {
+				looper.SendClose(websocket.CloseInvalidFramePayloadData, "text is not valid UTF-8")
+				continue
+			}
+
 			looper.SendPong(text)
 			if looper.onPing != nil {
 				looper.onPing(looper.ctx, looper, text)
@@ -429,6 +451,12 @@ func (looper *Looper) recvThread() {
 				Stringer("payload", textPayloadStringer(text)).
 				Int("len", len(text)).
 				Msg("Recv CTRL_PONG")
+
+			if !utf8.ValidString(text) {
+				looper.SendClose(websocket.CloseInvalidFramePayloadData, "text is not valid UTF-8")
+				continue
+			}
+
 			looper.pongCh <- struct{}{}
 			if looper.onPong != nil {
 				looper.onPong(looper.ctx, looper, text)
