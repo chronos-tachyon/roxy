@@ -17,13 +17,14 @@
 //
 // Commands:
 //
-//	help                 list available commands
-//	ping                 check that Roxy is running
-//	reload               tell Roxy to reload its config and to rotate its log file
-//	shutdown             tell Roxy to exit
-//	healthcheck [name]   check the health of the named subsystem(*)
-//	healthwatch [name]   watch the health of the named subsystem(*)
-//	set-health name y/n  set the health of the named subsystem
+//	help                          list available commands
+//	ping                          check that Roxy is running
+//	reload                        tell Roxy to reload its config and to rotate its log file
+//	shutdown                      tell Roxy to exit
+//	healthcheck [name]            check the health of the named subsystem(*)
+//	healthwatch [name]            watch the health of the named subsystem(*)
+//	set-health name y/n           set the health of the named subsystem
+//	get-certificate name outfile  retrieve a copy of the ACME certificate + private key for the given domain
 //
 //	(*) At startup, the only available subsystem is the empty string, "".
 //          The "set-health" command can create new named subsystems.
@@ -69,12 +70,13 @@ var (
 )
 
 const (
-	cmdPing        = "ping"
-	cmdReload      = "reload"
-	cmdShutdown    = "shutdown"
-	cmdHealthCheck = "healthcheck"
-	cmdHealthWatch = "healthwatch"
-	cmdSetHealth   = "set-health"
+	cmdPing           = "ping"
+	cmdReload         = "reload"
+	cmdShutdown       = "shutdown"
+	cmdHealthCheck    = "healthcheck"
+	cmdHealthWatch    = "healthwatch"
+	cmdSetHealth      = "set-health"
+	cmdGetCertificate = "get-certificate"
 )
 
 type clients struct {
@@ -127,6 +129,11 @@ var commandMap = map[string]commandRecord{
 	},
 	cmdSetHealth: {
 		fn:       doSetHealth,
+		minNArgs: 3,
+		maxNArgs: 3,
+	},
+	cmdGetCertificate: {
+		fn:       doGetCertificate,
 		minNArgs: 3,
 		maxNArgs: 3,
 	},
@@ -327,6 +334,33 @@ func doSetHealth(ctx context.Context, c clients, event *zerolog.Event, args []st
 			Str("subsystemName", subsystemName).
 			Err(err).
 			Msg("RPC failed")
+	}
+
+	return event
+}
+
+func doGetCertificate(ctx context.Context, c clients, event *zerolog.Event, args []string) *zerolog.Event {
+	certName := args[0]
+	outputFile := args[1]
+
+	resp, err := c.admin.GetCertificate(ctx, &roxy_v0.GetCertificateRequest{
+		CertificateName: certName,
+	})
+	if err != nil {
+		log.Logger.Fatal().
+			Str("rpcService", "roxy.v0.Admin").
+			Str("rpcMethod", "GetCertificate").
+			Str("certName", certName).
+			Err(err).
+			Msg("RPC failed")
+	}
+
+	err = os.WriteFile(outputFile, resp.CertificateBody, 0600)
+	if err != nil {
+		log.Logger.Fatal().
+			Str("outputFile", outputFile).
+			Err(err).
+			Msg("WriteFile failed")
 	}
 
 	return event

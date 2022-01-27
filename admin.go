@@ -62,3 +62,24 @@ func (AdminServer) SetHealth(ctx context.Context, req *roxy_v0.SetHealthRequest)
 	gMultiServer.SetHealth(req.SubsystemName, req.IsHealthy)
 	return &roxy_v0.SetHealthResponse{}, nil
 }
+
+func (AdminServer) GetCertificate(ctx context.Context, req *roxy_v0.GetCertificateRequest) (*roxy_v0.GetCertificateResponse, error) {
+	log.Logger.Info().
+		Str("rpcService", "roxy.v0.Admin").
+		Str("rpcMethod", "GetCertificate").
+		Str("rpcInterface", "admin").
+		Str("certName", req.CertificateName).
+		Msg("RPC")
+
+	impl := gRef.Get()
+
+	raw, err := impl.StorageGet(ctx, req.CertificateName)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &roxy_v0.GetCertificateResponse{
+		CertificateBody: raw,
+	}
+	return resp, nil
+}

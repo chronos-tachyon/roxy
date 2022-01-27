@@ -63,6 +63,9 @@ type FileSystemStorageEngine struct {
 
 func (engine *FileSystemStorageEngine) Get(ctx context.Context, name string) ([]byte, error) {
 	data, err := engine.dc.Get(ctx, name)
+	if errors.Is(err, autocert.ErrCacheMiss) {
+		return nil, autocert.ErrCacheMiss
+	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, autocert.ErrCacheMiss
 	}

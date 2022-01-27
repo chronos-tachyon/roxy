@@ -20,7 +20,7 @@ const (
 
 // WithMembership returns a copy of addr with the given *membership.Roxy attached.
 func WithMembership(addr resolver.Address, r *membership.Roxy) resolver.Address {
-	addr.Attributes = addr.Attributes.WithValues(MembershipAttrKey, r)
+	addr.Attributes = addr.Attributes.WithValue(MembershipAttrKey, r)
 	return addr
 }
 
@@ -32,7 +32,7 @@ func GetMembership(addr resolver.Address) *membership.Roxy {
 
 // WithResolved returns a copy of addr with the given Resolved attached.
 func WithResolved(addr resolver.Address, data Resolved) resolver.Address {
-	addr.Attributes = addr.Attributes.WithValues(ResolvedAttrKey, data)
+	addr.Attributes = addr.Attributes.WithValue(ResolvedAttrKey, data)
 	return addr
 }
 

@@ -577,6 +577,7 @@ type AdminClient interface {
 	Commit(ctx context.Context, in *CommitRequest, opts ...grpc.CallOption) (*CommitResponse, error)
 	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
 	SetHealth(ctx context.Context, in *SetHealthRequest, opts ...grpc.CallOption) (*SetHealthResponse, error)
+	GetCertificate(ctx context.Context, in *GetCertificateRequest, opts ...grpc.CallOption) (*GetCertificateResponse, error)
 }
 
 type adminClient struct {
@@ -641,6 +642,15 @@ func (c *adminClient) SetHealth(ctx context.Context, in *SetHealthRequest, opts 
 	return out, nil
 }
 
+func (c *adminClient) GetCertificate(ctx context.Context, in *GetCertificateRequest, opts ...grpc.CallOption) (*GetCertificateResponse, error) {
+	out := new(GetCertificateResponse)
+	err := c.cc.Invoke(ctx, "/roxy.v0.Admin/GetCertificate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminServer is the server API for Admin service.
 // All implementations must embed UnimplementedAdminServer
 // for forward compatibility
@@ -651,6 +661,7 @@ type AdminServer interface {
 	Commit(context.Context, *CommitRequest) (*CommitResponse, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 	SetHealth(context.Context, *SetHealthRequest) (*SetHealthResponse, error)
+	GetCertificate(context.Context, *GetCertificateRequest) (*GetCertificateResponse, error)
 	mustEmbedUnimplementedAdminServer()
 }
 
@@ -675,6 +686,9 @@ func (UnimplementedAdminServer) Shutdown(context.Context, *ShutdownRequest) (*Sh
 }
 func (UnimplementedAdminServer) SetHealth(context.Context, *SetHealthRequest) (*SetHealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetHealth not implemented")
+}
+func (UnimplementedAdminServer) GetCertificate(context.Context, *GetCertificateRequest) (*GetCertificateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCertificate not implemented")
 }
 func (UnimplementedAdminServer) mustEmbedUnimplementedAdminServer() {}
 
@@ -797,6 +811,24 @@ func _Admin_SetHealth_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Admin_GetCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).GetCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/roxy.v0.Admin/GetCertificate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).GetCertificate(ctx, req.(*GetCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Admin_ServiceDesc is the grpc.ServiceDesc for Admin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -827,6 +859,10 @@ var Admin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetHealth",
 			Handler:    _Admin_SetHealth_Handler,
+		},
+		{
+			MethodName: "GetCertificate",
+			Handler:    _Admin_GetCertificate_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
