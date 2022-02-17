@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/chronos-tachyon/roxy/internal/misc"
 	"github.com/chronos-tachyon/roxy/lib/roxyutil"
@@ -86,7 +87,7 @@ func (c *ATCClient) Dial(ctx context.Context, addr *net.TCPAddr) (*grpc.ClientCo
 
 	dialOpts := make([]grpc.DialOption, 3)
 	if c.tc == nil {
-		dialOpts[0] = grpc.WithInsecure()
+		dialOpts[0] = grpc.WithTransportCredentials(insecure.NewCredentials())
 	} else {
 		tc := c.tc.Clone()
 		if tc.ServerName == "" {

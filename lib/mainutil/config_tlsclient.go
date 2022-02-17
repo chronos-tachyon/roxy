@@ -12,6 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/chronos-tachyon/roxy/internal/constants"
 	"github.com/chronos-tachyon/roxy/internal/misc"
@@ -437,7 +438,7 @@ func (cfg TLSClientConfig) MakeDialOption(serverName string) (grpc.DialOption, e
 	}
 
 	if tc == nil {
-		return grpc.WithInsecure(), nil
+		return grpc.WithTransportCredentials(insecure.NewCredentials()), nil
 	}
 
 	return grpc.WithTransportCredentials(credentials.NewTLS(tc)), nil

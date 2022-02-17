@@ -413,7 +413,7 @@ func (res *WatchingResolver) sendEvents(events []Event) {
 			var state resolver.State
 			state.Addresses = makeAddressList(res.resolved)
 			state.ServiceConfig = res.sc
-			res.cc.UpdateState(state)
+			_ = res.cc.UpdateState(state)
 		} else if err := misc.ErrorOrNil(newErrors); err != nil {
 			res.cc.ReportError(err)
 		} else {

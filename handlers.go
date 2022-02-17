@@ -998,7 +998,7 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
-	innerReq.Header = make(http.Header, len(rc.Request.Header) + len(rc.Request.Trailer))
+	innerReq.Header = make(http.Header, len(rc.Request.Header)+len(rc.Request.Trailer))
 	for key, oldValues := range rc.Request.Header {
 		newValues := make([]string, len(oldValues))
 		copy(newValues, oldValues)

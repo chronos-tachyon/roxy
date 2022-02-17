@@ -182,10 +182,17 @@ func (rt *Target) FromGRPCTarget(target resolver.Target) error {
 
 	var err error
 
+	targetScheme := target.URL.Scheme
+	targetHost := target.URL.Host
+	targetEndpoint := target.URL.Path
+	if targetEndpoint == "" {
+		targetEndpoint = target.URL.Opaque
+	}
+
 	rt.HasSlash = false
-	rt.Scheme = target.Scheme
-	rt.Authority = unescapeAuthorityOrEndpoint(target.Authority)
-	ep, qs, hasQS := splitPathAndQueryString(target.Endpoint)
+	rt.Scheme = targetScheme
+	rt.Authority = unescapeAuthorityOrEndpoint(targetHost)
+	ep, qs, hasQS := splitPathAndQueryString(targetEndpoint)
 	rt.Endpoint = unescapeAuthorityOrEndpoint(ep)
 
 	if hasQS {

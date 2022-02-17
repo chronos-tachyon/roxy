@@ -69,7 +69,7 @@ func NewStaticResolver(opts StaticResolverOptions) (*StaticResolver, error) {
 			if opts.ServiceConfigJSON != "" {
 				state.ServiceConfig = opts.ClientConn.ParseServiceConfig(opts.ServiceConfigJSON)
 			}
-			opts.ClientConn.UpdateState(state)
+			_ = opts.ClientConn.UpdateState(state)
 		}
 	}
 

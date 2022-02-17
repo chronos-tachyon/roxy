@@ -462,7 +462,7 @@ func (res *PollingResolver) onUpdate(newList []Resolved, newErr error) {
 			var state resolver.State
 			state.Addresses = makeAddressList(newList)
 			state.ServiceConfig = res.sc
-			res.cc.UpdateState(state)
+			_ = res.cc.UpdateState(state)
 		}
 	}
 
