@@ -4,7 +4,7 @@ Architecture: %ARCH%
 Maintainer: Donald King <chronos@chronos-tachyon.net>
 Installed-Size: %SIZE%
 Depends: libc6
-Recommends: ca-certificates
+Recommends: ca-certificates, libcap2-bin
 Section: contrib/net
 Priority: optional
 Homepage: https://chronos-tachyon.github.io/roxy/

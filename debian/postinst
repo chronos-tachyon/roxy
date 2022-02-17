@@ -4,7 +4,9 @@ set -u
 
 umask 022
 
-setcap cap_net_bind_service=+ep /opt/roxy/bin/roxy
+if which setcap >/dev/null 2>&1 ; then
+  setcap cap_net_bind_service=+ep /opt/roxy/bin/roxy
+fi
 
 if ! getent group roxy >/dev/null 2>&1 ; then
   addgroup --system --gid 400 roxy
@@ -16,45 +18,27 @@ fi
 if ! [ -e /etc/opt/roxy/config.json ]; then
   cp /opt/roxy/share/misc/roxy.config.json.example /etc/opt/roxy/config.json
 fi
-if ! [ -e /etc/opt/roxy/config.json.example ]; then
-  cp /opt/roxy/share/misc/roxy.config.json.example /etc/opt/roxy/config.json.example
-fi
 if ! [ -e /etc/opt/roxy/mime.json ]; then
   cp /opt/roxy/share/misc/roxy.mime.json.example /etc/opt/roxy/mime.json
-fi
-if ! [ -e /etc/opt/roxy/mime.json.example ]; then
-  cp /opt/roxy/share/misc/roxy.mime.json.example /etc/opt/roxy/mime.json.example
 fi
 if ! [ -e /etc/opt/atc/global.json ]; then
   cp /opt/roxy/share/misc/atc.global.json.example /etc/opt/atc/global.json
 fi
-if ! [ -e /etc/opt/atc/global.json.example ]; then
-  cp /opt/roxy/share/misc/atc.global.json.example /etc/opt/atc/global.json.example
-fi
 if ! [ -e /etc/opt/atc/peers.json ]; then
   cp /opt/roxy/share/misc/atc.peers.json.example /etc/opt/atc/peers.json
-fi
-if ! [ -e /etc/opt/atc/peers.json.example ]; then
-  cp /opt/roxy/share/misc/atc.peers.json.example /etc/opt/atc/peers.json.example
 fi
 if ! [ -e /etc/opt/atc/services.json ]; then
   cp /opt/roxy/share/misc/atc.services.json.example /etc/opt/atc/services.json
 fi
-if ! [ -e /etc/opt/atc/services.json.example ]; then
-  cp /opt/roxy/share/misc/atc.services.json.example /etc/opt/atc/services.json.example
-fi
 if ! [ -e /etc/opt/atc/cost.json ]; then
   cp /opt/roxy/share/misc/atc.cost.json.example /etc/opt/atc/cost.json
-fi
-if ! [ -e /etc/opt/atc/cost.json.example ]; then
-  cp /opt/roxy/share/misc/atc.cost.json.example /etc/opt/atc/cost.json.example
 fi
 if ! [ -e /etc/logrotate.d/roxy ]; then
   cp /opt/roxy/share/misc/logrotate.conf /etc/logrotate.d/roxy
 fi
 
-chown root:roxy /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example
-chmod 0640 /etc/opt/roxy/config.json /etc/opt/roxy/config.json.example
+chown root:roxy /etc/opt/roxy/config.json
+chmod 0640 /etc/opt/roxy/config.json
 
 chown root:roxy /var/opt/roxy
 chmod 0755 /var/opt/roxy

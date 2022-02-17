@@ -77,8 +77,6 @@ else
   mv -t "$DSTBIN" "$SRCBIN"/*
 fi
 
-setcap cap_net_bind_service=+ep "${INSTALL_DIR}/opt/roxy/bin/roxy"
-
 echo '> cp -t .../etc/opt/roxy (additional files)'
 cp templates/index.html "${INSTALL_DIR}/opt/roxy/share/templates/index.html"
 cp templates/redir.html "${INSTALL_DIR}/opt/roxy/share/templates/redir.html"

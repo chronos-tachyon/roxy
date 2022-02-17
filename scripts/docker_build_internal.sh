@@ -22,6 +22,8 @@ echo 'hosts: files dns' > /etc/nsswitch.conf
 
 /build/scripts/build_in_tree.sh /target "$VERSION" "$GOOS" "$GOARCH"
 
+setcap cap_net_bind_service=+ep /target/opt/roxy/bin/roxy
+
 addgroup --system --gid 400 roxy
 adduser --system --uid 400 --gid 400 --gecos roxy --home /var/opt/roxy/lib --no-create-home --disabled-login roxy
 
