@@ -963,6 +963,24 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.Request.Header.Set(constants.HeaderXFwdFor, strings.Join(values, ", "))
 	}
 
+	body, err := ioutil.ReadAll(rc.Body)
+	if err != nil {
+		rc.Writer.WriteError(http.StatusInternalServerError)
+		rc.Logger.Warn().
+			Err(err).
+			Msg("I/O error reading request body from remote client")
+		return
+	}
+
+	err = rc.Body.Close()
+	if err != nil {
+		rc.Writer.WriteError(http.StatusInternalServerError)
+		rc.Logger.Warn().
+			Err(err).
+			Msg("I/O error closing connection after receiving request body from remote client")
+		return
+	}
+
 	innerURL := new(url.URL)
 	*innerURL = *rc.Request.URL
 	innerURL.Scheme = constants.SchemeHTTP
@@ -975,21 +993,31 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx,
 		rc.Request.Method,
 		innerURL.String(),
-		rc.Body)
+		io.NopCloser(bytes.NewReader(body)))
 	if err != nil {
 		panic(err)
 	}
 
-	innerReq.Header = make(http.Header, len(rc.Request.Header))
+	innerReq.Header = make(http.Header, len(rc.Request.Header) + len(rc.Request.Trailer))
 	for key, oldValues := range rc.Request.Header {
 		newValues := make([]string, len(oldValues))
 		copy(newValues, oldValues)
 		innerReq.Header[key] = newValues
 	}
+	for key, oldValues := range rc.Request.Trailer {
+		newValues := make([]string, len(oldValues))
+		copy(newValues, oldValues)
+		innerReq.Header[key] = newValues
+	}
 
-	innerReq.Close = true
 	innerReq.Host = rc.Request.Host
+	innerReq.ContentLength = int64(len(body))
+	innerReq.Header.Del("te")
 	innerReq.Header.Set("host", rc.Request.Host)
+	innerReq.Header.Set("content-length", strconv.Itoa(len(body)))
+	innerReq.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
 
 	innerResp, err := h.client.Do(innerReq)
 	once.Do(func() {})
@@ -1002,9 +1030,14 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.Writer.WriteError(http.StatusInternalServerError)
 		rc.Logger.Error().
 			Err(err).
-			Msg("failed subrequest")
+			Msg("failed HTTP subrequest")
 		return
 	}
+
+	rc.Logger.Trace().
+		Interface("request", innerReq.Header).
+		Interface("response", innerResp.Header).
+		Msg("raw headers of HTTP subrequest")
 
 	needBodyClose := true
 	defer func() {
@@ -1026,6 +1059,13 @@ func (h *HTTPBackendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rc.Logger.Error().
 			Err(err).
 			Msg("failed subrequest")
+	}
+
+	hdrs = rc.Writer.Header()
+	for key, oldValues := range innerResp.Trailer {
+		newValues := make([]string, len(oldValues))
+		copy(newValues, oldValues)
+		hdrs[key] = newValues
 	}
 
 	needBodyClose = false
