@@ -2,5 +2,12 @@
 .github
 Dockerfile*
 version.txt
-*.sh
 *.md
+*.deb
+/atc
+/atcctl
+/roxy
+/roxyctl
+/colorize-logs
+/demo-*
+/zkcp

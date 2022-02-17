@@ -11,25 +11,14 @@ export TZ="Etc/UTC"
 readonly PACKAGE="chronostachyon/roxy"
 readonly PLATFORM_LIST=( linux/amd64 linux/arm64v8 )
 
-if [ "${RELEASE_MODE:-false}" = "true" ]; then
-  FULL_VERSION="$GITHUB_REF"
-  FULL_VERSION="${FULL_VERSION##*/v}"
-  TAGS=( "$FULL_VERSION" "latest" )
-else
-  VERSION="$(cat .version)"
-  DATESTAMP="$(date --utc +%Y.%m.%d)"
-  LASTBUILDDIR="${HOME}/.cache/last-build"
-  LASTBUILDFILE="${LASTBUILDDIR}/roxy-docker"
-  mkdir -p "$LASTBUILDDIR"
-  if [ ! -e "$LASTBUILDFILE" ]; then
-    echo 0 > "$LASTBUILDFILE"
-  fi
-  LAST_COUNTER="$(cat "$LASTBUILDFILE")"
-  NEXT_COUNTER=$((LAST_COUNTER + 1))
-  echo "$NEXT_COUNTER" > "$LASTBUILDFILE"
-  FULL_VERSION="${VERSION}-r${DATESTAMP}-${NEXT_COUNTER}"
-  TAGS=( "$FULL_VERSION" "devel" )
-fi
+FULL_VERSION="$(./scripts/next_build_version.sh roxy-docker)"
+TAGS=( "$FULL_VERSION" "latest" )
+
+case "$FULL_VERSION" in
+  (*-r*)
+    TAGS=( "$FULL_VERSION" "devel" )
+    ;;
+esac
 
 run() {
   echo "> $*"

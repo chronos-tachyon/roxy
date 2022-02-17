@@ -2,14 +2,8 @@
 /etc/default/atc
 /etc/logrotate.d/roxy
 /etc/opt/roxy/config.json
-/etc/opt/roxy/config.json.example
 /etc/opt/roxy/mime.json
-/etc/opt/roxy/mime.json.example
 /etc/opt/atc/global.json
-/etc/opt/atc/global.json.example
 /etc/opt/atc/peers.json
-/etc/opt/atc/peers.json.example
 /etc/opt/atc/services.json
-/etc/opt/atc/services.json.example
 /etc/opt/atc/cost.json
-/etc/opt/atc/cost.json.example
