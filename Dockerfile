@@ -12,7 +12,7 @@ ENV NO_SUDO_REQUIRED true
 COPY ./ /build/
 RUN /build/scripts/docker_build_internal.sh "${TARGETPLATFORM}" "${VERSION}"
 
-FROM --platform=$TARGETPLATFORM ${ARCH}/alpine:3.13 AS final
+FROM --platform=$TARGETPLATFORM ${ARCH}/alpine AS final
 COPY --from=builder /target/ /
 ENV PATH /opt/roxy/bin:$PATH
 USER roxy:roxy
