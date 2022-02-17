@@ -182,24 +182,29 @@ func (rt *Target) FromGRPCTarget(target resolver.Target) error {
 
 	var err error
 
-	targetScheme := target.URL.Scheme
-	targetHost := target.URL.Host
-	targetEndpoint := target.URL.Path
-	if targetEndpoint == "" {
-		targetEndpoint = target.URL.Opaque
+	rt.Scheme = target.URL.Scheme
+
+	rt.Authority = target.URL.Host
+
+	if strings.HasPrefix(target.URL.Path, "/") {
+		rt.HasSlash = true
+		rt.Endpoint = strings.TrimLeft(target.URL.Path, "/")
+	} else if target.URL.Path != "" {
+		rt.HasSlash = false
+		rt.Endpoint = target.URL.Path
+	} else {
+		rt.HasSlash = false
+		rt.Endpoint = target.URL.Opaque
 	}
 
-	rt.HasSlash = false
-	rt.Scheme = targetScheme
-	rt.Authority = unescapeAuthorityOrEndpoint(targetHost)
-	ep, qs, hasQS := splitPathAndQueryString(targetEndpoint)
-	rt.Endpoint = unescapeAuthorityOrEndpoint(ep)
-
-	if hasQS {
+	if target.URL.RawQuery != "" {
+		qs := target.URL.RawQuery
 		rt.Query, err = url.ParseQuery(qs)
 		if err != nil {
 			return roxyutil.QueryStringError{QueryString: qs, Err: err}
 		}
+	} else if target.URL.ForceQuery {
+		rt.Query = make(url.Values, 0)
 	}
 
 	err = rt.PostProcess()
