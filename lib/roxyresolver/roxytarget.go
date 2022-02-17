@@ -204,7 +204,7 @@ func (rt *Target) FromGRPCTarget(target resolver.Target) error {
 			return roxyutil.QueryStringError{QueryString: qs, Err: err}
 		}
 	} else if target.URL.ForceQuery {
-		rt.Query = make(url.Values, 0)
+		rt.Query = make(url.Values)
 	}
 
 	err = rt.PostProcess()
