@@ -1,3 +1,6 @@
+v0.6.4
+  * Fixed a bug introduced in lint-fixing the recent gRPC update
+
 v0.6.3
   * Fixed handling of trailers
   * Fixed the arm64 build for .deb files
