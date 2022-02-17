@@ -62,9 +62,7 @@ go get -d ./...
 echo '::endgroup::'
 
 echo '> go install ./...'
-echo '::group::go install'
-go install -v ./...
-echo '::endgroup::'
+go install ./...
 
 echo '> mv -t .../opt/roxy/bin (binaries)'
 SRCBIN="${GOPATH}/bin"
