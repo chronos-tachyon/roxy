@@ -2,7 +2,7 @@
 ARG VERSION=unset
 ARG ARCH
 
-FROM --platform=$BUILDPLATFORM golang:1.17-bullseye AS builder
+FROM --platform=$BUILDPLATFORM golang:1.18-bullseye AS builder
 ARG VERSION
 ARG TARGETPLATFORM
 ENV TZ Etc/UTC
