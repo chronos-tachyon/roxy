@@ -1,3 +1,6 @@
+v0.6.5
+  * Upgrade to go1.18
+
 v0.6.4
   * Fixed a bug introduced in lint-fixing the recent gRPC update
 
