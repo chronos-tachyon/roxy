@@ -77,6 +77,7 @@ Commands available:
 	lookup-clients <service> <shard-id> [<unique>]
 	lookup-servers <service> <shard-id> [<unique>]
 	find <service> [<shard-id>]
+
 `
 
 var (
@@ -618,7 +619,7 @@ func processCommandAndArgs() (fn commandFunc, cmd string, args []string) {
 	}
 
 	if cmd == "help" {
-		fmt.Println(helpText)
+		fmt.Print(helpText)
 		os.Exit(0)
 	}
 
